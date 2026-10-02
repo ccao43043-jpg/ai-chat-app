@@ -19,4 +19,4 @@ keystore.properties
 node_modules/
 npm-debug.log*
 # 其它
-icon-512.png
+/icon-512.png

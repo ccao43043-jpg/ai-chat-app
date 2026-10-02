@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <defs>
+    <linearGradient id="bub" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E6E9FF"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="0.55" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="2.2" stdDeviation="2.4" flood-color="#0B0630" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- 气泡：圆润方形 + 柔和尾巴 -->
+  <path filter="url(#sh)" fill="url(#bub)" d="M42 31 H66 C74.3 31 81 37.7 81 46 V58 C81 66.3 74.3 73 66 73 H52.5 L41.6 80.6 C40.3 81.5 38.6 80.5 38.8 78.9 L39.6 72.6 C32.4 71.2 27 64.9 27 57.4 V46 C27 37.7 33.7 31 42 31 Z"/>
+  <!-- 四角星（曲线收腰） -->
+  <path fill="url(#spark)" d="M53.00 39.00 C56.64 48.72 56.64 48.72 66.00 52.50 C56.64 56.28 56.64 56.28 53.00 66.00 C49.36 56.28 49.36 56.28 40.00 52.50 C49.36 48.72 49.36 48.72 53.00 39.00 Z"/>
+  <!-- 小星 -->
+  <path fill="url(#spark)" opacity="0.9" d="M68.50 35.90 C69.73 39.21 69.73 39.21 72.90 40.50 C69.73 41.79 69.73 41.79 68.50 45.10 C67.27 41.79 67.27 41.79 64.10 40.50 C67.27 39.21 67.27 39.21 68.50 35.90 Z"/>
+</svg>
