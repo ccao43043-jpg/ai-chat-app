@@ -55,10 +55,10 @@ public class MainActivity extends Activity {
                 fileCallback = callback;
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("image/*");
+                intent.setType("*/*"); // 图片、PDF、文档、代码等都可以选
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "选择图片"), REQ_FILE);
+                    startActivityForResult(Intent.createChooser(intent, "选择文件"), REQ_FILE);
                 } catch (Exception e) {
                     fileCallback = null;
                     return false;

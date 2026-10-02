@@ -6,15 +6,28 @@
 <img src="docs/icon-512.png" width="96">
 </p>
 <p>
+<img src="docs/light-search.png" width="200">
+<img src="docs/light-file-chat.png" width="200">
+<img src="docs/light-personas.png" width="200">
+<img src="docs/dark-search.png" width="200">
+</p>
+<p>
 <img src="docs/light-chat.png" width="200">
-<img src="docs/light-model-menu.png" width="200">
-<img src="docs/dark-chat.png" width="200">
-<img src="docs/dark-settings.png" width="200">
+<img src="docs/dark-file-chat.png" width="200">
+<img src="docs/dark-personas.png" width="200">
+<img src="docs/light-prompts.png" width="200">
 </p>
 
 ## 功能
 
-**v0.1.1 新增**：应用改名为 AI Chat、全新图标与界面设计（浅色/深色）、顶部模型胶囊一键切换、各家预设更新为当前模型名、「从接口获取模型列表」、旧版设置自动迁移（DeepSeek 已下线的 `deepseek-chat` / `deepseek-reasoner` 自动换成 `deepseek-flash`，API Key 与对话不受影响）。
+**v0.2.0 新增**：
+
+- 🌐 **联网搜索**：输入框里的「联网」开关。开启后发送前先搜索网页，把前几条结果（标题、链接、摘要）交给模型；回答中用 `[1]`、`[2]` 角标标注来源，点击角标或下方来源卡片用系统浏览器打开原网页。支持 **Tavily**、**博查 Bocha**、**Brave Search**、自建 **SearXNG**；可选「智能提炼搜索词」（先让模型把问题改写成关键词）。
+- 📄 **文件和 PDF 对话**：📎 按钮可选择 PDF、Word（.docx）、PowerPoint（.pptx）、Excel（.xlsx）、txt / md / csv / json / 代码等文本文件，**在手机本地**提取文字（内置 pdf.js 与中文 CMap），按「【文件：名称】」分段注入提示词；单个文件最多 3 万字、一条消息合计 8 万字，超出部分截断并告知模型。扫描版（无文字层）PDF 会明确提示，并把前 4 页转成图片交给视觉模型。图片仍走视觉模型。
+- 🧩 **助手（角色）与提示词库**：内置 8 个中文助手（翻译官、写作助手、代码助手、英语陪练、文案策划、学习导师、总结提炼、心理倾听），可新建 / 编辑 / 复制 / 删除，并可指定默认服务商、模型和温度；从侧边栏「助手与提示词」或新对话空白页一键开始，对话中显示助手名称和头像。⚡ 按钮打开提示词库，一键插入常用提示词，也可把当前输入保存为提示词。
+- 从 v0.1.1 覆盖安装即可升级，对话、服务商和 API Key 全部保留。
+
+**v0.1.1**：应用改名为 AI Chat、全新图标与界面设计（浅色/深色）、顶部模型胶囊一键切换、各家预设更新为当前模型名、「从接口获取模型列表」、旧版设置自动迁移（DeepSeek 已下线的 `deepseek-chat` / `deepseek-reasoner` 自动换成 `deepseek-flash`，API Key 与对话不受影响）。
 
 - 聊天气泡界面，Markdown 渲染（代码块高亮 + 一键复制、表格、列表等）
 - **流式输出**（SSE），随时**停止生成**
@@ -28,7 +41,8 @@
   - **Anthropic Claude**（原生 Messages API）
   - **Google Gemini**（原生 generateContent API）
   - 可添加任意多个自定义服务商
-- 图片输入（视觉模型）：点输入框左侧图片按钮添加，自动压缩
+- 图片输入（视觉模型）：点输入框左侧 📎 按钮添加，自动压缩
+- 联网搜索、文件 / PDF 对话、助手与提示词库（见上方 v0.2.0）
 - 图片生成：点输入框里的「生图」切换模式，调用 OpenAI 兼容 `/images/generations`（如 OpenAI `gpt-image-2.5-flare`、智谱 `cogview-3-flash`、硅基流动 `Kwai-Kolors/Kolors`），可保存到相册
 - 通用设置：默认系统提示词、流式开关、temperature、最大输出 tokens、生图尺寸
 - 自动跟随系统深色模式
@@ -78,13 +92,28 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
 
 > 注意：OpenAI / Claude / Gemini 在中国大陆通常需要可用的网络环境才能访问。
 
+## 配置联网搜索
+
+1. 左上角菜单 → 设置 → 「联网搜索」，选择搜索服务并填写 Key，可点「测试搜索」验证。
+2. 回到聊天页，点输入框里的「联网」（地球图标）开启；再次点击关闭。
+
+| 搜索服务 | 获取 Key | 说明 |
+|---|---|---|
+| Tavily | 在 [app.tavily.com](https://app.tavily.com) 注册登录，首页复制 `tvly-` 开头的 API Key | 免费版每月 1000 次额度，无需绑卡；海外服务 |
+| 博查 Bocha | 在 [open.bochaai.com](https://open.bochaai.com) 微信扫码登录 →「API KEY 管理」新建 Key | 国内直连、中文结果好；新用户可在总览页领取免费调用资源包，之后预充值按次计费（约 ¥0.036/次） |
+| Brave Search | 在 [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com) 订阅 Search API 后获取 Token | 海外服务 |
+| SearXNG | 无需 Key，填写自建实例地址 | 实例需在 `settings.yml` 的 `search.formats` 中加入 `json` |
+
+请求格式（2026-10 对照官方文档）：Tavily `POST https://api.tavily.com/search`（`Authorization: Bearer`，`{query, max_results, search_depth}`）；博查 `POST https://api.bochaai.com/v1/web-search`（`Authorization: Bearer`，`{query, freshness, summary, count}`）；Brave `GET /res/v1/web/search?q=`（`X-Subscription-Token`）；SearXNG `GET /search?q=&format=json`。「接口地址」可改成自己的代理地址。
+
 ## 技术实现
 
 - 原生 Android（Java）外壳 + WebView 界面（`app/src/main/assets/www`），无第三方 Android 依赖
 - 网络请求通过 `NativeBridge`（`HttpURLConnection`）在原生层发出，流式数据逐块回传给页面
 - 数据（设置、对话）以 JSON 文件保存在应用私有目录，`allowBackup=false`
-- 前端库（本地打包，离线可用）：marked、DOMPurify、highlight.js
-- 各服务商请求构造 / SSE 解析在 `providers.js`（纯函数，带单元测试）
+- 前端库（本地打包，离线可用）：marked、DOMPurify、highlight.js、pdf.js 3.11（含 CMap，Apache-2.0）、fflate（MIT，解压 docx/pptx/xlsx）
+- 各服务商请求构造 / SSE 解析在 `providers.js`；联网搜索在 `search.js`；文件解析在 `files.js`；助手与提示词在 `personas.js`（均为纯函数，带单元测试）
+- pdf.js 按需加载、在主线程运行（WebView 中不使用 Worker）；中文 CMap 通过 `NativeBridge.readAsset` 从 APK 内读取
 
 ## 图标
 
@@ -113,6 +142,7 @@ keyPassword=******
 ## 测试
 
 ```bash
-npm test          # providers.js 单元测试（请求格式、SSE 解析、错误/生图解析），无需真实 Key
-npm i && npm run test:ui   # 可选：用本机 Chrome 跑界面端到端测试（模拟原生桥，不访问网络；含旧版数据迁移；截图输出到 docs/）
+npm test          # 单元测试：服务商请求/SSE 解析、搜索请求格式与结果注入、PDF/Word/PPT/Excel/文本提取（tests/fixtures 中的样例 PDF）、助手存储
+npm i && npm run test:ui   # 可选：用本机 Chrome 跑界面端到端测试（模拟原生桥，不访问网络；含旧版数据迁移、联网搜索、文件对话、助手；截图输出到 docs/）
+npm run fixtures  # 重新生成测试用 PDF（一般不需要）
 ```

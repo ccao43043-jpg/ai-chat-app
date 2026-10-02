@@ -172,6 +172,38 @@ public class NativeBridge {
         });
     }
 
+    /** 用系统浏览器打开链接（仅 http/https） */
+    @JavascriptInterface
+    public void openUrl(final String url) {
+        if (url == null) return;
+        final Uri uri = Uri.parse(url.trim());
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
+        activity.runOnUiThread(() -> {
+            try {
+                android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_VIEW, uri);
+                it.addCategory(android.content.Intent.CATEGORY_BROWSABLE);
+                activity.startActivity(it);
+            } catch (Exception e) {
+                Toast.makeText(activity, "没有可用的浏览器", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /** 读取内置资源（仅限 www/lib/cmaps/，供 pdf.js 加载中文字体映射表），返回 base64；不存在时返回空字符串 */
+    @JavascriptInterface
+    public String readAsset(String path) {
+        if (path == null || !path.startsWith("www/lib/cmaps/") || path.contains("..")) return "";
+        try (InputStream in = activity.getAssets().open(path)) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            byte[] buf = new byte[16384]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            return Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     @JavascriptInterface
     public void toast(String text) {
         activity.runOnUiThread(() -> Toast.makeText(activity, text, Toast.LENGTH_SHORT).show());

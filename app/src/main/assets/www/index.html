@@ -32,8 +32,15 @@
       <div id="attach-preview" class="attach-preview"></div>
       <textarea id="input" rows="1" placeholder="给 AI 发消息…"></textarea>
       <div class="composer-tools">
-        <button class="tool-btn" id="btn-attach" aria-label="添加图片">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="4"/><circle cx="9" cy="10" r="1.8"/><path d="M21 15.5l-4.5-4.5L8 19.5"/></svg>
+        <button class="tool-btn" id="btn-attach" aria-label="添加图片或文件">
+          <svg viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.4 8.4a1.7 1.7 0 01-2.4-2.4l7.7-7.7"/></svg>
+        </button>
+        <button class="tool-btn" id="btn-prompts" aria-label="提示词库">
+          <svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg>
+        </button>
+        <button class="tool-chip" id="btn-search" aria-label="联网搜索">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5s1.2-6.1 3.6-8.5z"/></svg>
+          <span>联网</span>
         </button>
         <button class="tool-chip" id="btn-imagegen" aria-label="图片生成模式">
           <svg viewBox="0 0 24 24"><path d="M12 3.5c.6 4.2 1.9 5.5 6 6.3-4.1.8-5.4 2.1-6 6.3-.6-4.2-1.9-5.5-6-6.3 4.1-.8 5.4-2.1 6-6.3z"/><path d="M18.5 15.5c.25 1.6.75 2.1 2.3 2.4-1.55.3-2.05.8-2.3 2.4-.25-1.6-.75-2.1-2.3-2.4 1.55-.3 2.05-.8 2.3-2.4z"/></svg>
@@ -46,7 +53,7 @@
         </button>
       </div>
     </div>
-    <input type="file" id="file-input" accept="image/*" multiple hidden>
+    <input type="file" id="file-input" multiple hidden>
   </footer>
 </div>
 
@@ -72,6 +79,10 @@
   </div>
   <div id="conv-list"></div>
   <div class="drawer-foot">
+    <button class="row-btn" id="btn-personas">
+      <span class="row-ic grad"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg></span>
+      <span class="row-text"><span>助手与提示词</span><small id="persona-count">选择助手开始新对话</small></span>
+    </button>
     <button class="row-btn" id="btn-settings">
       <span class="row-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></span>
       <span class="row-text"><span>设置</span><small>服务商、API Key 与偏好</small></span>
@@ -94,6 +105,21 @@
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加自定义服务商
     </button>
 
+    <div class="group-title" id="search-settings">联网搜索</div>
+    <div class="hint">打开输入框里的「联网」后，发送前会先搜索网页，再把结果交给模型并标注来源编号。搜索请求同样由手机直接发出。</div>
+    <div class="group form">
+      <label class="field"><span>搜索服务</span>
+        <select id="ss-provider"></select></label>
+      <label class="field" id="ss-key-field"><span>API Key</span>
+        <div class="input-row"><input id="ss-key" type="password" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="chip-btn" id="ss-key-toggle" type="button">显示</button></div></label>
+      <div class="hint small" id="ss-hint"></div>
+      <label class="field"><span id="ss-url-label">接口地址（可选）</span>
+        <input id="ss-url" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="field"><span>每次搜索结果数</span><input id="ss-count" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="5"></label>
+      <label class="field inline"><span>智能提炼搜索词<small>先让模型把问题改写成关键词，会多一次模型调用</small></span><input type="checkbox" id="ss-rewrite" class="switch"></label>
+      <div class="input-row" style="margin-top:14px"><input id="ss-test-q" placeholder="测试关键词，如：今天的科技新闻"><button class="chip-btn accent" id="ss-test" type="button">测试搜索</button></div>
+    </div>
+
     <div class="group-title">对话</div>
     <div class="group form">
       <label class="field"><span>默认系统提示词</span>
@@ -110,7 +136,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.1.1 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.2.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -149,6 +175,87 @@
     <button class="ghost-btn danger" id="pe-delete">删除此服务商</button>
   </div>
 </section>
+
+<!-- 助手库 -->
+<section id="page-personas" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title">助手与提示词</div>
+    <button class="icon-btn" id="pl-add" aria-label="新建"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  </header>
+  <div class="seg" id="pl-seg"><button class="active" data-tab="personas">助手</button><button data-tab="prompts">提示词</button></div>
+  <div class="page-body">
+    <div id="pl-personas">
+      <div class="hint">点选一个助手即可开始新对话：它会带上专属的系统提示词，也可以指定默认模型与温度。</div>
+      <div id="persona-grid" class="persona-grid"></div>
+    </div>
+    <div id="pl-prompts" style="display:none">
+      <div class="hint">常用提示词可在输入框左下角的 ⚡ 按钮中一键插入。</div>
+      <div id="prompt-manage" class="group"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 助手编辑 -->
+<section id="page-persona" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title" id="ps-title">编辑助手</div>
+    <button class="text-btn" id="ps-save">保存</button>
+  </header>
+  <div class="page-body">
+    <div class="persona-hero"><span class="ph-emoji" id="ps-emoji-view">🤖</span></div>
+    <div class="emoji-row" id="ps-emoji-row"></div>
+    <div class="group form">
+      <div class="field-row">
+        <label class="field" style="flex:0 0 84px"><span>头像</span><input id="ps-emoji" maxlength="4"></label>
+        <label class="field"><span>名称</span><input id="ps-name" placeholder="例如：周报助手"></label>
+      </div>
+      <label class="field"><span>简介</span><input id="ps-desc" placeholder="一句话说明用途（可选）"></label>
+      <label class="field"><span>系统提示词</span>
+        <textarea id="ps-prompt" rows="8" placeholder="描述助手的身份、任务、语气和输出格式…"></textarea></label>
+    </div>
+    <div class="group-title">默认模型（可选）</div>
+    <div class="group form">
+      <label class="field"><span>服务商</span><select id="ps-provider"></select></label>
+      <label class="field"><span>模型</span><input id="ps-model" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="留空则使用该服务商的默认模型"></label>
+      <div id="ps-models" class="chip-row wrap"></div>
+      <label class="field"><span>温度<small>0 更严谨，越高越有创意；留空跟随全局设置</small></span>
+        <input id="ps-temp" type="number" inputmode="decimal" step="0.1" min="0" max="2" placeholder="默认"></label>
+    </div>
+    <button class="ghost-btn danger" id="ps-delete">删除此助手</button>
+  </div>
+</section>
+
+<!-- 提示词库（输入框插入） -->
+<div id="prompt-mask" class="mask"></div>
+<div id="prompt-sheet" class="sheet tall">
+  <div class="sheet-handle"></div>
+  <div class="sheet-head"><div class="sheet-title">提示词库</div><button class="text-btn" id="pr-manage">管理</button></div>
+  <div class="search in-sheet">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
+    <input id="pr-search" placeholder="搜索提示词">
+  </div>
+  <div id="prompt-list" class="prompt-list"></div>
+  <div class="btn-row">
+    <button class="pill-btn" id="pr-save-input">保存当前输入</button>
+    <button class="pill-btn primary" id="pr-new">新建提示词</button>
+  </div>
+</div>
+
+<!-- 提示词编辑 -->
+<div id="pe2-mask" class="mask center">
+  <div class="dialog">
+    <div class="dialog-title" id="pe2-title">新建提示词</div>
+    <label class="field"><span>标题</span><input id="pe2-name" placeholder="例如：周报模板"></label>
+    <label class="field"><span>内容</span><textarea id="pe2-content" rows="6" placeholder="插入到输入框的文字"></textarea></label>
+    <div class="btn-row">
+      <button class="pill-btn danger" id="pe2-delete">删除</button>
+      <button class="pill-btn" id="pe2-cancel">取消</button>
+      <button class="pill-btn primary" id="pe2-ok">保存</button>
+    </div>
+  </div>
+</div>
 
 <!-- 获取模型列表结果 -->
 <div id="fetch-mask" class="mask"></div>
@@ -219,7 +326,11 @@
 <script src="lib/marked.umd.js"></script>
 <script src="lib/purify.min.js"></script>
 <script src="lib/highlight.min.js"></script>
+<script src="lib/fflate.min.js"></script>
 <script src="providers.js"></script>
+<script src="search.js"></script>
+<script src="files.js"></script>
+<script src="personas.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
