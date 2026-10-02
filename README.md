@@ -6,6 +6,12 @@
 <img src="docs/icon-512.png" width="96">
 </p>
 <p>
+<img src="docs/light-rp-monitor.png" width="200">
+<img src="docs/light-rp-blocks.png" width="200">
+<img src="docs/dark-rp-summary.png" width="200">
+<img src="docs/dark-plugins.png" width="200">
+</p>
+<p>
 <img src="docs/light-search.png" width="200">
 <img src="docs/light-file-chat.png" width="200">
 <img src="docs/light-personas.png" width="200">
@@ -20,7 +26,33 @@
 
 ## 功能
 
-**v0.2.0 新增**：
+**v0.3.0 新增：插件**
+
+- 🧩 **插件框架**：侧边栏或设置里的「插件」页列出所有插件，可以全局开关，也可以在单个对话中开关。
+  - 插件能在请求发出前整理上下文、在回复结束后读取 usage，并在界面上显示徽章和对话面板。
+  - 目前只有随应用内置的插件，不会下载任何第三方代码。API 文档见 [docs/plugins/README.md](docs/plugins/README.md)。
+- 🎭 **DeepSeek RP 缓存优化器**：长篇角色扮演专用，按设计文档 [V1](docs/plugins/deepseek-rp-cache-design-v1.md) 实现。
+  - 每次请求按固定的六层结构组装：永久锚点（世界观 / 角色卡 / 规则 / 格式 / Few-shot / 禁止事项 / 风格）→ 长期记忆 → 冻结章节摘要 → 原样追加的最近对话 → 当前动态状态 → 当前输入。
+  - 动态状态放在最后，历史前缀每轮逐字节一致，让 DeepSeek 的上下文缓存尽量命中。
+  - 历史超过阈值时自动生成「知识边界」格式的章节摘要。摘要是冻结快照，可以查看、编辑、回滚；原始消息永不删除。
+  - 每次请求逐层诊断（SAME / APPEND / CHANGED）并给出原因。
+  - 缓存监控：命中率、平均 Miss Tokens / 请求、今日统计、最近 20 次、各层 token 构成、命中率骤降报警、估算节省的费用。
+- 📊 **Token 用量显示**插件：在回复上显示输入 / 输出 tokens。
+- 流式请求现在会附带 `stream_options.include_usage`，从而拿到用量和缓存命中数据。默认对 OpenAI、DeepSeek、千问、OpenRouter 开启，其他服务商可在设置中手动打开。
+- 从 v0.2.0 覆盖安装即可升级，数据全部保留。
+
+**RP 插件怎么用**
+
+1. 打开一个新对话，选择 DeepSeek 模型。
+2. 点顶部模型胶囊 →「本对话插件 · RP 缓存优化」（也可以从侧边栏 → 插件 →「当前对话」进入），打开「在本对话启用」。
+3. 在「分层设定」里填写世界观、角色卡、规则等。这些内容尽量一次写好，之后少改。
+4. 「当前动态状态」（HP、时间、地点、好感度……）可以随时修改，不影响历史缓存。
+5. 正常聊天即可：
+   - 每条回复上会显示「缓存 xx%」，点击可以查看本次请求逐层的诊断和原因。
+   - 历史变长后会自动生成章节摘要 #001、#002……，可以在「章节摘要」页检查、编辑或回滚。
+   - 阈值等参数在「预算设置」里调整，每个对话单独设置。
+
+**v0.2.0**：
 
 - 🌐 **联网搜索**：输入框里的「联网」开关。开启后发送前先搜索网页，把前几条结果（标题、链接、摘要）交给模型；回答中用 `[1]`、`[2]` 角标标注来源，点击角标或下方来源卡片用系统浏览器打开原网页。支持 **Tavily**、**博查 Bocha**、**Brave Search**、自建 **SearXNG**；可选「智能提炼搜索词」（先让模型把问题改写成关键词）。
 - 📄 **文件和 PDF 对话**：📎 按钮可选择 PDF、Word（.docx）、PowerPoint（.pptx）、Excel（.xlsx）、txt / md / csv / json / 代码等文本文件，**在手机本地**提取文字（内置 pdf.js 与中文 CMap），按「【文件：名称】」分段注入提示词；单个文件最多 3 万字、一条消息合计 8 万字，超出部分截断并告知模型。扫描版（无文字层）PDF 会明确提示，并把前 4 页转成图片交给视觉模型。图片仍走视觉模型。
@@ -42,7 +74,7 @@
   - **Google Gemini**（原生 generateContent API）
   - 可添加任意多个自定义服务商
 - 图片输入（视觉模型）：点输入框左侧 📎 按钮添加，自动压缩
-- 联网搜索、文件 / PDF 对话、助手与提示词库（见上方 v0.2.0）
+- 联网搜索、文件 / PDF 对话、助手与提示词库（v0.2.0）；插件与 RP 缓存优化器（v0.3.0）
 - 图片生成：点输入框里的「生图」切换模式，调用 OpenAI 兼容 `/images/generations`（如 OpenAI `gpt-image-2.5-flare`、智谱 `cogview-3-flash`、硅基流动 `Kwai-Kolors/Kolors`），可保存到相册
 - 通用设置：默认系统提示词、流式开关、temperature、最大输出 tokens、生图尺寸
 - 自动跟随系统深色模式
@@ -112,7 +144,14 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
 - 网络请求通过 `NativeBridge`（`HttpURLConnection`）在原生层发出，流式数据逐块回传给页面
 - 数据（设置、对话）以 JSON 文件保存在应用私有目录，`allowBackup=false`
 - 前端库（本地打包，离线可用）：marked、DOMPurify、highlight.js、pdf.js 3.11（含 CMap，Apache-2.0）、fflate（MIT，解压 docx/pptx/xlsx）
-- 各服务商请求构造 / SSE 解析在 `providers.js`；联网搜索在 `search.js`；文件解析在 `files.js`；助手与提示词在 `personas.js`（均为纯函数，带单元测试）
+- 代码分工如下，均为纯函数，带单元测试：
+  - `providers.js`：各服务商的请求构造、SSE 解析，以及 usage 和缓存字段的统一
+  - `search.js`：联网搜索
+  - `files.js`：文件解析
+  - `personas.js`：助手与提示词
+  - `plugins.js`：插件注册表
+  - `rpcache.js`：RP 缓存优化器的 Context Builder
+  - `rp-plugin.js`：插件的界面
 - pdf.js 按需加载、在主线程运行（WebView 中不使用 Worker）；中文 CMap 通过 `NativeBridge.readAsset` 从 APK 内读取
 
 ## 图标
@@ -142,7 +181,7 @@ keyPassword=******
 ## 测试
 
 ```bash
-npm test          # 单元测试：服务商请求/SSE 解析、搜索请求格式与结果注入、PDF/Word/PPT/Excel/文本提取（tests/fixtures 中的样例 PDF）、助手存储
-npm i && npm run test:ui   # 可选：用本机 Chrome 跑界面端到端测试（模拟原生桥，不访问网络；含旧版数据迁移、联网搜索、文件对话、助手；截图输出到 docs/）
+npm test          # 单元测试：服务商请求、SSE 与 usage 解析、搜索、文件提取、助手、插件钩子、RP 优化器（分层顺序、状态后置、逐字节稳定前缀、自动摘要、版本、诊断、统计、异常检测、隐私）
+npm i && npm run test:ui   # 可选：用本机 Chrome 跑界面端到端测试（模拟原生桥，不访问网络；含旧版数据迁移、联网搜索、文件对话、助手、插件与 RP 优化器全流程；截图输出到 docs/）
 npm run fixtures  # 重新生成测试用 PDF（一般不需要）
 ```

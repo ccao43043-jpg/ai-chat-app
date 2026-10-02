@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.2.0';
+  const APP_VERSION = '0.3.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -100,6 +100,7 @@
   let docs = [];          // 待发送的文件 [{id,name,size,kind,status,text,...}]
   let imageMode = false;
   let running = null;
+  let lastRequest = null;
 
   settings.search = Object.assign(defaultSearch(), settings.search || {});
   let personas = Personas.mergeBuiltins(Store.get('personas.json', null) || Personas.defaultPersonas(), settings.removedPersonas);
@@ -261,7 +262,7 @@
     const ok = await dialog({ title: '删除对话？', body: '「' + (meta ? meta.title : '') + '」将被永久删除。', okText: '删除', danger: true });
     if (!ok) return;
     if (running && conv && conv.id === id) stopGen();
-    Store.del('conv_' + id + '.json');
+    Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json');
     convIndex = convIndex.filter(x => x.id !== id); saveIndex();
     if (conv && conv.id === id) newConv(); else renderConvList();
     toast('已删除');
@@ -278,6 +279,17 @@
 
   // ---------------- 渲染 ----------------
   function renderAll() { renderHeader(); renderMessages(); renderConvList(); }
+  function renderConvBar() {
+    const bar = $('#conv-bar'); if (!bar) return;
+    const badges = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
+    bar.innerHTML = '';
+    bar.classList.toggle('show', badges.length > 0);
+    badges.forEach(b => {
+      const el = document.createElement('button'); el.className = 'hbadge tone-' + (b.tone || 'info'); el.textContent = b.text; if (b.title) el.title = b.title;
+      if (b.action) el.onclick = b.action;
+      bar.appendChild(el);
+    });
+  }
   function renderHeader() {
     const p = getProvider(conv.providerId);
     const ok = p && p.apiKey;
@@ -286,6 +298,7 @@
     const dot = $('#mp-dot');
     dot.style.background = ok ? (PROVIDER_COLORS[p.presetId] || PROVIDER_COLORS.custom) : '';
     dot.textContent = ok ? p.name.trim().charAt(0).toUpperCase() : '';
+    renderConvBar();
   }
   function dayGroup(t) {
     const d = new Date(t); const n = new Date();
@@ -383,6 +396,9 @@
   function fillMsgEl(el, m) {
     el.className = 'msg ' + m.role + (m.error ? ' error' : '');
     el.innerHTML = '';
+    const pst = !m.pending ? Plugins.registry.messageState(m, settings, conv, pluginHost) : null;
+    if (pst && pst.dim) el.classList.add(pst.light ? 'dim-light' : 'dim');
+    if (pst && pst.label) { const lb = document.createElement('div'); lb.className = 'msg-state'; lb.textContent = pst.label; el.appendChild(lb); }
     const isLast = conv.messages[conv.messages.length - 1] === m;
     if (m.role === 'assistant') {
       const head = document.createElement('div'); head.className = 'bot-head';
@@ -390,6 +406,11 @@
       const pn = m.personaName || (!m.imageGen && conv.personaName);
       head.innerHTML = (pe ? '<span class="bot-avatar emoji">' + esc(pe) + '</span>' : '<img class="bot-avatar" src="logo.svg" alt="">') +
         '<span class="bot-name">' + (pn ? '<b>' + esc(pn) + '</b> · ' : '') + esc(m.model || 'AI') + (m.stopped ? ' · 已停止' : '') + '</span>';
+      if (!m.pending) Plugins.registry.messageBadges(m, settings, conv, pluginHost).forEach(b => {
+        const bd = document.createElement('button'); bd.className = 'mbadge tone-' + (b.tone || 'info'); bd.textContent = b.text; if (b.title) bd.title = b.title;
+        if (b.action) bd.onclick = e => { e.stopPropagation(); b.action(); };
+        head.appendChild(bd);
+      });
       el.appendChild(head);
     }
     if (m.files && m.files.length) el.appendChild(buildFileChips(m.files));
@@ -407,6 +428,11 @@
         st.innerHTML = ICON.globe + '<span>' + (m.searchQuery ? '正在联网搜索：' + esc(m.searchQuery) : '正在提炼搜索关键词…') + '</span>';
         body.appendChild(st);
       }
+      if (m.pluginStatus && m.pending) {
+        const st = document.createElement('div'); st.className = 'search-status plugin-status';
+        st.innerHTML = '<span class="spin"></span><span>' + esc(m.pluginStatus) + '</span>';
+        body.appendChild(st);
+      }
       if (m.searchError) {
         const st = document.createElement('div'); st.className = 'search-status warn';
         st.innerHTML = ICON.warn + '<span>' + esc(m.searchError) + '</span>';
@@ -422,7 +448,7 @@
       if (m.content) { const md = renderMarkdown(m.content, m.sources); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
       if (m.error) { const e = document.createElement('div'); e.className = 'err'; e.textContent = m.error; body.appendChild(e); }
       if (!m.content && !m.error) {
-        if (m.pending && !m.reasoning && !m.searching) { const t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t); }
+        if (m.pending && !m.reasoning && !m.searching && !m.pluginStatus) { const t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t); }
         else if (!m.pending && !m.reasoning && !(m.images && m.images.length)) { const e = document.createElement('div'); e.className = 'muted'; e.textContent = m.stopped ? '（已停止）' : '（空回复）'; body.appendChild(e); }
       }
       if (body.childNodes.length) el.appendChild(body);
@@ -661,10 +687,10 @@
     setRunning({ cancel: () => cur && cur(), msg: bot });
     const refresh = () => { if (conv === thisConv) scheduleUpdate(bot); };
     const finish = () => {
-      bot.pending = false; delete bot.searching;
+      bot.pending = false; delete bot.searching; delete bot.pluginStatus;
       setRunning(null);
       saveConv(thisConv);
-      if (conv === thisConv) renderMessages();
+      if (conv === thisConv) { renderMessages(); renderConvBar(); }
       renderConvList();
     };
 
@@ -688,14 +714,26 @@
       refresh();
     }
 
-    const ctx = thisConv.messages.filter(m => m !== bot && !m.error && !m.imageGen && !m.pending).map(m => toRequestMsg(m, m === lastUser));
     const stream = settings.stream !== false;
     const temp = thisConv.temperature != null && thisConv.temperature !== '' ? numOrUndef(thisConv.temperature) : numOrUndef(settings.temperature);
-    const req = Providers.buildChatRequest(p, thisConv.model, ctx, thisConv.systemPrompt,
-      { stream, temperature: temp, maxTokens: numOrUndef(settings.maxTokens) });
+    // 插件管线：搜索结果、文件内容只在用户消息里，系统提示词保持稳定
+    let rctx = {
+      conv: thisConv, provider: p, model: thisConv.model, systemPrompt: thisConv.systemPrompt, settings, lastUser, meta: {},
+      messages: thisConv.messages.filter(m => m !== bot && !m.error && !m.imageGen && !m.pending).map(m => Object.assign(toRequestMsg(m, m === lastUser), { _src: m })),
+      opts: { stream, temperature: temp, maxTokens: numOrUndef(settings.maxTokens) },
+      setStatus: t => { if (t) bot.pluginStatus = t; else delete bot.pluginStatus; refresh(); },
+      setCancel: c => { cur = c; },
+    };
+    rctx = await Plugins.registry.runBeforeRequest(rctx, pluginHost);
+    delete bot.pluginStatus;
+    if (bot.stopped) { finish(); return; }
+    if (rctx.plugins.length) bot.plugins = rctx.plugins;
+    const req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
+    lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
     const parser = Providers.createStreamParser(p.type);
     let status = 0, raw = '', gotDelta = false;
     const apply = deltas => deltas.forEach(d => {
+      if (d.kind === 'usage') { bot.usage = Providers.mergeUsage(bot.usage, d.usage); return; }
       gotDelta = true;
       if (d.kind === 'text') bot.content += d.text;
       else if (d.kind === 'reasoning') bot.reasoning += d.text;
@@ -722,6 +760,7 @@
     } catch (e) {
       bot.error = '网络错误：' + e.message + '\n请检查网络连接和 Base URL。';
     }
+    Plugins.registry.runAfterResponse(rctx, { ok: !bot.error && !bot.stopped && status >= 200 && status < 300, usage: bot.usage || null, bot, status }, pluginHost);
     finish();
   }
 
@@ -974,7 +1013,10 @@
     t1.onclick = () => { closeModelMenu(); openSheet(); };
     const t2 = document.createElement('button'); t2.className = 'pm-item tool'; t2.innerHTML = ICON.key + '<span class="pm-name">管理服务商与 API Key</span>';
     t2.onclick = () => { closeModelMenu(); openSettings(); };
-    if (list.length) tools.appendChild(t1);
+    const t3 = document.createElement('button'); t3.className = 'pm-item tool';
+    t3.innerHTML = '<span class="pm-emoji">🎭</span><span class="pm-name">本对话插件 · RP 缓存优化' + (Plugins.registry.isActive('rpcache', settings, conv) ? '（已开启）' : '') + '</span>';
+    t3.onclick = () => { closeModelMenu(); openPluginPanel('rpcache'); };
+    if (list.length) { tools.appendChild(t1); tools.appendChild(t3); }
     tools.appendChild(t2);
     menu.appendChild(tools);
     menu.classList.add('show'); $('#menu-mask').classList.add('show'); $('#model-pill').classList.add('open');
@@ -1073,7 +1115,7 @@
     const ok = await dialog({ title: '删除全部对话？', body: '将删除所有本地对话记录（服务商与 API Key 设置会保留）。', okText: '全部删除', danger: true });
     if (!ok) return;
     if (running) stopGen();
-    convIndex.forEach(m => Store.del('conv_' + m.id + '.json'));
+    convIndex.forEach(m => { Store.del('conv_' + m.id + '.json'); Store.del('rplog_' + m.id + '.json'); });
     convIndex = []; saveIndex(); newConv(); toast('已删除全部对话');
   };
 
@@ -1340,6 +1382,8 @@
     $('#pe-base').value = editing.baseUrl;
     $('#pe-key').value = editing.apiKey || ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
     $('#pe-imgmodel').value = editing.imageModel || '';
+    $('#pe-streamusage').checked = Providers.streamUsageEnabled(Object.assign({}, editing, { type: 'openai' }));
+    $('#pe-su-row').style.display = editing.type === 'openai' ? '' : 'none';
     $('#pe-model-add').value = '';
     $('#pe-base-hint').textContent = presetHints[editing.presetId] || baseHints[editing.type];
     $('#pe-delete').style.display = fresh ? 'none' : '';
@@ -1370,6 +1414,7 @@
   $('#pe-model-add').addEventListener('keydown', e => { if (e.key === 'Enter') $('#pe-model-add-btn').click(); });
   $('#pe-type').onchange = () => {
     const t = $('#pe-type').value; $('#pe-base-hint').textContent = baseHints[t];
+    $('#pe-su-row').style.display = t === 'openai' ? '' : 'none';
     const def = { anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' }[t];
     if (def && (!$('#pe-base').value || $('#pe-base').value === 'https://')) $('#pe-base').value = def;
   };
@@ -1385,6 +1430,10 @@
     if (!editModels.length) { toast('请至少添加一个模型'); return; }
     const p = { id: editing.id, presetId: editing.presetId, name: $('#pe-name').value.trim() || '未命名', type: $('#pe-type').value,
       baseUrl: base, apiKey: $('#pe-key').value.trim(), models: editModels.slice(), imageModel: $('#pe-imgmodel').value.trim() };
+    if ($('#pe-type').value === 'openai') {
+      const su = $('#pe-streamusage').checked;
+      if (su !== Providers.streamUsageEnabled(Object.assign({}, p, { streamUsage: undefined }))) p.streamUsage = su; // 只保存与默认不同的选择
+    }
     const i = settings.providers.findIndex(x => x.id === p.id);
     if (i >= 0) settings.providers[i] = p; else settings.providers.push(p);
     saveSettings(); toast('已保存'); closeProviderEdit(); renderHeader();
@@ -1454,6 +1503,77 @@
     else { const a = document.createElement('a'); a.href = viewerSrc; a.download = 'image.png'; a.click(); }
   };
 
+  // ---------------- 插件 ----------------
+  const pluginHost = {
+    settings: () => settings, saveSettings, conv: () => conv,
+    saveConv: c => saveConv(c || conv, false),
+    store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v) },
+    toast, dialog, esc,
+    refresh: () => { if (conv) { renderHeader(); renderMessages(); } },
+    openPanel: (id, tab) => openPluginPanel(id, tab),
+    /** 用当前对话的模型做一次非流式调用，返回文本 */
+    async callModel(prompt, o) {
+      o = o || {};
+      const p = getProvider(conv.providerId);
+      if (!p || !p.apiKey) throw new Error('请先为本对话选择已配置 API Key 的服务商');
+      const req = Providers.buildChatRequest(p, o.model || conv.model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096 });
+      const r = await requestText(req, o.setCancel || null, 180000);
+      if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
+      const ds = Providers.parseFullResponse(p.type, r.text);
+      const err = ds.find(d => d.kind === 'error'); if (err) throw new Error(err.text);
+      return ds.filter(d => d.kind === 'text').map(d => d.text).join('');
+    },
+  };
+  function pluginSummary() {
+    const on = Plugins.registry.all().filter(pl => Plugins.registry.isGloballyEnabled(pl.id, settings)).length;
+    return Plugins.registry.all().length + ' 个内置插件 · 已启用 ' + on;
+  }
+  function openPlugins() { closeDrawer(); renderPluginList(); $('#page-plugins').classList.add('show'); }
+  function closePlugins() { $('#page-plugins').classList.remove('show'); renderAll(); }
+  function renderPluginList() {
+    const box = $('#plugin-list'); box.innerHTML = '';
+    Plugins.registry.all().forEach(pl => {
+      const on = Plugins.registry.isGloballyEnabled(pl.id, settings);
+      const card = document.createElement('div'); card.className = 'plugin-card' + (on ? ' on' : '');
+      card.innerHTML = '<div class="plc-head"><span class="plc-icon">' + esc(pl.icon) + '</span><div class="plc-main"><div class="plc-name">' + esc(pl.name) +
+        '<span class="plc-ver">v' + esc(pl.version) + ' · 内置</span></div><div class="plc-desc">' + esc(pl.desc) + '</div></div>' +
+        '<input type="checkbox" class="switch" aria-label="启用"' + (on ? ' checked' : '') + '></div>' +
+        '<div class="plc-foot">' + (pl.perConversation ? '<span class="plc-note">需在每个对话中单独开启</span>' : '<span class="plc-note">对所有对话生效，可在对话中关闭</span>') +
+        (pl.renderPanel ? '<button class="chip-btn accent plc-open">当前对话 ›</button>' : '') + (pl.renderSettings ? '<button class="chip-btn plc-set">设置</button>' : '') + '</div>' +
+        '<div class="plc-settings" hidden></div>';
+      card.querySelector('.switch').onchange = e => {
+        Plugins.registry.setGlobal(settings, pl.id, e.target.checked); saveSettings();
+        card.classList.toggle('on', e.target.checked); $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
+        toast((e.target.checked ? '已启用 ' : '已停用 ') + pl.name);
+      };
+      const op = card.querySelector('.plc-open'); if (op) op.onclick = () => openPluginPanel(pl.id);
+      const st = card.querySelector('.plc-set');
+      if (st) st.onclick = () => {
+        const sb = card.querySelector('.plc-settings');
+        sb.hidden = !sb.hidden; if (!sb.hidden) pl.renderSettings(sb, pluginHost);
+      };
+      box.appendChild(card);
+    });
+    const tip = document.createElement('div'); tip.className = 'hint'; tip.style.marginTop = '14px';
+    tip.innerHTML = '开发者：插件 API 见仓库 docs/plugins/README.md。';
+    box.appendChild(tip);
+  }
+  let panelPlugin = null;
+  function openPluginPanel(id, tab) {
+    const pl = Plugins.registry.get(id); if (!pl) return;
+    panelPlugin = pl;
+    $('#pp-title').textContent = pl.icon + ' ' + pl.name.replace(/^DeepSeek /, '');
+    if (pl.renderPanel) pl.renderPanel($('#pp-body'), pluginHost, tab);
+    $('#page-plugin').classList.add('show');
+  }
+  function closePluginPanel() {
+    $('#page-plugin').classList.remove('show'); panelPlugin = null;
+    if ($('#page-plugins').classList.contains('show')) renderPluginList();
+    renderAll();
+  }
+  $('#btn-plugins').onclick = () => { closeDrawer(); setTimeout(openPlugins, 120); };
+  $('#set-plugins').onclick = () => openPlugins();
+
   // ---------------- 返回键 ----------------
   window.onAndroidBack = function () {
     const shown = s => $(s).classList.contains('show');
@@ -1465,6 +1585,8 @@
     if (shown('#model-menu')) { closeModelMenu(); return true; }
     if (shown('#sheet')) { closeSheet(); return true; }
     if (shown('#prompt-sheet')) { closePromptSheet(); return true; }
+    if (shown('#page-plugin')) { if (panelPlugin && panelPlugin.onBack && panelPlugin.onBack()) return true; closePluginPanel(); return true; }
+    if (shown('#page-plugins')) { closePlugins(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
     if (shown('#page-personas')) { closePersonas(); return true; }
     if (shown('#page-provider')) { closeProviderEdit(); return true; }
@@ -1478,6 +1600,7 @@
   if (!Store.get('personas.json', null)) savePersonas();
   if (!Store.get('prompts.json', null)) savePrompts();
   $('#persona-count').textContent = personas.length + ' 个助手 · ' + prompts.length + ' 条提示词';
+  $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
   updateSendState();

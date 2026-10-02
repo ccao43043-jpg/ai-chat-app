@@ -202,6 +202,7 @@
       }
     });
     const body = { model, messages: out, stream };
+    if (stream && streamUsageEnabled(provider)) body.stream_options = { include_usage: true };
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
@@ -209,11 +210,69 @@
     return { url: base + '/chat/completions', method: 'POST', headers, body: JSON.stringify(body) };
   }
 
-  /** 从一个 JSON 事件中提取增量 [{kind:'text'|'reasoning', text}] */
+  // 流式请求附带 usage（stream_options.include_usage）：已核实官方文档支持的预设默认开启，其他可在服务商设置里打开
+  const STREAM_USAGE_PRESETS = ['openai', 'deepseek', 'qwen', 'openrouter'];
+  function streamUsageEnabled(provider) {
+    if (!provider || provider.type !== 'openai') return false;
+    if (provider.streamUsage === true || provider.streamUsage === false) return provider.streamUsage;
+    return STREAM_USAGE_PRESETS.includes(provider.presetId) || /\/\/api\.deepseek\.com/i.test(provider.baseUrl || '');
+  }
+
+  const num = v => (typeof v === 'number' && isFinite(v) ? v : undefined);
+  /**
+   * 统一 usage 字段：{ prompt, completion, hit, miss, cacheSupported, cacheWrite, source }
+   * 只返回响应中出现的字段（流式时可能分几次到达，用 mergeUsage 合并）
+   */
+  function normalizeUsage(type, u) {
+    if (!u || typeof u !== 'object') return null;
+    const out = {};
+    if (type === 'anthropic') {
+      const input = num(u.input_tokens), read = num(u.cache_read_input_tokens), write = num(u.cache_creation_input_tokens);
+      if (input !== undefined || read !== undefined || write !== undefined) {
+        out.prompt = (input || 0) + (read || 0) + (write || 0);
+        if (read !== undefined || write !== undefined) {
+          out.hit = read || 0; out.miss = out.prompt - out.hit; out.cacheSupported = true; out.source = 'anthropic';
+          if (write) out.cacheWrite = write;
+        }
+      }
+      if (num(u.output_tokens) !== undefined) out.completion = u.output_tokens;
+    } else if (type === 'gemini') {
+      if (num(u.promptTokenCount) !== undefined) out.prompt = u.promptTokenCount;
+      if (num(u.candidatesTokenCount) !== undefined) out.completion = u.candidatesTokenCount + (num(u.thoughtsTokenCount) || 0);
+      if (num(u.cachedContentTokenCount) !== undefined) {
+        out.hit = u.cachedContentTokenCount; out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'gemini';
+      }
+    } else {
+      if (num(u.prompt_tokens) !== undefined) out.prompt = u.prompt_tokens;
+      if (num(u.completion_tokens) !== undefined) out.completion = u.completion_tokens;
+      const det = u.prompt_tokens_details || {};
+      if (num(u.prompt_cache_hit_tokens) !== undefined) { // DeepSeek
+        out.hit = u.prompt_cache_hit_tokens;
+        out.miss = num(u.prompt_cache_miss_tokens) !== undefined ? u.prompt_cache_miss_tokens : (out.prompt || 0) - out.hit;
+        if (out.prompt === undefined) out.prompt = out.hit + out.miss;
+        out.cacheSupported = true; out.source = 'deepseek';
+      } else if (num(det.cached_tokens) !== undefined) { // OpenAI 等
+        out.hit = det.cached_tokens; out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'openai';
+      }
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  function mergeUsage(a, b) {
+    if (!b) return a || null;
+    const out = Object.assign({}, a || {});
+    Object.keys(b).forEach(k => { if (b[k] !== undefined) out[k] = b[k]; });
+    if (out.cacheSupported && out.prompt !== undefined && out.hit !== undefined) out.miss = Math.max(0, out.prompt - out.hit);
+    return out;
+  }
+
+  /** 从一个 JSON 事件中提取增量 [{kind:'text'|'reasoning'|'error'|'usage', text|usage}] */
   function extractDeltas(type, obj) {
     const out = [];
     if (!obj) return out;
     if (type === 'anthropic') {
+      const au = obj.type === 'message_start' && obj.message ? obj.message.usage : obj.usage;
+      const nu = normalizeUsage('anthropic', au);
+      if (nu) out.push({ kind: 'usage', usage: nu });
       if (obj.type === 'content_block_delta' && obj.delta) {
         if (obj.delta.type === 'text_delta') out.push({ kind: 'text', text: obj.delta.text || '' });
         else if (obj.delta.type === 'thinking_delta') out.push({ kind: 'reasoning', text: obj.delta.thinking || '' });
@@ -229,6 +288,8 @@
     }
     if (type === 'gemini') {
       if (obj.error) { out.push({ kind: 'error', text: obj.error.message || JSON.stringify(obj.error) }); return out; }
+      const gu = normalizeUsage('gemini', obj.usageMetadata);
+      if (gu) out.push({ kind: 'usage', usage: gu });
       const cands = obj.candidates || [];
       if (cands[0] && cands[0].content && cands[0].content.parts) {
         cands[0].content.parts.forEach(p => {
@@ -246,6 +307,8 @@
       if (typeof r === 'string' && r) out.push({ kind: 'reasoning', text: r });
       if (typeof d.content === 'string' && d.content) out.push({ kind: 'text', text: d.content });
     }
+    const ou = normalizeUsage('openai', obj.usage); // 流式最后一块（DeepSeek 附在最后的内容块上；OpenAI 为 choices 为空的单独一块）
+    if (ou) out.push({ kind: 'usage', usage: ou });
     return out;
   }
 
@@ -339,7 +402,7 @@
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl };
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

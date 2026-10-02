@@ -57,7 +57,15 @@ async function scenario(browser, theme) {
           return;
         }
         if (url.includes('anthropic')) { setTimeout(() => { H.onStart(id, 401); H.onChunk(id, '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'); H.onEnd(id); }, 50); return; }
-        const msgs = (JSON.parse(body || '{}').messages || []);
+        const B = JSON.parse(body || '{}');
+        const msgs = (B.messages || []);
+        // 章节摘要（非流式）
+        if (!B.stream && msgs.length === 1 && String(msgs[0].content).includes('章节摘要记录员')) {
+          window.__summaryReqs = (window.__summaryReqs || []).concat([B]);
+          const sm = 'FACTS:\n- 曹含森在王都西区的旧书店找到了失踪商人留下的账本\n- 张燕答应与曹含森一起调查北方商会\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知道失踪案与北方商人有关，不知道账本的存在\n- 书店老板：见过失踪商人最后一面\n\nPLAYER_KNOWLEDGE:\n- 玩家知道账本里记录了商会的秘密交易\n\nSECRET:\n- 曹含森拥有特殊魔法能力（对张燕保密）\n\nUNRESOLVED:\n- 真正的幕后组织尚未确认\n\nRELATIONSHIPS:\n- 曹含森 ↔ 张燕：合作，信任度上升\n\nOBJECTS:\n- 失踪商人的账本（曹含森持有）\n\nLOCATION:\n- 王都西区：夜间戒严';
+          setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ choices: [{ message: { role: 'assistant', content: sm }, finish_reason: 'stop' }], usage: { prompt_tokens: 900, completion_tokens: 300, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 900 } })); H.onEnd(id); }, 700);
+          return;
+        }
         const lastU = msgs.filter(m => m.role === 'user').pop();
         const uc = lastU ? (typeof lastU.content === 'string' ? lastU.content : JSON.stringify(lastU.content)) : '';
         const sys = (msgs.find(m => m.role === 'system') || {}).content || '';
@@ -65,8 +73,24 @@ async function scenario(browser, theme) {
         if (uc.includes('联网搜索结果')) text = '根据最新消息，**2026 年诺贝尔物理学奖**授予了三位在量子材料领域做出开创性贡献的科学家 [1]。\n\n获奖研究主要揭示了拓扑量子态在室温下的稳定机制，有望带来更低功耗的电子器件 [2][3]。\n\n- 颁奖机构：瑞典皇家科学院 [1]\n- 研究方向：量子材料、拓扑物态 [2]\n';
         else if (uc.includes('【文件：')) text = '我阅读了你上传的两个文件，要点如下：\n\n**《2026 年第三季度销售报告》**\n- 本季度总营收 **1280 万元**，同比增长 23%\n- 华东区贡献最大，占比 41%；线上渠道同比增长 57%\n- 下季度计划在成都、西安新开两家门店，预算 300 万元\n\n**会议纪要**\n- Q4 主推线上渠道，预算增加 15%（负责人：王磊，10 月 20 日前提交方案）\n\n> 结论：营收为 1280 万元，线上渠道是增长主力。';
         else if (sys.includes('专业翻译')) text = 'The weather is really nice today — shall we go for a walk in the park?';
-        const sse = ['data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '用户想要一个简单的 Python 示例，我给出读取文件统计行数的代码。' } }] }) + '\n\n'];
-        for (let i = 0; i < text.length; i += 6) sse.push('data: ' + JSON.stringify({ choices: [{ delta: { content: text.slice(i, i + 6) } }] }) + '\n\n');
+        const rp = sys.includes('[WORLD]');
+        if (rp) text = '（烛光在走廊尽头摇曳）张燕压低声音：“' + uc.slice(-12) + '……你确定要这么做？北方商会的人今晚一定会来。”她把斗篷拉紧，目光扫过旧书店斑驳的木门。' +
+          '远处传来巡夜卫兵整齐的脚步声，石板路上积着薄薄的雨水，倒映着摇晃的灯笼。书店老板缩在柜台后，假装整理一摞发黄的旧书，手却一直在发抖。你注意到他的袖口沾着一点墨迹，和账本上的字迹颜色一模一样。'.repeat(3);
+        // 模拟 DeepSeek 前缀缓存：与之前请求的最长公共前缀（按 64 token 粒度）
+        const ser = JSON.stringify(msgs);
+        let lcp = 0;
+        (window.__prompts = window.__prompts || []).forEach(q => { let i = 0; const n = Math.min(q.length, ser.length); while (i < n && q.charCodeAt(i) === ser.charCodeAt(i)) i++; lcp = Math.max(lcp, i); });
+        window.__prompts.push(ser);
+        const ptok = Math.ceil(ser.length / 1.5), hit = Math.min(ptok, Math.floor(lcp / 1.5 / 64) * 64);
+        const usage = { prompt_tokens: ptok, completion_tokens: Math.ceil(text.length / 1.5), total_tokens: ptok + Math.ceil(text.length / 1.5), prompt_cache_hit_tokens: hit, prompt_cache_miss_tokens: ptok - hit };
+        const sse = rp ? [] : ['data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '用户想要一个简单的 Python 示例，我给出读取文件统计行数的代码。' } }] }) + '\n\n'];
+        const step = rp ? 24 : 6;
+        for (let i = 0; i < text.length; i += step) {
+          const lastChunk = i + step >= text.length;
+          const o = { choices: [{ index: 0, delta: { content: text.slice(i, i + step) }, finish_reason: lastChunk ? 'stop' : null }] };
+          if (lastChunk && url.includes('deepseek') && B.stream_options && B.stream_options.include_usage) o.usage = usage; // DeepSeek：usage 在最后一个内容块上
+          sse.push('data: ' + JSON.stringify(o) + '\n\n');
+        }
         sse.push('data: [DONE]\n\n');
         setTimeout(() => H.onStart(id, 200), 20);
         sse.forEach((c, i) => setTimeout(() => H.onChunk(id, c), 30 + i * 12));
@@ -124,6 +148,10 @@ async function scenario(browser, theme) {
   assert.strictEqual(r.chat.req.body.model, 'deepseek-flash');
   assert.strictEqual(r.chat.req.headers.Authorization, 'Bearer sk-old-key');
   assert.ok(r.chat.code && r.chat.table && r.chat.reasoning);
+  assert.deepStrictEqual(r.chat.req.body.stream_options, { include_usage: true }, 'DeepSeek 流式请求附带 include_usage');
+  r.chatUsage = await page.evaluate(() => { const c = JSON.parse(window.__mem['convs.json'])[0]; return JSON.parse(window.__mem['conv_' + c.id + '.json']).messages[1].usage; });
+  assert.strictEqual(r.chatUsage.source, 'deepseek'); assert.ok(r.chatUsage.prompt > 0 && r.chatUsage.miss > 0, JSON.stringify(r.chatUsage));
+  assert.strictEqual(await page.$$eval('.mbadge', e => e.length), 0, '未开启插件时没有徽章');
   await page.click('.code-head button');
   assert.ok((await page.evaluate(() => window.__copied)).includes('count_lines'));
 
@@ -308,6 +336,208 @@ async function scenario(browser, theme) {
   assert.strictEqual(r.scanThumbs, 1);
   await page.click('#attach-preview .thumb.doc .rm'); await sleep(150);
   assert.strictEqual(await page.$$eval('#attach-preview .thumb', e => e.length), 0);
+
+
+  // 13) 插件：DeepSeek RP 缓存优化器 V1
+  const rpConv = () => page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache && c.plugins.rpcache.enabled) return c; } return null; });
+  const rpLogs = async () => { const c = await rpConv(); return JSON.parse(await page.evaluate(k => window.__mem[k] || '[]', 'rplog_' + c.id + '.json')); };
+  const waitIdle = () => page.waitForFunction(() => !document.querySelector('#btn-send').classList.contains('stop'), { timeout: 20000 });
+  const panelClick = sel => page.evaluate(s => document.querySelector('#pp-body ' + s).click(), sel);
+  const openBlock = t => page.evaluate(t => [...document.querySelectorAll('#pp-body .rp-block')].find(e => e.querySelector('.rb-title').textContent === t).click(), t);
+  const typeBlock = v => page.evaluate(v => { const t = document.querySelector('#rb-text'); t.value = v; t.dispatchEvent(new Event('input')); }, v);
+  const tab = k => page.evaluate(k => document.querySelector('#pp-body .seg button[data-tab="' + k + '"]').click(), k);
+  const closePanels = async () => { for (let i = 0; i < 4 && await page.evaluate(() => document.querySelector('#page-plugin.show,#page-plugins.show') != null); i++) { await page.evaluate(() => window.onAndroidBack()); await sleep(350); } };
+  const sendRP = async t => { await setInput(t); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250); return lastPost(); };
+
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#model-pill'); await sleep(250); await pickModel('deepseek-flash'); await sleep(250);
+  await page.click('#btn-menu'); await sleep(350);
+  r.pluginRow = await page.$eval('#plugin-count', e => e.textContent);
+  assert.ok(r.pluginRow.includes('2 个内置插件'), r.pluginRow);
+  await page.click('#btn-plugins'); await sleep(650);
+  r.pluginCards = await page.$$eval('#plugin-list .plugin-card .plc-name', els => els.map(e => e.textContent));
+  assert.ok(r.pluginCards[0].startsWith('DeepSeek RP 缓存优化器') && r.pluginCards[1].startsWith('Token 用量显示'), JSON.stringify(r.pluginCards));
+  await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(200);
+  r.priceInputs = await page.$$eval('#plugin-list input[data-m]', e => e.map(x => x.value));
+  assert.deepStrictEqual(r.priceInputs, ['0.006', '0.3', '1.2', '0.044', '1.32', '3.96']);
+  await shot('plugins');
+  await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-open').click()); await sleep(500);
+  assert.ok(await page.$eval('#page-plugin', e => e.classList.contains('show')));
+  await page.click('#rp-on'); await sleep(300);
+  r.tabs = await page.$$eval('#pp-body .seg button', e => e.map(x => x.textContent));
+  assert.deepStrictEqual(r.tabs, ['分层设定', '章节摘要', '缓存监控', '预算设置']);
+  r.layers = await page.$$eval('#pp-body .layer-head .lh-no', e => e.map(x => x.textContent));
+  assert.deepStrictEqual(r.layers, ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
+  // 编辑 L1 / L2 / L5
+  const blocks = [['世界观', '这是一个剑与魔法的世界。王都分为东西两区，西区夜间戒严。\r\n北方商会垄断了盐与铁的贸易。'], ['角色卡', '张燕：22 岁，王都巡夜队副队长，谨慎、嘴硬心软。\n曹含森（玩家）：23 岁，旧书店常客。'],
+    ['RP 规则', '1. NPC 不能读取玩家内心\n2. NPC 只知道自己应该知道的信息\n3. 不替玩家决定行动\n4. 保持人物性格连续'], ['Few-shot 示例', ('玩家：我走进酒馆，环顾四周。\n角色：（酒馆里人声嘈杂，壁炉里的火噼啪作响）张燕靠在吧台边，抬眼看了你一下，又低头转着手里的酒杯：“这么晚还出来？西区可不太平。”\n\n').repeat(6)], ['长期记忆', '张燕尚不知道曹含森拥有特殊魔法能力。\n任务：调查北方商会失踪事件。'],
+    ['当前动态状态', 'Location: 王都西区\nTime: 21:40\nHP: 82/100\nZhangYan_Affection: 37']];
+  for (const [t, v] of blocks) { await openBlock(t); await sleep(250); await typeBlock(v); await page.click('#rb-save'); await sleep(250); }
+  // 只改空白：版本不变
+  await openBlock('世界观'); await sleep(250);
+  await typeBlock('这是一个剑与魔法的世界。王都分为东西两区，西区夜间戒严。   \n北方商会垄断了盐与铁的贸易。\n\n\n\n\n\n');
+  r.wsMeta = await page.$eval('#rb-meta', e => e.textContent);
+  assert.ok(r.wsMeta.includes('未修改'), r.wsMeta);
+  await page.click('#rb-save'); await sleep(250);
+  // 真正修改：v2，历史中可恢复 v1
+  await openBlock('世界观'); await sleep(250);
+  await typeBlock('这是一个剑与魔法的世界。王都分为东西两区，西区夜间戒严。\n北方商会垄断了盐与铁的贸易，暗中豢养刺客。');
+  await page.click('#rb-save'); await sleep(250);
+  let st = (await rpConv()).plugins.rpcache.state;
+  r.versions = Object.fromEntries(st.blocks.map(b => [b.id, b.version]));
+  assert.strictEqual(r.versions.world, 2, JSON.stringify(r.versions)); assert.strictEqual(r.versions.character, 1); assert.strictEqual(r.versions.state, 1);
+  assert.strictEqual(st.staticVersion, 5);
+  assert.ok(!st.blocks.find(b => b.id === 'world').content.includes('\r'), 'CRLF 已规范化');
+  await page.evaluate(() => { document.querySelector('#page-plugin .page-body').scrollTop = 0; });
+  await shot('rp-blocks');
+  await openBlock('世界观'); await sleep(300);
+  r.hist = await page.$$eval('#rb-hist .hist-row .rb-ver', e => e.map(x => x.textContent));
+  assert.deepStrictEqual(r.hist, ['v1']);
+  await shot('rp-block-editor');
+  await page.click('#rb-back'); await sleep(250);
+  await closePanels();
+
+  // 发送几轮：L1→L2 在 system，L5+L6 在最后一条用户消息，历史前缀逐字节稳定
+  r.badge = await page.$eval('#conv-bar', e => e.textContent);
+  assert.ok(r.badge.includes('RP'), r.badge);
+  const rq = [];
+  rq.push(await sendRP('我推开旧书店的门，低声问老板：失踪的商人最后来过这里吗？'));
+  rq.push(await sendRP('我拿出那本账本给张燕看。'));
+  // 修改动态状态（L5）：不影响历史缓存
+  await page.click('#conv-bar .hbadge'); await sleep(450); await tab('blocks'); await sleep(200);
+  await openBlock('当前动态状态'); await sleep(250); await typeBlock('Location: 王都西区 · 旧书店\nTime: 22:05\nHP: 82/100\nZhangYan_Affection: 41'); await page.click('#rb-save'); await sleep(250);
+  await closePanels();
+  rq.push(await sendRP('我们从后门离开，沿着运河往北走。'));
+  rq.push(await sendRP('我问张燕：你相信商会会长吗？'));
+  rq.forEach((q, i) => {
+    const m = q.body.messages;
+    assert.strictEqual(m[0].role, 'system');
+    const sys = m[0].content;
+    const order = ['[WORLD]', '[CHARACTER]', '[RP_RULES]', '[LONG_TERM_MEMORY]'].map(t => sys.indexOf(t));
+    assert.ok(order.every((x, j) => x > (j ? order[j - 1] : -1)), '系统提示词分层顺序 ' + order);
+    assert.ok(!sys.includes('[CURRENT_STATE]') && !sys.includes('HP:'), '状态不在 system');
+    assert.ok(m[m.length - 1].content.startsWith('[CURRENT_STATE]\nLocation: 王都西区') && m[m.length - 1].content.includes('\n\n[USER_INPUT]\n'), '状态 + 输入在最后');
+    m.slice(1, -1).forEach(x => assert.ok(!x.content.includes('[CURRENT_STATE]'), '历史中不保留旧状态'));
+    assert.deepStrictEqual(q.body.stream_options, { include_usage: true });
+    if (i) {
+      const prev = rq[i - 1].body.messages; const k = prev.length - 1;
+      assert.deepStrictEqual(m.slice(0, k), prev.slice(0, k), '第 ' + (i + 1) + ' 轮的前缀与上一轮完全一致');
+      assert.strictEqual(m[k].content, prev[k].content.split('\n\n[USER_INPUT]\n')[1], '上一轮输入以原文进入历史');
+    }
+  });
+  let logs = await rpLogs();
+  assert.strictEqual(logs.length, 4);
+  assert.deepStrictEqual(logs[3].diag, { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'SAME', input: 'CHANGED', history: 'APPEND' });
+  assert.strictEqual(logs[2].diag.state, 'CHANGED'); assert.strictEqual(logs[2].diag.history, 'APPEND');
+  assert.ok(logs[3].hit_rate > 0.7, 'hit ' + logs[3].hit_rate);
+  assert.strictEqual(logs[3].reason, '正常动态更新');
+  assert.ok(!JSON.stringify(logs).includes('账本'), '日志默认不含 Prompt 文本');
+  r.mbadges = await page.$$eval('.msg.assistant .mbadge', e => e.map(x => x.textContent));
+  assert.strictEqual(r.mbadges.length, 4); assert.ok(r.mbadges[3].startsWith('缓存 '), r.mbadges[3]);
+  await page.evaluate(() => [...document.querySelectorAll('.msg.assistant .mbadge')].pop().click()); await sleep(500);
+  r.diagUi = await page.$$eval('#pp-body .dg-row', e => e.map(x => x.textContent));
+  assert.deepStrictEqual(r.diagUi, ['StaticSAME', 'MemorySAME', 'SummarySAME', 'HistoryAPPEND', 'StateSAME', 'InputCHANGED']);
+  assert.ok((await page.$eval('#pp-body .dg-reason', e => e.textContent)).includes('正常动态更新'));
+  assert.ok(await page.$('#pp-body .miss-big'));
+  await shot('rp-monitor');
+
+  // 修改角色卡（L1）→ 命中率骤降 → 异常提示 + Static CHANGED
+  await tab('blocks'); await sleep(200);
+  await openBlock('角色卡'); await sleep(250); await typeBlock('张燕：22 岁，王都巡夜队副队长，谨慎、嘴硬心软，左手有旧伤。\n曹含森（玩家）：23 岁，旧书店常客。'); await page.click('#rb-save'); await sleep(250);
+  await closePanels();
+  await sendRP('我注意到张燕的左手在发抖。');
+  logs = await rpLogs();
+  const la = logs[logs.length - 1];
+  assert.strictEqual(la.diag.static, 'CHANGED'); assert.ok(la.hit_rate < 0.3, 'rate ' + la.hit_rate);
+  assert.ok(la.reasons.includes('角色卡 / 世界观等永久锚点被修改'));
+  r.anomBadge = await page.evaluate(() => [...document.querySelectorAll('.msg.assistant .mbadge')].pop().textContent);
+  assert.ok(r.anomBadge.startsWith('⚠'), r.anomBadge + ' ' + JSON.stringify(logs.map(x => x.hit_rate)));
+  await page.evaluate(() => [...document.querySelectorAll('.msg.assistant .mbadge')].pop().click()); await sleep(500);
+  r.alert = await page.$eval('#pp-body .rp-alert', e => e.textContent);
+  assert.ok(r.alert.includes('Cache Hit Drop') && r.alert.includes('Static Hash'), r.alert);
+  await shot('rp-anomaly');
+
+  // 预算设置：调低摘要阈值 → 下一轮自动生成章节摘要 #001
+  await tab('opts'); await sleep(250);
+  await page.evaluate(() => { const set = (id, v) => { const i = document.querySelector(id); i.value = v; i.dispatchEvent(new Event('change')); }; set('#rp-trigger', 1000); set('#rp-minnew', 2); set('#rp-keep', 2); });
+  st = (await rpConv()).plugins.rpcache.state;
+  assert.deepStrictEqual(st.settings.summary, { enabled: true, trigger_tokens: 1000, min_new_turns: 2, keep_recent_turns: 2 });
+  assert.strictEqual(st.settings.max_context, 100000); assert.strictEqual(st.settings.save_prompt, false);
+  await closePanels();
+  await setInput('我们在运河边停下，我把账本的事告诉了张燕。'); await page.click('#btn-send'); await sleep(250);
+  r.sumStatus = await page.$eval('.msg.assistant:last-child', e => e.textContent);
+  assert.ok(r.sumStatus.includes('正在生成章节摘要…'), r.sumStatus);
+  await waitIdle(); await sleep(300);
+  const sumReq = await page.evaluate(() => (window.__summaryReqs || []).slice(-1)[0]);
+  assert.ok(sumReq && sumReq.stream === false && sumReq.model === 'deepseek-flash');
+  const sp = sumReq.messages[0].content;
+  ['FACTS:', 'CHARACTER_KNOWLEDGE:', 'PLAYER_KNOWLEDGE:', 'SECRET:', 'UNRESOLVED:', 'RELATIONSHIPS:', 'OBJECTS:', 'LOCATION:'].forEach(k => assert.ok(sp.includes(k), k));
+  assert.ok(sp.includes('失踪的商人最后来过这里吗'), '最旧一批对话进入摘要');
+  const afterSum = await lastPost();
+  const am = afterSum.body.messages;
+  assert.ok(am[0].content.includes('[CHAPTER_SUMMARY #001]\nFACTS:'), '摘要在 system（L3）');
+  assert.ok(am[0].content.indexOf('[LONG_TERM_MEMORY]') < am[0].content.indexOf('[CHAPTER_SUMMARY #001]'));
+  assert.strictEqual(am.filter(x => x.role === 'user').length, 3, '保留最近 2 轮 + 当前输入');
+  assert.ok(!am.some(x => x.content.includes('失踪的商人最后来过这里吗')), '被摘要的消息不再发送');
+  const c13 = await rpConv();
+  assert.strictEqual(c13.messages.length, 12, '原始消息全部保留');
+  st = c13.plugins.rpcache.state;
+  assert.strictEqual(st.summaries.length, 1); assert.strictEqual(st.summaries[0].coveredIds.length, 6);
+  logs = await rpLogs();
+  assert.strictEqual(logs[logs.length - 1].summary_happened, true); assert.strictEqual(logs[logs.length - 1].diag.summary, 'CHANGED');
+  r.dim = await page.$$eval('.msg.dim', e => e.length);
+  assert.strictEqual(r.dim, 6);
+  r.dimLabel = await page.$$eval('.msg.dim .msg-state', e => e.map(x => x.textContent).filter(Boolean));
+  assert.ok(r.dimLabel[0].includes('章节摘要 #001') && r.dimLabel[0].includes('原文保留'), JSON.stringify(r.dimLabel));
+  r.sumBadges = await page.$$eval('.msg.assistant .mbadge', e => e.map(x => x.textContent));
+  assert.ok(r.sumBadges.includes('📚 摘要 #001'));
+  await page.evaluate(() => { const ms = document.querySelector('#messages'); const d = [...document.querySelectorAll('.msg.dim')].pop(); ms.scrollTop = d.offsetTop - 420; });
+  await shot('rp-chat');
+  // 下一轮：摘要冻结，前缀稳定，不再调用摘要
+  await sendRP('张燕点点头：“明天一早去商会。”');
+  const nx = (await lastPost()).body.messages;
+  assert.strictEqual(nx[0].content, am[0].content);
+  assert.deepStrictEqual(nx.slice(0, am.length - 1), am.slice(0, am.length - 1));
+  assert.strictEqual(await page.evaluate(() => window.__summaryReqs.length), 1);
+  logs = await rpLogs();
+  assert.strictEqual(logs[logs.length - 1].diag.summary, 'SAME'); assert.strictEqual(logs[logs.length - 1].diag.history, 'APPEND');
+  // 摘要页：查看 / 编辑（生成新快照 #002）/ 版本列表 / 回滚
+  await page.click('#conv-bar .hbadge:nth-child(2)'); await sleep(500);
+  r.sumTab = await page.$eval('#pp-body .seg button.active', e => e.textContent);
+  assert.strictEqual(r.sumTab, '章节摘要');
+  await panelClick('#rp-sum-cur'); await sleep(300);
+  r.svText = await page.$eval('#sv-text', e => e.value);
+  assert.ok(r.svText.startsWith('FACTS:'));
+  await shot('rp-summary');
+  await page.evaluate(() => { const t = document.querySelector('#sv-text'); t.value = t.value.replace('信任度上升', '信任度明显上升'); t.dispatchEvent(new Event('input')); });
+  await page.click('#sv-save'); await sleep(300);
+  r.sumHist = await page.$$eval('#rp-sum-hist .hist-row .rb-ver', e => e.map(x => x.textContent));
+  assert.deepStrictEqual(r.sumHist, ['#001']);
+  await page.evaluate(() => document.querySelector('#rp-sum-hist .hist-row button').click()); await sleep(350);
+  await page.click('#dialog-ok'); await sleep(350);
+  st = (await rpConv()).plugins.rpcache.state;
+  assert.deepStrictEqual(st.summaries.map(x => [x.no, x.source]), [[1, 'auto'], [2, 'edit'], [3, 'rollback']]);
+  assert.strictEqual(st.summaries[2].content, st.summaries[0].content);
+  await shot('rp-summary-versions');
+  // 调试开关：save_prompt 需确认警告
+  await tab('opts'); await sleep(250);
+  await page.click('#rp-saveprompt'); await sleep(350);
+  r.spWarn = await page.$eval('#dialog-body', e => e.textContent);
+  assert.ok(r.spWarn.includes('日志可能包含角色卡、私密剧情、API 请求内容，请谨慎使用'));
+  await page.click('#dialog-cancel'); await sleep(300);
+  assert.strictEqual(await page.$eval('#rp-saveprompt', e => e.checked), false);
+  await closePanels();
+  // 关闭插件后请求恢复普通结构
+  await page.click('#model-pill'); await sleep(250);
+  r.toolItem = await page.$$eval('#model-menu .pm-item.tool', e => e.map(x => x.textContent));
+  assert.ok(r.toolItem.some(t => t.includes('RP 缓存优化（已开启）')), JSON.stringify(r.toolItem));
+  await page.evaluate(() => [...document.querySelectorAll('#model-menu .pm-item.tool')].find(e => e.textContent.includes('RP 缓存优化')).click()); await sleep(500);
+  await page.click('#rp-on'); await sleep(300);
+  await closePanels();
+  await sendRP('普通消息');
+  const plain = (await lastPost()).body.messages;
+  assert.ok(!plain.some(x => x.content.includes('[WORLD]') || x.content.includes('[CURRENT_STATE]')), '关闭后不再注入');
+  assert.strictEqual(plain[plain.length - 1].content, '普通消息');
 
   assert.deepStrictEqual(errors, []);
   await page.close();

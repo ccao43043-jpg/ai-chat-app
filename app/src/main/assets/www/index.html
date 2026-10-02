@@ -25,6 +25,7 @@
     </button>
   </header>
 
+  <div id="conv-bar" class="conv-bar"></div>
   <main id="messages"></main>
 
   <footer class="composer">
@@ -83,6 +84,10 @@
       <span class="row-ic grad"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg></span>
       <span class="row-text"><span>助手与提示词</span><small id="persona-count">选择助手开始新对话</small></span>
     </button>
+    <button class="row-btn" id="btn-plugins">
+      <span class="row-ic"><svg viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 114 0V6h3a1 1 0 011 1v3h-1.5a2 2 0 100 4H18v3a1 1 0 01-1 1h-3v-1.5a2 2 0 10-4 0V18H7a1 1 0 01-1-1v-3h1.5a2 2 0 100-4H6V7a1 1 0 011-1h3z"/></svg></span>
+      <span class="row-text"><span>插件</span><small id="plugin-count">RP 缓存优化等</small></span>
+    </button>
     <button class="row-btn" id="btn-settings">
       <span class="row-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></span>
       <span class="row-text"><span>设置</span><small>服务商、API Key 与偏好</small></span>
@@ -132,11 +137,14 @@
       <label class="field"><span>生成图片尺寸</span><input id="set-imgsize" placeholder="1024x1024"></label>
     </div>
 
+    <div class="group-title">插件</div>
+    <div class="group"><button class="prov-item" id="set-plugins"><span class="avatar lg" style="background:var(--grad)">🧩</span><div class="pi-main"><div class="pi-name">插件</div><div class="pi-sub" id="set-plugins-sub">管理内置插件</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
+
     <div class="group-title">数据</div>
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.2.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.3.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -169,11 +177,35 @@
       <div id="pe-model-chips" class="model-chips"></div>
       <div class="input-row"><input id="pe-model-add" placeholder="输入模型名称后添加" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="chip-btn" id="pe-model-add-btn" type="button">添加</button></div>
       <div class="hint small" style="margin-top:8px">第一个为默认模型；点 × 删除，点模型名设为默认。</div>
+      <label class="field inline" id="pe-su-row" style="margin-top:6px"><span>流式请求返回用量<small>发送 stream_options.include_usage，用于缓存命中统计；不支持的服务商可能报错</small></span><input type="checkbox" id="pe-streamusage" class="switch"></label>
       <label class="field" style="margin-top:6px"><span>图片生成模型（可选，仅 OpenAI 兼容）</span>
         <input id="pe-imgmodel" autocapitalize="off" spellcheck="false" placeholder="如 gpt-image-2.5-flare / cogview-3-flash"></label>
     </div>
     <button class="ghost-btn danger" id="pe-delete">删除此服务商</button>
   </div>
+</section>
+
+<!-- 插件列表 -->
+<section id="page-plugins" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title">插件</div>
+    <span class="icon-btn ghost"></span>
+  </header>
+  <div class="page-body">
+    <div class="hint">插件在请求发出前、响应返回后对对话进行处理。目前仅提供随应用内置的插件，不会下载或运行任何第三方代码。</div>
+    <div id="plugin-list"></div>
+  </div>
+</section>
+
+<!-- 插件 · 本对话面板 -->
+<section id="page-plugin" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title" id="pp-title">插件</div>
+    <span class="icon-btn ghost"></span>
+  </header>
+  <div class="page-body" id="pp-body"></div>
 </section>
 
 <!-- 助手库 -->
@@ -331,6 +363,9 @@
 <script src="search.js"></script>
 <script src="files.js"></script>
 <script src="personas.js"></script>
+<script src="plugins.js"></script>
+<script src="rpcache.js"></script>
+<script src="rp-plugin.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
