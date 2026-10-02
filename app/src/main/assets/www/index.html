@@ -154,7 +154,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.3.1 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.3.2 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -419,6 +419,18 @@
 </div>
 
 <!-- 通用弹窗 -->
+<!-- 全屏文本编辑器（编辑消息 / 长提示词），高度跟随 visualViewport，按钮固定在键盘上方 -->
+<div id="editor" class="editor" role="dialog" aria-modal="true" aria-labelledby="ed-title">
+  <div class="ed-top">
+    <button class="icon-btn" id="ed-close" aria-label="取消"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="ed-title" id="ed-title">编辑</div>
+    <span class="ed-count" id="ed-count">0 字</span>
+  </div>
+  <div class="ed-hint" id="ed-hint"></div>
+  <textarea id="ed-text" spellcheck="false"></textarea>
+  <div class="ed-bar" id="ed-bar"></div>
+</div>
+
 <div id="dialog-mask" class="mask center">
   <div class="dialog">
     <div class="dialog-title" id="dialog-title"></div>

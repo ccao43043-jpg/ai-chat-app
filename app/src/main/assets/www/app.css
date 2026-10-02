@@ -605,3 +605,38 @@ input:disabled { opacity: .55; }
 .composer-tools .tool-chip.tpl-chip { flex-shrink: 1; min-width: 0; }
 .tpl-chip span { max-width: 4.6em; }
 @media (max-width: 370px) { .composer-tools .tool-chip:not(.tpl-chip) span { display: none; } .composer-tools .tool-chip { padding: 0 9px; } }
+
+/* v0.3.2：全屏文本编辑器 */
+.editor { position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vvh, 100%); z-index: 65; background: var(--bg); display: flex; flex-direction: column;
+  transform: translateY(104%); visibility: hidden; transition: transform .28s var(--ease), visibility 0s linear .28s; padding-top: env(safe-area-inset-top); }
+.editor.show { transform: none; visibility: visible; transition: transform .28s var(--ease); }
+.ed-top { display: flex; align-items: center; gap: 6px; padding: 6px 12px 4px 6px; flex-shrink: 0; }
+.ed-title { flex: 1; font-size: 17px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-count { font-size: 12.5px; color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ed-count.dirty::before { content: '已修改 · '; color: var(--accent); }
+.ed-hint { font-size: 12.5px; line-height: 1.5; color: var(--fg-3); padding: 0 16px 6px; flex-shrink: 0; }
+.ed-hint:empty { display: none; }
+.ed-hint.warn { color: #b45309; }
+@media (prefers-color-scheme: dark) { .ed-hint.warn { color: #fbbf24; } }
+#ed-text { flex: 1 1 auto; min-height: 0; width: auto; margin: 0 12px; padding: 14px 14px 18px; resize: none; border-radius: 16px; border: 1px solid var(--line-2);
+  background: var(--surface); font-size: 16.5px; line-height: 1.75; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#ed-text:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ed-bar { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); }
+.ed-bar .pill-btn { flex: 1; min-width: 0; padding: 0 10px; overflow: hidden; text-overflow: ellipsis; }
+.ed-bar .pill-btn.primary { flex: 1.6; }
+.ed-bar .pill-btn.ghost { background: transparent; border: 1px solid var(--line-2); color: var(--fg-2); flex: .8; }
+body.kb-open .ed-bar { padding-bottom: 8px; }
+#dialog-mask { z-index: 75; }
+/* 长文本输入框旁的「全屏编辑」按钮 */
+.ta-wrap { position: relative; display: block; }
+.ta-wrap > textarea { padding-right: 40px; }
+.ta-expand { position: absolute; right: 6px; bottom: 6px; width: 32px; height: 32px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-3); background: var(--surface-2); border: 1px solid var(--line); opacity: .92; }
+.ta-expand svg { width: 16px; height: 16px; }
+.ta-expand:active { background: var(--surface-3); color: var(--accent); }
+.composer-card { position: relative; }
+.input-expand { display: none; top: 6px; bottom: auto; right: 8px; }
+.composer-card.long .input-expand { display: inline-flex; }
+.composer-card.long #input { padding-right: 44px; }
+body.kb-open .ed-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.kb-open .ed-top { padding-top: 2px; padding-bottom: 2px; }

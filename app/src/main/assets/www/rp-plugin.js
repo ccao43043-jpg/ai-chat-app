@@ -287,6 +287,7 @@
         wrap.querySelector('#rb-meta').textContent = c.length + ' 字 · 约 ' + R.estimateTokens(c) + ' tokens · SHA-256 ' + R.sha256(c).slice(0, 12) + '…' + (c === b.content ? ' · 未修改' : ' · 保存后为 v' + (b.version + 1));
       };
       ta.addEventListener('input', meta); meta();
+      if (host.expandTextarea) host.expandTextarea(ta, def.layer + ' · ' + def.title, '全屏编辑完成后回到这里，点「保存」才会生效。' + warn);
       const back = () => { this.panel.view = null; this._render(); };
       wrap.querySelector('#rb-back').onclick = back; wrap.querySelector('#rb-cancel').onclick = back;
       wrap.querySelector('#rb-save').onclick = () => {
@@ -387,6 +388,7 @@
       const ta = box.querySelector('#sv-text'); ta.value = act.content;
       const meta = () => { const c = R.canonicalize(ta.value); box.querySelector('#sv-meta').textContent = c.length + ' 字 · 约 ' + R.estimateTokens(c) + ' tokens' + (c === act.content ? ' · 未修改' : ' · 已修改'); };
       ta.addEventListener('input', meta); meta();
+      if (host.expandTextarea) host.expandTextarea(ta, 'L3 · Summary ' + R.slabel(act.no), '全屏编辑完成后回到这里，点「保存修改」生成新快照。');
       const back = () => { this.panel.view = null; this._render(); };
       box.querySelector('#sv-back').onclick = back; box.querySelector('#sv-cancel').onclick = back;
       box.querySelector('#sv-save').onclick = () => {

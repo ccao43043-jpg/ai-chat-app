@@ -750,6 +750,125 @@ async function scenario(browser, theme) {
   lg = (await rpLogs()).slice(-1)[0];
   assert.strictEqual(lg.diag.static, 'SAME', '下一轮恢复');
 
+  // 15) 全屏编辑器：编辑消息（小屏 + 模拟键盘）、AI 回复编辑、RP 交互、其他长文本框
+  const edInfo = () => page.evaluate(() => { const e = document.querySelector('#editor'), t = document.querySelector('#ed-text'), b = document.querySelector('#ed-bar');
+    const er = e.getBoundingClientRect(), tr = t.getBoundingClientRect(), br = b.getBoundingClientRect();
+    return { show: e.classList.contains('show'), vh: window.innerHeight, edTop: er.top, edH: er.height, taH: tr.height, barTop: br.top, barBottom: br.bottom, value: t.value, sel: [t.selectionStart, t.selectionEnd], focused: document.activeElement === t,
+      btns: [...b.querySelectorAll('button')].map(x => x.textContent), hint: document.querySelector('#ed-hint').textContent, warn: document.querySelector('#ed-hint').classList.contains('warn'),
+      count: document.querySelector('#ed-count').textContent, dirty: document.querySelector('#ed-count').classList.contains('dirty'), scrollable: t.scrollHeight > t.clientHeight, font: parseFloat(getComputedStyle(t).fontSize), kb: document.body.classList.contains('kb-open') }; });
+  const edSet = v => page.evaluate(v => { const t = document.querySelector('#ed-text'); t.value = v; t.dispatchEvent(new Event('input')); }, v);
+  const msgEdit = (role, fromEnd) => page.evaluate((role, k) => { const l = [...document.querySelectorAll('.msg.' + role)]; l[l.length - 1 - k].querySelector('.act[aria-label="编辑"]').click(); }, role, fromEnd || 0);
+  await page.setViewport({ width: 360, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(400);
+  assert.ok(await rpConv(), '在 RP 对话中测试');
+  const msgsBefore = (await rpConv()).messages;
+  const lastUser = msgsBefore.filter(m => m.role === 'user').pop();
+  await msgEdit('user'); await sleep(450);
+  let ei = await edInfo();
+  assert.ok(ei.show && ei.focused, '编辑器打开并聚焦');
+  assert.strictEqual(ei.value, lastUser.content);
+  assert.deepStrictEqual(ei.sel, [lastUser.content.length, lastUser.content.length], '光标在末尾');
+  assert.deepStrictEqual(ei.btns, ['取消', '保存', '保存并重新发送']);
+  assert.ok(ei.hint.includes('删除这条之后的 1 条消息') && ei.hint.includes('RP 缓存优化') && ei.warn, ei.hint);
+  assert.ok(ei.taH >= 0.6 * ei.vh, '文本框至少 60% 视口高度 ' + ei.taH + '/' + ei.vh);
+  assert.ok(ei.font >= 16, 'font ' + ei.font);
+  assert.strictEqual(Math.round(ei.edH), 640); assert.ok(ei.barBottom <= 640);
+  const longText = Array.from({ length: 40 }, (_, i) => '第 ' + (i + 1) + ' 段：我推开旧书店的门，烛光摇曳，张燕跟在我身后，手按在剑柄上。我们沿着书架一排排地找，终于在最里面的角落发现了那本账本。').join('\n');
+  await edSet(longText);
+  ei = await edInfo();
+  assert.strictEqual(ei.count, Array.from(longText).length + ' 字'); assert.ok(ei.dirty && ei.scrollable);
+  await page.evaluate(() => { const t = document.querySelector('#ed-text'); t.setSelectionRange(t.value.length, t.value.length); t.scrollTop = t.scrollHeight; });
+  await shot('edit-message');
+  // 模拟键盘弹出（adjustResize：WebView 高度变小）
+  await page.setViewport({ width: 360, height: 330, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(500);
+  ei = await edInfo();
+  assert.ok(ei.show && ei.kb, 'kb-open');
+  assert.strictEqual(Math.round(ei.edH), 330, '编辑器高度跟随可视区域');
+  assert.ok(ei.barBottom <= 330 && ei.barTop > 200, '按钮固定在键盘上方 ' + JSON.stringify([ei.barTop, ei.barBottom]));
+  assert.ok(ei.taH >= 150, '键盘弹出后仍有足够编辑空间 ' + ei.taH);
+  assert.ok(ei.value === longText, '内容不丢失');
+  await shot('edit-message-kb');
+  await page.setViewport({ width: 360, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(400);
+  assert.ok(!(await edInfo()).kb);
+  // 取消（有修改 → 确认放弃）
+  await page.click('#ed-cancel'); await sleep(350);
+  assert.strictEqual(await page.$eval('#dialog-title', e => e.textContent), '放弃修改？');
+  await page.click('#dialog-cancel'); await sleep(300);
+  assert.ok((await edInfo()).show, '选择继续编辑');
+  await page.evaluate(() => window.onAndroidBack()); await sleep(350);
+  await page.click('#dialog-ok'); await sleep(450);
+  assert.ok(!(await edInfo()).show);
+  assert.deepStrictEqual((await rpConv()).messages.map(m => m.content), msgsBefore.map(m => m.content), '取消后不变');
+  // 保存（不重发）：只改这条，RP 冻结原文作废
+  await msgEdit('user'); await sleep(400);
+  await edSet('我注意到张燕的左手在发抖，于是轻声问她：伤还疼吗？'); await page.click('#ed-save'); await sleep(450);
+  let rc = await rpConv();
+  assert.strictEqual(rc.messages.length, msgsBefore.length);
+  const editedU = rc.messages.filter(m => m.role === 'user').pop();
+  assert.strictEqual(editedU.content, '我注意到张燕的左手在发抖，于是轻声问她：伤还疼吗？'); assert.ok(editedU.edited && editedU.rpSent == null);
+  // AI 回复编辑
+  await msgEdit('assistant', 1); await sleep(400);
+  ei = await edInfo();
+  assert.deepStrictEqual(ei.btns, ['取消', '保存']); assert.ok(ei.hint.includes('AI 回复') || ei.hint.includes('回复'), ei.hint);
+  assert.ok(ei.warn, 'RP 对话中提示历史前缀变化');
+  await edSet('（已编辑的回复）张燕点点头，把斗篷拉紧。'); await page.click('#ed-save'); await sleep(450);
+  rc = await rpConv();
+  const ai = rc.messages.filter(m => m.role === 'assistant');
+  assert.strictEqual(ai[ai.length - 2].content, '（已编辑的回复）张燕点点头，把斗篷拉紧。');
+  assert.ok((await page.$$eval('.msg.assistant .md', e => e.map(x => x.textContent))).some(t => t.includes('（已编辑的回复）')), '界面已更新');
+  const q15 = await sendRP('我们走吧。');
+  const qm = q15.body.messages;
+  assert.ok(qm.some(m => m.role === 'assistant' && m.content === '（已编辑的回复）张燕点点头，把斗篷拉紧。'), '编辑后的回复进入上下文');
+  assert.ok(qm.some(m => m.role === 'user' && m.content === '我注意到张燕的左手在发抖，于是轻声问她：伤还疼吗？'), '编辑后的用户消息进入上下文');
+  let lg15 = (await rpLogs()).slice(-1)[0];
+  assert.strictEqual(lg15.diag.history, 'CHANGED'); assert.strictEqual(lg15.diag.static, 'SAME');
+  assert.ok(lg15.reasons.some(x => x.includes('历史被修改')), JSON.stringify(lg15.reasons));
+  await sendRP('继续前进。');
+  { const l = (await rpLogs()).slice(-1)[0]; assert.ok(l.diag.history === 'APPEND' || l.summary_happened, '下一轮恢复（或触发了摘要）'); assert.ok(!l.reasons.some(x => x.includes('历史被修改')), JSON.stringify(l.reasons)); }
+  // 保存并重新发送
+  const nBefore = (await rpConv()).messages.length;
+  await msgEdit('user', 1); await sleep(400);
+  assert.ok((await edInfo()).hint.includes('删除这条之后的 3 条消息'));
+  await edSet('我们换条路，往东走。'); await page.click('#ed-resend'); await sleep(200); await waitIdle(); await sleep(300);
+  rc = await rpConv();
+  assert.strictEqual(rc.messages.length, nBefore - 2);
+  assert.strictEqual(rc.messages[rc.messages.length - 2].content, '我们换条路，往东走。');
+  assert.ok((await lastPost()).body.messages.pop().content.endsWith('[USER_INPUT]\n我们换条路，往东走。'));
+  // RP 分层设定：全屏编辑后仍需点「保存」才生效（显式更新路径不变）
+  const stBefore = JSON.stringify((await rpConv()).plugins.rpcache.state.blocks);
+  await page.evaluate(() => [...document.querySelectorAll('#conv-bar .hbadge')].find(e => !e.classList.contains('tpl')).click()); await sleep(450); await tab('blocks'); await sleep(200);
+  await openBlock('当前动态状态'); await sleep(300);
+  await page.evaluate(() => document.querySelector('#pp-body .ta-expand').click()); await sleep(400);
+  ei = await edInfo();
+  assert.ok(ei.show && ei.hint.includes('点「保存」才会生效'), ei.hint);
+  assert.deepStrictEqual(ei.btns, ['取消', '完成']);
+  await edSet(ei.value + '\nWeather: 小雨'); await page.click('#ed-ok'); await sleep(350);
+  assert.ok((await page.$eval('#rb-text', e => e.value)).endsWith('Weather: 小雨'));
+  assert.ok((await page.$eval('#rb-meta', e => e.textContent)).includes('保存后为 v'));
+  await page.click('#rb-cancel'); await sleep(300);
+  assert.strictEqual(JSON.stringify((await rpConv()).plugins.rpcache.state.blocks), stBefore, '未保存则不改变');
+  await closePanels();
+  // 模板编辑页的全屏编辑
+  await page.click('#btn-menu'); await sleep(350); await page.click('#btn-templates'); await sleep(500);
+  await page.click('#tm-new'); await sleep(450);
+  await page.evaluate(() => document.querySelector('#page-template .ta-expand').click()); await sleep(400);
+  ei = await edInfo();
+  assert.strictEqual(await page.$eval('#ed-title', e => e.textContent), '模板 · 系统提示词');
+  await edSet('你是一名{{职业}}。\n' + '请分点作答。\n'.repeat(30)); await page.click('#ed-ok'); await sleep(350);
+  assert.ok((await page.$eval('#te-content', e => e.value)).startsWith('你是一名{{职业}}'));
+  assert.ok((await page.$eval('#te-vars', e => e.textContent)).includes('{{职业}}'), '写回后触发 input');
+  await page.evaluate(() => window.onAndroidBack()); await sleep(350);
+  await page.evaluate(() => window.onAndroidBack()); await sleep(400);
+  // 输入框内容较长时出现全屏编辑
+  assert.ok(!(await page.$eval('#btn-expand-input', e => e.offsetWidth)));
+  await setInput('第一行\n第二行\n第三行\n第四行\n第五行\n第六行');
+  assert.ok(await page.$eval('#btn-expand-input', e => e.offsetWidth) > 0);
+  await page.click('#btn-expand-input'); await sleep(400);
+  assert.deepStrictEqual((await edInfo()).btns, ['取消', '完成', '发送']);
+  await edSet('改好的输入'); await page.click('#ed-ok'); await sleep(300);
+  assert.strictEqual(await page.$eval('#input', e => e.value), '改好的输入');
+  await setInput('');
+  await page.setViewport({ width: 390, height: 820, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+
   assert.deepStrictEqual(errors, []);
   await page.close();
   return r;

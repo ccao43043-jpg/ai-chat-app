@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.1';
+  const APP_VERSION = '0.3.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -186,6 +186,97 @@
   }
   function closeActionSheet() { $('#action-sheet').classList.remove('show'); $('#action-mask').classList.remove('show'); }
   $('#action-mask').onclick = closeActionSheet;
+
+  // ---------------- 全屏文本编辑器 ----------------
+  // 高度跟随 visualViewport（Android adjustResize 下键盘弹出时 WebView 变矮，visualViewport 同步变化），底部按钮始终在键盘上方
+  const vv = window.visualViewport;
+  function syncViewport() {
+    const h = vv ? vv.height : window.innerHeight, top = vv ? vv.offsetTop : 0;
+    const root = document.documentElement.style;
+    root.setProperty('--vvh', Math.round(h) + 'px'); root.setProperty('--vv-top', Math.round(top) + 'px');
+    // 键盘：可视高度明显小于布局高度（未开 adjustResize 时），或比初始高度小 150px 以上（adjustResize）
+    const kb = (window.innerHeight - h > 120) || (fullH - h > 150);
+    document.body.classList.toggle('kb-open', kb);
+    const ta = $('#ed-text');
+    if (ta && edState && document.activeElement === ta) keepCaretVisible(ta);
+  }
+  let fullH = window.innerHeight;
+  window.addEventListener('orientationchange', () => setTimeout(() => { fullH = window.innerHeight; syncViewport(); }, 300));
+  if (vv) { vv.addEventListener('resize', syncViewport); vv.addEventListener('scroll', syncViewport); }
+  let lastW = window.innerWidth;
+  window.addEventListener('resize', () => {
+    // 宽度变化（旋转 / 分屏）时重新记录「无键盘」高度；宽度不变时只会因键盘变矮
+    if (window.innerWidth !== lastW) { lastW = window.innerWidth; fullH = window.innerHeight; } else if (window.innerHeight > fullH) fullH = window.innerHeight;
+    syncViewport();
+  });
+  /** 光标在末尾附近时，把它滚到可见区域（键盘弹出后 textarea 变矮） */
+  function keepCaretVisible(ta) {
+    const tail = ta.value.length - ta.selectionEnd;
+    if (tail < 40) ta.scrollTop = ta.scrollHeight;
+  }
+  const charCount = t => Array.from(t).length;
+  let edState = null;
+  /**
+   * 打开全屏编辑器。
+   * actions: [{ key, text, primary }]；返回 Promise<{ key, text } | null>（null = 取消）
+   */
+  function openEditor({ title, value, hint, warn, placeholder, actions }) {
+    const ta = $('#ed-text');
+    $('#ed-title').textContent = title || '编辑';
+    const h = $('#ed-hint'); h.textContent = hint || ''; h.classList.toggle('warn', !!warn);
+    ta.placeholder = placeholder || '';
+    ta.value = value || '';
+    const bar = $('#ed-bar'); bar.innerHTML = '';
+    const cancel = document.createElement('button'); cancel.className = 'pill-btn ghost'; cancel.id = 'ed-cancel'; cancel.textContent = '取消';
+    cancel.onclick = () => closeEditor(null); bar.appendChild(cancel);
+    (actions || [{ key: 'ok', text: '完成', primary: true }]).forEach(a => {
+      const b = document.createElement('button'); b.className = 'pill-btn ' + (a.primary ? 'primary' : ''); b.dataset.key = a.key; b.id = 'ed-' + a.key; b.textContent = a.text;
+      b.onclick = () => closeEditor({ key: a.key, text: ta.value });
+      bar.appendChild(b);
+    });
+    syncViewport();
+    $('#editor').classList.add('show');
+    edCount();
+    // 在用户点击的同一调用栈里聚焦，Android WebView 才会弹出键盘；光标放到末尾
+    ta.focus({ preventScroll: true });
+    const n = ta.value.length; ta.setSelectionRange(n, n); ta.scrollTop = ta.scrollHeight;
+    return new Promise(res => { edState = { res, orig: ta.value }; });
+  }
+  function edCount() {
+    const t = $('#ed-text').value, c = $('#ed-count');
+    c.textContent = charCount(t) + ' 字';
+    c.classList.toggle('dirty', !!edState && t !== edState.orig);
+  }
+  $('#ed-text').addEventListener('input', edCount);
+  async function closeEditor(result, force) {
+    if (!edState) return;
+    if (!result && !force && $('#ed-text').value !== edState.orig) {
+      if (!(await dialog({ title: '放弃修改？', body: '编辑的内容不会保存。', okText: '放弃', danger: true }))) return;
+    }
+    const r = edState.res; edState = null;
+    $('#ed-text').blur();
+    $('#editor').classList.remove('show');
+    r(result);
+  }
+  $('#ed-close').onclick = () => closeEditor(null);
+  syncViewport();
+  /** 给长文本框加一个「全屏编辑」按钮（写回后触发 input / change 事件） */
+  const EXPAND_ICON = '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>';
+  function expandTextarea(ta, title, hintFn) {
+    if (!ta || ta.dataset.expand) return;
+    ta.dataset.expand = '1';
+    const wrap = document.createElement('div'); wrap.className = 'ta-wrap';
+    ta.parentNode.insertBefore(wrap, ta); wrap.appendChild(ta);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ta-expand'; b.setAttribute('aria-label', '全屏编辑'); b.title = '全屏编辑'; b.innerHTML = EXPAND_ICON;
+    b.onclick = async e => {
+      e.preventDefault(); e.stopPropagation();
+      const r = await openEditor({ title: typeof title === 'function' ? title() : title, value: ta.value, hint: hintFn ? hintFn() : '', placeholder: ta.placeholder });
+      if (!r) return;
+      ta.value = r.text;
+      ta.dispatchEvent(new Event('input', { bubbles: true })); ta.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    wrap.appendChild(b);
+  }
 
   // ---------------- Markdown ----------------
   marked.setOptions({ gfm: true, breaks: true });
@@ -463,7 +554,8 @@
       const act = document.createElement('div'); act.className = 'actions';
       if (m.content) act.appendChild(mkAct(ICON.copy, '复制', () => copyText(m.content)));
       if (m.role === 'assistant' && isLast && !running) act.appendChild(mkAct(ICON.redo, '重新生成', regenerate));
-      if (m.role === 'user' && !running && !m.imageGen) act.appendChild(mkAct(ICON.edit, '编辑', () => editUserMsg(m)));
+      if (m.role === 'user' && !running && !m.imageGen) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
+      if (m.role === 'assistant' && !running && !m.imageGen && m.content) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (!running) act.appendChild(mkAct(ICON.trash, '删除', () => deleteMsg(m)));
       el.appendChild(act);
     }
@@ -534,16 +626,37 @@
   $('#messages').addEventListener('scroll', () => $('.main-top').classList.toggle('scrolled', $('#messages').scrollTop > 4), { passive: true });
 
   function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); saveConv(); renderMessages(); }
-  async function editUserMsg(m) {
-    const t = await dialog({ title: '编辑并重新发送', input: true, value: m.content });
-    if (t == null) return;
+  /** 编辑消息：全屏编辑器。用户消息可「保存」或「保存并重新发送」；AI 回复可「保存」 */
+  async function editMsg(m) {
+    const user = m.role === 'user';
     const idx = conv.messages.indexOf(m);
-    conv.messages = conv.messages.slice(0, idx);
-    input.value = t; attachments = (m.images || []).slice();
-    docs = (m.files || []).map(f => Object.assign({}, f, { id: uid(), status: 'ok' }));
-    renderAttachments();
-    saveConv(); renderMessages(); send();
+    const after = conv.messages.length - idx - 1;
+    const rp = rpOn(conv);
+    let hint = user ? (after ? '「保存并重新发送」会删除这条之后的 ' + after + ' 条消息，并用新内容重新生成；「保存」只修改这条消息。' : '「保存并重新发送」会用新内容重新生成回复。')
+      : '修改这条 AI 回复的内容，后续对话会以修改后的内容作为上下文。';
+    if ((m.images && m.images.length) || (m.files && m.files.length)) hint += '图片和文件附件会保留。';
+    if (rp && (after || !user)) hint += '\n本对话开启了 RP 缓存优化：修改历史消息会改变历史前缀，下一轮缓存命中率会下降一次。';
+    const r = await openEditor({ title: user ? '编辑消息' : '编辑 AI 回复', value: m.content || '', hint, warn: rp && (after || !user),
+      placeholder: user ? '输入消息…' : '回复内容…',
+      actions: user ? [{ key: 'save', text: '保存' }, { key: 'resend', text: '保存并重新发送', primary: true }] : [{ key: 'save', text: '保存', primary: true }] });
+    if (!r) return;
+    const t = r.text;
+    if (r.key === 'resend') {
+      if (!t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
+      conv.messages = conv.messages.slice(0, conv.messages.indexOf(m));
+      input.value = t; attachments = (m.images || []).slice();
+      docs = (m.files || []).map(f => Object.assign({}, f, { id: uid(), status: 'ok' }));
+      renderAttachments();
+      saveConv(); renderMessages(); send();
+      return;
+    }
+    if (t === (m.content || '')) return;
+    if (user && !t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
+    m.content = t; m.edited = true;
+    delete m.rpSent; // RP：冻结的发送原文作废，下一轮按修改后的内容进入历史
+    saveConv(); renderMessages(); toast('已保存');
   }
+  const editUserMsg = editMsg;
 
   // ---------------- 发送 / 生成 ----------------
   function setRunning(r) {
@@ -799,7 +912,7 @@
 
   // ---------------- 输入区 ----------------
   const input = $('#input');
-  function autosize() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 168) + 'px'; updateSendState(); }
+  function autosize() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 168) + 'px'; updateSendState(); $('#composer-card').classList.toggle('long', input.scrollHeight > 130 || input.value.split('\n').length > 4); }
   input.addEventListener('input', autosize);
   input.addEventListener('focus', () => $('#composer-card').classList.add('focus'));
   input.addEventListener('blur', () => $('#composer-card').classList.remove('focus'));
@@ -1745,6 +1858,7 @@
     toast, dialog, esc,
     refresh: () => { if (conv) { renderHeader(); renderMessages(); } },
     openPanel: (id, tab) => openPluginPanel(id, tab),
+    expandTextarea: (ta, title, hint) => expandTextarea(ta, title, hint ? () => hint : null),
     /** 用当前对话的模型做一次非流式调用，返回文本 */
     async callModel(prompt, o) {
       o = o || {};
@@ -1809,10 +1923,30 @@
   $('#set-plugins').onclick = () => openPlugins();
 
   // ---------------- 返回键 ----------------
+  // 长文本框：全屏编辑按钮
+  expandTextarea($('#sheet-system'), '本对话系统提示词', () => (rpOn(conv) ? '本对话开启了 RP 缓存优化：修改系统提示词会改变 L1 固定前缀，下一轮缓存命中率会下降一次。' : '只影响当前对话。完成后点「确定」生效。'));
+  expandTextarea($('#set-system'), '默认系统提示词', () => '新对话默认使用（未设置默认模板时）。');
+  expandTextarea($('#te-content'), '模板 · 系统提示词', () => '可以用 {{变量名}} 插入变量，应用模板时会提示填写。完成后点「保存」。');
+  expandTextarea($('#ps-prompt'), '助手 · 系统提示词', () => '描述助手的身份、任务、语气和输出格式。完成后点「保存」。');
+  expandTextarea($('#pe2-content'), '提示词内容', () => '插入到输入框的文字。');
+  // 输入框内容较长时，右上角出现「全屏编辑」
+  (function () {
+    const card = $('#composer-card');
+    const b = document.createElement('button'); b.type = 'button'; b.id = 'btn-expand-input'; b.className = 'ta-expand input-expand'; b.setAttribute('aria-label', '全屏编辑'); b.innerHTML = EXPAND_ICON;
+    card.appendChild(b);
+    b.onclick = async () => {
+      const r = await openEditor({ title: '编辑输入', value: input.value, placeholder: '给 AI 发消息…', actions: [{ key: 'ok', text: '完成' }, { key: 'send', text: '发送', primary: true }] });
+      if (!r) return;
+      input.value = r.text; input.dispatchEvent(new Event('input'));
+      if (r.key === 'send') send();
+    };
+  })();
+
   window.onAndroidBack = function () {
     const shown = s => $(s).classList.contains('show');
     if (shown('#viewer')) { closeViewer(); return true; }
     if (shown('#dialog-mask')) { closeDialog(null); return true; }
+    if (shown('#editor')) { closeEditor(null); return true; }
     if (shown('#pe2-mask')) { closePromptEdit(); return true; }
     if (shown('#action-sheet')) { closeActionSheet(); return true; }
     if (shown('#fetch-sheet')) { closeFetch(); return true; }
