@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 可选：在项目根目录放置 keystore.properties（不提交到 Git）以使用自签名 release 证书；
+// 不存在时 release 构建回退为 debug 证书签名。
+def ksPropsFile = rootProject.file('keystore.properties')
+def ksProps = new Properties()
+if (ksPropsFile.exists()) { ksPropsFile.withInputStream { ksProps.load(it) } }
+
+android {
+    namespace 'com.aichat.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.aichat.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        release {
+            if (ksPropsFile.exists()) {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ksPropsFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

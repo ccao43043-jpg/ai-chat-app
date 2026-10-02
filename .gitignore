@@ -1,0 +1,22 @@
+# 构建输出
+build/
+app/build/
+.gradle/
+*.apk
+*.aab
+*.idsig
+# 本机配置
+local.properties
+.idea/
+*.iml
+.DS_Store
+# 签名与密钥（切勿提交）
+keystore/
+*.jks
+*.keystore
+keystore.properties
+# Node
+node_modules/
+npm-debug.log*
+# 其它
+icon-512.png

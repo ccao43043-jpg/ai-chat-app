@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 对话气泡 -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M36,34h36a8,8 0,0 1,8 8v20a8,8 0,0 1,-8 8H52l-11,9v-9h-5a8,8 0,0 1,-8 -8V42a8,8 0,0 1,8 -8z" />
+    <!-- 三个点 -->
+    <path android:fillColor="#6366F1" android:pathData="M44,52m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#3B82F6" android:pathData="M54,52m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#06B6D4" android:pathData="M64,52m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>
