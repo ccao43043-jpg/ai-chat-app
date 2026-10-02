@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.2';
+  const APP_VERSION = '0.3.3';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -1884,7 +1884,7 @@
       const on = Plugins.registry.isGloballyEnabled(pl.id, settings);
       const card = document.createElement('div'); card.className = 'plugin-card' + (on ? ' on' : '');
       card.innerHTML = '<div class="plc-head"><span class="plc-icon">' + esc(pl.icon) + '</span><div class="plc-main"><div class="plc-name">' + esc(pl.name) +
-        '<span class="plc-ver">v' + esc(pl.version) + ' · 内置</span></div><div class="plc-desc">' + esc(pl.desc) + '</div></div>' +
+        '<span class="plc-ver">版本 ' + esc(pl.version) + ' · 内置</span></div><div class="plc-desc">' + esc(pl.desc) + '</div></div>' +
         '<input type="checkbox" class="switch" aria-label="启用"' + (on ? ' checked' : '') + '></div>' +
         '<div class="plc-foot">' + (pl.perConversation ? '<span class="plc-note">需在每个对话中单独开启</span>' : '<span class="plc-note">对所有对话生效，可在对话中关闭</span>') +
         (pl.renderPanel ? '<button class="chip-btn accent plc-open">当前对话 ›</button>' : '') + (pl.renderSettings ? '<button class="chip-btn plc-set">设置</button>' : '') + '</div>' +

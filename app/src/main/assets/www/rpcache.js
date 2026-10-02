@@ -12,7 +12,7 @@
     { id: 'character', tag: 'CHARACTER', title: '角色卡', hint: '角色身份、性格、说话方式、人物基础资料与人物关系基础。' },
     { id: 'rules', tag: 'RP_RULES', title: 'RP 规则', hint: '例如：NPC 不能读取玩家内心；NPC 只知道自己应该知道的信息；不替玩家决定行动。' },
     { id: 'format', tag: 'OUTPUT_FORMAT', title: '输出格式', hint: '回复格式、长度、人称、是否带动作描写等。' },
-    { id: 'fewshot', tag: 'FEW_SHOT', title: 'Few-shot 示例', hint: '示例对话，展示期望的文风与格式。' },
+    { id: 'fewshot', tag: 'FEW_SHOT', title: '示例对白', hint: '几段示例对话（Few-shot），展示期望的文风与格式。' },
     { id: 'prohibit', tag: 'PROHIBITIONS', title: '禁止事项', hint: '绝对不能出现的内容或行为。' },
     { id: 'style', tag: 'STYLE', title: '写作风格', hint: '固定写作风格、语气、节奏。' },
   ];
@@ -20,11 +20,18 @@
     { id: 'memory', tag: 'LONG_TERM_MEMORY', title: '长期记忆', layer: 'L2', type: 'memory', cache_priority: 'medium',
       hint: '已确认的重要事实、人物关系、重大事件、长期目标、关键道具、已揭开的秘密、未解决的剧情线。只在发生重要事件时手动更新。' },
     { id: 'state', tag: 'CURRENT_STATE', title: '当前动态状态', layer: 'L5', type: 'dynamic', cache_priority: 'low',
-      hint: 'HP / MP / 金钱 / 时间 / 地点 / 好感度 / 天气 / 任务 / 装备 / Buff。放在最新输入之前，随时修改都不会破坏历史缓存。' },
+      hint: 'HP / MP / 金钱 / 时间 / 地点 / 好感度 / 天气 / 任务 / 装备 / 增益效果。放在本轮输入之前，随时修改都不会破坏历史缓存。' },
   ]);
   const BLOCK_TITLES = Object.fromEntries(BLOCK_DEFS.map(d => [d.id, d.title]));
   const LAYERS = ['static', 'memory', 'summary', 'history', 'state', 'input'];
-  const LAYER_TITLES = { static: 'Static', memory: 'Memory', summary: 'Summary', history: 'History', state: 'State', input: 'Input' };
+  // 界面显示用（v0.3.3 起为中文）；日志 / 诊断里保存的仍是英文键名与 SAME / APPEND / CHANGED
+  const LAYER_TITLES = { static: '固定设定', memory: '长期记忆', summary: '章节摘要', history: '对话历史', state: '当前状态', input: '本轮输入' };
+  const LAYER_EN = { static: 'Static', memory: 'Memory', summary: 'Summary', history: 'History', state: 'State', input: 'Input' };
+  const DIAG_LABELS = { SAME: '未变', APPEND: '追加', CHANGED: '已改动', NEW: '首次' };
+  const diagLabel = v => DIAG_LABELS[v] || v || '—';
+  // 章节摘要各段标题（发送给模型 / 保存的文本保持英文，界面显示中文释义）
+  const SUMMARY_SECTION_CN = { FACTS: '已发生的事实', CHARACTER_KNOWLEDGE: '角色知道的', PLAYER_KNOWLEDGE: '玩家知道的', SECRET: '秘密（角色不知道）',
+    UNRESOLVED: '未解决的线索', RELATIONSHIPS: '人物关系', OBJECTS: '关键物品', LOCATION: '地点' };
   const LAYER_CN = { static: '永久锚点', memory: '长期记忆', summary: '章节摘要', history: '最近对话', state: '动态状态', input: '当前输入' };
   // 默认工程参数（设计文档第 9、17、26 节）——不是 DeepSeek 官方阈值，可按会话修改
   const DEFAULT_SETTINGS = {
@@ -42,6 +49,9 @@
   const pad3 = n => String(n).padStart(3, '0');
   const vlabel = (prefix, n) => prefix + '_v' + pad3(n | 0);
   const slabel = n => '#' + pad3(n | 0);
+  const VER_KIND_CN = { static: '固定设定', memory: '长期记忆', state: '当前状态' };
+  /** 中文版本标签：固定设定 第 2 版 */
+  const verLabel = (kind, n) => (VER_KIND_CN[kind] || kind) + ' 第 ' + (n | 0) + ' 版';
 
   // ---------------- 规范化（只做安全的格式处理，不改语义） ----------------
   function canonicalize(text) {
@@ -425,9 +435,9 @@
     res.avg = avg;
     res.anomaly = avg >= 0.5 && cur.hit_rate < avg - 0.3 && cur.hit_rate < avg * 0.6;
     if (res.anomaly) {
-      const map = { static: 'Static Hash 变化：角色卡 / 世界观等永久锚点被修改', memory: 'Memory Hash 变化：长期记忆被更新',
-        summary: 'Summary Hash 变化：章节摘要被重新生成 / 修改，导致稳定前缀发生变化', history: 'History Hash 变化：较早的历史被编辑、删除、截断或摘要',
-        state: 'State Hash 变化：动态状态位于末尾，正常情况下只影响最后一小段' };
+      const map = { static: '固定设定指纹变化：角色卡 / 世界观等永久设定被修改', memory: '长期记忆指纹变化：长期记忆被更新',
+        summary: '章节摘要指纹变化：章节摘要被重新生成 / 修改，导致稳定前缀发生变化', history: '对话历史指纹变化：较早的历史被编辑、删除、截断或摘要',
+        state: '当前状态指纹变化：当前状态位于末尾，正常情况下只影响最后一小段' };
       res.causes = res.changed.filter(k => k !== 'state').map(k => map[k]);
       (cur.reasons || []).forEach(r => { if (r !== '正常动态更新' && !res.causes.some(c => c.indexOf(r) >= 0)) res.causes.push(r); });
       if (!res.causes.length) res.causes.push('本地上下文没有变化：可能是服务端缓存过期或尚未建立（DeepSeek 缓存为尽力而为，通常数小时到数天清除）');
@@ -435,7 +445,7 @@
     return res;
   }
 
-  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_CN, DEFAULT_SETTINGS, DEFAULT_PRICES, SUMMARY_SECTIONS,
+  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, SUMMARY_SECTIONS,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate,
     activeSummary, addSummary, editSummary, rollbackSummary, staticText, memoryText, summaryText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, oldestBatch, plan, fallbackTrim, assemble, fingerprints, diagnose, reasons,

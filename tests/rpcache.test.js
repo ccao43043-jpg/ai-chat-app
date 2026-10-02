@@ -242,11 +242,31 @@ test('异常检测：命中率骤降 + 基于哈希的原因', () => {
   assert.strictEqual(R.detectAnomaly(base).anomaly, false);
   const an = R.detectAnomaly(base.concat([mk(0.41, Object.assign({}, ok, { summary: 'CHANGED' }))]));
   assert.ok(an.anomaly); assert.ok(Math.abs(an.avg - 0.922) < 1e-9);
-  assert.ok(an.causes[0].includes('Summary Hash'));
+  assert.ok(an.causes[0].includes('章节摘要指纹变化'));
   assert.deepStrictEqual(an.changed, ['summary', 'state']);
   const an2 = R.detectAnomaly(base.concat([mk(0.2, ok, { reasons: ['正常动态更新'] })]));
   assert.ok(an2.anomaly); assert.ok(an2.causes.some(c => c.includes('服务端缓存')));
   assert.strictEqual(R.detectAnomaly(base.concat([mk(0.85, ok)])).anomaly, false, '小幅波动不报警');
   const cold = mk(0, { static: 'NEW', memory: 'NEW', summary: 'NEW', history: 'NEW', state: 'NEW', input: 'NEW' });
   assert.ok(R.detectAnomaly([cold, mk(0.6, ok), mk(0.65, ok), mk(0.05, ok)]).anomaly, '首次冷启动请求不拉低基线');
+});
+
+test('界面中文标签（v0.3.3）：只改显示，不改保存的键名与发送给模型的文本', () => {
+  assert.deepStrictEqual(R.LAYERS.map(k => R.LAYER_TITLES[k]), ['固定设定', '长期记忆', '章节摘要', '对话历史', '当前状态', '本轮输入']);
+  assert.deepStrictEqual(['SAME', 'APPEND', 'CHANGED', 'NEW'].map(R.diagLabel), ['未变', '追加', '已改动', '首次']);
+  assert.strictEqual(R.verLabel('static', 1), '固定设定 第 1 版');
+  assert.strictEqual(R.verLabel('state', 12), '当前状态 第 12 版');
+  assert.strictEqual(R.vlabel('static', 1), 'static_v001', '内部标签不变');
+  assert.ok(R.SUMMARY_SECTIONS.every(k => R.SUMMARY_SECTION_CN[k]), '每个摘要段落都有中文释义');
+  // 诊断结果与日志仍保存英文代码
+  let st = R.syncBase(R.normalizeState(null), 'S');
+  const p = R.plan(st, 'S', [{ id: 'u1', role: 'user', content: '你好' }]);
+  const e = R.makeLogEntry({ fp: R.fingerprints(p, 'S'), at: 1 });
+  const p2 = R.plan(st, 'S', [{ id: 'u1', role: 'user', content: '你好' }, { id: 'a1', role: 'assistant', content: '嗨' }, { id: 'u2', role: 'user', content: '继续' }]);
+  assert.deepStrictEqual(R.diagnose(e, R.fingerprints(p2, 'S'), p2.hist), { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'SAME', input: 'CHANGED', history: 'APPEND' });
+  // 发送给模型的分段标记与摘要格式保持英文
+  st = R.setBlock(st, 'state', 'HP: 80', 1).state;
+  assert.strictEqual(R.finalUserContent(st, '推门'), '[CURRENT_STATE]\nHP: 80\n\n[USER_INPUT]\n推门');
+  const sp = R.buildSummaryPrompt({ prevSummary: null, memory: '', batch: [{ role: 'user', content: 'x' }] });
+  R.SUMMARY_SECTIONS.forEach(k => assert.ok(JSON.stringify(sp).includes(k + ':'), k));
 });
