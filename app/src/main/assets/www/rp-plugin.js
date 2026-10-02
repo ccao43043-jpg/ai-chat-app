@@ -101,7 +101,7 @@
         const logs = loadLogs(host, ctx.conv);
         const prev = logs[logs.length - 1] || null;
         ctx.meta.rp = {
-          fp, diag: R.diagnose(prev, fp, p.hist), tokens: p.tokens, overBudget, trimmed: p.trimmed, trimmedNow, summaryNo, summaryReason, summaryError,
+          fp, diag: R.diagnose(prev, fp, p.hist), tokens: p.tokens, overBudget, staticCause: st.pendingStaticCause || null, trimmed: p.trimmed, trimmedNow, summaryNo, summaryReason, summaryError,
           prompt: st.settings.save_prompt ? { system: a.system, messages: a.messages.map(m => ({ role: m.role, content: m.content })) } : null,
         };
         if (summaryNo || trimmedNow) host.saveConv(ctx.conv);
@@ -114,8 +114,9 @@
         d.state.seq = (d.state.seq | 0) + 1;
         const entry = R.makeLogEntry({ request_id: 'req_' + String(d.state.seq).padStart(4, '0'), at: Date.now(), usage: result.usage, model: ctx.model,
           provider: ctx.provider.presetId || ctx.provider.id, fp: info.fp, diag: info.diag, tokens: info.tokens, summaryNo: info.summaryNo, summaryReason: info.summaryReason,
-          summaryError: info.summaryError, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
+          summaryError: info.summaryError, staticCause: info.diag.static === 'CHANGED' ? info.staticCause : null, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
           savePrompt: d.state.settings.save_prompt, prompt: info.prompt });
+        if (d.state.pendingStaticCause) d.state = Object.assign({}, d.state, { pendingStaticCause: null });
         const logs = R.appendLog(logs0, entry);
         host.store.set(logKey(ctx.conv), logs);
         const an = R.detectAnomaly(logs);

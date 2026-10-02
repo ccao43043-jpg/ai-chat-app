@@ -112,3 +112,28 @@ test('摘要失败时不会静默卡住：提示并回退，请求照常发送',
   assert.strictEqual(r.body.messages.length, 5, '摘要失败时照常发送完整历史');
   assert.strictEqual(JSON.parse(host.raw['rplog_c3.json']).pop().summary_error.includes('格式不完整'), true);
 });
+
+test('切换提示词模板：显式更新 L1，下一轮日志 static=CHANGED 且原因写明模板，之后恢复 SAME', async () => {
+  const settings = {}; const conv = { id: 'c-tpl', systemPrompt: '旧系统提示词', messages: [] };
+  reg.setForConversation(conv, 'rpcache', true);
+  const host = mkHost(conv, settings, '');
+  await send(conv, settings, host, '第一轮');
+  const d = reg.convData(conv, 'rpcache');
+  const v0 = d.state.staticVersion;
+  // 宿主（app.js setConvSystem）切换模板时调用的路径
+  conv.systemPrompt = '简洁回答模板内容';
+  const r = R.explicitBaseUpdate(d.state, conv.systemPrompt, { kind: 'template', name: '简洁回答' }, 5);
+  assert.ok(r.changed); d.state = r.state;
+  assert.strictEqual(d.state.staticVersion, v0 + 1);
+  const r2 = await send(conv, settings, host, '第二轮');
+  assert.strictEqual(r2.body.messages[0].content, '简洁回答模板内容');
+  let logs = JSON.parse(host.raw['rplog_c-tpl.json']);
+  assert.strictEqual(logs[1].diag.static, 'CHANGED');
+  assert.strictEqual(logs[1].reason, '切换了提示词模板「简洁回答」，L1 固定前缀改变');
+  assert.strictEqual(logs[1].static_cause.name, '简洁回答');
+  assert.strictEqual(d.state.pendingStaticCause, null, '成功后清掉原因');
+  assert.strictEqual(d.state.staticVersion, v0 + 1, '发送时不重复升级');
+  await send(conv, settings, host, '第三轮');
+  logs = JSON.parse(host.raw['rplog_c-tpl.json']);
+  assert.strictEqual(logs[2].diag.static, 'SAME');
+});

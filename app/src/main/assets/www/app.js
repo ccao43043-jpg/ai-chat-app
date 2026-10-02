@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.0';
+  const APP_VERSION = '0.3.1';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -107,6 +107,8 @@
   let prompts = (Store.get('prompts.json', null) || Personas.defaultPrompts()).map(Personas.normalizePrompt);
   const savePersonas = () => Store.set('personas.json', personas);
   const savePrompts = () => Store.set('prompts.json', prompts);
+  let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
+  const saveTemplates = () => Store.set('templates.json', templates);
   const saveSettings = () => Store.set('settings.json', settings);
   const saveIndex = () => Store.set('convs.json', convIndex);
   function saveConv(c, touch) {
@@ -250,6 +252,8 @@
     const p = getProvider(pid);
     const model = settings.lastProviderId === pid && settings.lastModel ? settings.lastModel : (p ? p.models[0] || '' : '');
     conv = { id: uid(), title: '新对话', providerId: pid, model, systemPrompt: settings.systemPrompt || '', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+    const dt = settings.defaultTemplateId && templates.find(t => t.id === settings.defaultTemplateId);
+    if (dt && !Templates.variables(dt.content).length) Object.assign(conv, Templates.applyToConv(conv, dt));
     renderAll();
   }
   function openConv(id) {
@@ -282,10 +286,12 @@
   function renderConvBar() {
     const bar = $('#conv-bar'); if (!bar) return;
     const badges = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
+    if (conv && conv.templateName) badges.unshift({ text: (conv.templateEmoji || '📋') + ' ' + conv.templateName, tone: 'info', title: '当前提示词模板（点击切换）', action: openTemplateSheet, cls: 'tpl' });
+    renderTplChip();
     bar.innerHTML = '';
     bar.classList.toggle('show', badges.length > 0);
     badges.forEach(b => {
-      const el = document.createElement('button'); el.className = 'hbadge tone-' + (b.tone || 'info'); el.textContent = b.text; if (b.title) el.title = b.title;
+      const el = document.createElement('button'); el.className = 'hbadge tone-' + (b.tone || 'info') + (b.cls ? ' ' + b.cls : ''); el.textContent = b.text; if (b.title) el.title = b.title;
       if (b.action) el.onclick = b.action;
       bar.appendChild(el);
     });
@@ -1016,6 +1022,10 @@
     const t3 = document.createElement('button'); t3.className = 'pm-item tool';
     t3.innerHTML = '<span class="pm-emoji">🎭</span><span class="pm-name">本对话插件 · RP 缓存优化' + (Plugins.registry.isActive('rpcache', settings, conv) ? '（已开启）' : '') + '</span>';
     t3.onclick = () => { closeModelMenu(); openPluginPanel('rpcache'); };
+    const t4 = document.createElement('button'); t4.className = 'pm-item tool';
+    t4.innerHTML = '<span class="pm-emoji">📋</span><span class="pm-name">提示词模板' + (conv.templateName ? ' · ' + esc(conv.templateName) : ' · 切换系统提示词') + '</span>';
+    t4.onclick = () => { closeModelMenu(); openTemplateSheet(); };
+    tools.appendChild(t4);
     if (list.length) { tools.appendChild(t1); tools.appendChild(t3); }
     tools.appendChild(t2);
     menu.appendChild(tools);
@@ -1058,7 +1068,8 @@
   $('#sheet-ok').onclick = () => {
     const m = $('#sheet-model').value.trim();
     if (!m) { toast('请填写模型名称'); return; }
-    conv.systemPrompt = $('#sheet-system').value;
+    const ns = $('#sheet-system').value;
+    if (ns !== (conv.systemPrompt || '')) setConvSystem(ns, null, { kind: 'manual' });
     selectModel(sheetPid, m);
     closeSheet();
   };
@@ -1066,6 +1077,7 @@
   // ---------------- 设置 ----------------
   function openSettings() {
     $('#set-system').value = settings.systemPrompt || '';
+    renderDefaultTplSelect();
     $('#set-stream').checked = settings.stream !== false;
     $('#set-temp').value = settings.temperature || '';
     $('#set-maxtokens').value = settings.maxTokens || '';
@@ -1077,6 +1089,7 @@
   }
   function readGeneral() {
     settings.systemPrompt = $('#set-system').value;
+    settings.defaultTemplateId = $('#set-deftpl').value || null;
     settings.stream = $('#set-stream').checked;
     settings.temperature = $('#set-temp').value.trim();
     settings.maxTokens = $('#set-maxtokens').value.trim();
@@ -1503,6 +1516,227 @@
     else { const a = document.createElement('a'); a.href = viewerSrc; a.download = 'image.png'; a.click(); }
   };
 
+  // ---------------- 提示词模板 ----------------
+  // 模板 = 替换当前对话的系统提示词；⚡ 提示词库 = 插入输入框；助手 = 新建对话
+  const rpOn = c => !!(c && Plugins.registry.isActive('rpcache', settings, c));
+  /** 修改当前对话的系统提示词。RP 插件开启时走显式的 L1 静态更新（static 版本 +1，并记录原因） */
+  function setConvSystem(text, tpl, cause) {
+    const c = conv;
+    const before = c.systemPrompt || '';
+    if (tpl) Object.assign(c, { systemPrompt: text, templateId: tpl.id, templateName: tpl.name, templateEmoji: tpl.emoji || '' });
+    else { c.systemPrompt = text; delete c.templateId; delete c.templateName; delete c.templateEmoji; }
+    if (rpOn(c) && RPCache.canonicalize(before) !== RPCache.canonicalize(text)) {
+      const d = Plugins.registry.convData(c, 'rpcache');
+      d.state = RPCache.explicitBaseUpdate(d.state, text, cause, Date.now()).state;
+    }
+    if (c.messages.length || c.plugins) saveConv(c, false);
+    renderHeader(); renderConvBar();
+  }
+  const RP_WARN = '本对话开启了 RP 缓存优化：系统提示词属于 L1 固定前缀，切换提示词会改变固定前缀，下一轮缓存命中率会下降一次（之后恢复）。';
+  async function applyTemplate(tpl, opt) {
+    opt = opt || {};
+    if (!tpl) { // 清空
+      if (!conv.systemPrompt && !conv.templateId) { toast('当前没有系统提示词'); return false; }
+      if (rpOn(conv) && !(await dialog({ title: '清空系统提示词？', body: RP_WARN, okText: '仍然清空' }))) return false;
+      setConvSystem('', null, { kind: 'clear' }); closeTemplateSheet(); toast('已清空本对话的系统提示词'); return true;
+    }
+    const vars = Templates.variables(tpl.content);
+    let values = {};
+    if (vars.length) { values = await openVarDialog(tpl, vars); if (!values) return false; }
+    const text = Templates.fill(tpl.content, values);
+    if (text === (conv.systemPrompt || '') && conv.templateId === tpl.id) { closeTemplateSheet(); toast('已经在使用「' + tpl.name + '」'); return false; }
+    if (rpOn(conv) && !(await dialog({ title: '切换为「' + tpl.name + '」？', body: RP_WARN, okText: '切换' }))) return false;
+    setConvSystem(text, tpl, { kind: 'template', name: tpl.name });
+    if (!String(tpl.id).startsWith('persona:')) { settings.recentTemplates = Templates.pushRecent(settings.recentTemplates, tpl.id, 5); saveSettings(); }
+    closeTemplateSheet();
+    toast('已切换为「' + tpl.name + '」' + (conv.messages.length ? '，从下一条消息开始生效' : ''));
+    return true;
+  }
+
+  // 变量填写
+  let varResolve = null;
+  function openVarDialog(tpl, vars) {
+    const last = (settings.templateVars || {})[tpl.id] || {};
+    $('#tv-title').textContent = '填写「' + tpl.name + '」的变量';
+    const box = $('#tv-fields'); box.innerHTML = '';
+    vars.forEach(v => {
+      const l = document.createElement('label'); l.className = 'field';
+      l.innerHTML = '<span>' + esc(v) + '</span><input data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '">';
+      l.querySelector('input').value = last[v] || '';
+      box.appendChild(l);
+    });
+    const preview = () => { const vals = collectVars(); $('#tv-preview').textContent = Templates.fill(tpl.content, vals).slice(0, 160); };
+    box.querySelectorAll('input').forEach(i => i.addEventListener('input', preview)); preview();
+    $('#tv-mask').classList.add('show');
+    setTimeout(() => { const f = box.querySelector('input'); if (f) f.focus(); }, 80);
+    return new Promise(res => { varResolve = vals => { if (vals) { settings.templateVars = Object.assign({}, settings.templateVars, { [tpl.id]: vals }); saveSettings(); } res(vals); }; });
+  }
+  function collectVars() { const o = {}; $('#tv-fields').querySelectorAll('input').forEach(i => { o[i.dataset.var] = i.value; }); return o; }
+  function closeVarDialog(vals) { $('#tv-mask').classList.remove('show'); const r = varResolve; varResolve = null; if (r) r(vals); }
+  $('#tv-cancel').onclick = () => closeVarDialog(null);
+  $('#tv-ok').onclick = () => closeVarDialog(collectVars());
+  $('#tv-mask').onclick = e => { if (e.target.id === 'tv-mask') closeVarDialog(null); };
+
+  // 快速切换面板
+  function renderTplChip() {
+    const b = $('#btn-template'); if (!b || !conv) return;
+    b.classList.toggle('active', !!conv.templateName);
+    $('#tpl-chip-label').textContent = conv.templateName ? (conv.templateName.length > 5 ? conv.templateName.slice(0, 5) + '…' : conv.templateName) : '模板';
+  }
+  function openTemplateSheet() {
+    $('#tq-search').value = '';
+    renderTemplateSheet();
+    $('#tpl-sheet').classList.add('show'); $('#tpl-mask').classList.add('show');
+  }
+  function closeTemplateSheet() { $('#tpl-sheet').classList.remove('show'); $('#tpl-mask').classList.remove('show'); }
+  function tplItem(t, opts) {
+    const el = document.createElement('button');
+    const cur = conv.templateId === t.id;
+    el.className = 'prompt-item tpl-item' + (cur ? ' current' : '');
+    const vars = Templates.variables(t.content);
+    el.innerHTML = '<span class="pi-t"><span class="tpl-emoji">' + esc(t.emoji || '📋') + '</span>' + esc(t.name) + (t.pinned ? '<span class="tpl-star">★</span>' : '') +
+      (cur ? '<span class="tpl-cur">使用中</span>' : '') + (vars.length ? '<span class="tpl-var">' + vars.length + ' 个变量</span>' : '') + '</span>' +
+      '<span class="pi-c">' + esc(t.content.replace(/\s+/g, ' ').slice(0, 70)) + '</span>';
+    el.onclick = () => applyTemplate(t);
+    return el;
+  }
+  function renderTemplateSheet() {
+    const q = $('#tq-search').value.trim();
+    const box = $('#tq-list'); box.innerHTML = '';
+    const cur = $('#tq-cur');
+    cur.innerHTML = conv.templateName ? '当前：<b>' + esc((conv.templateEmoji || '📋') + ' ' + conv.templateName) + '</b>' + (rpOn(conv) ? ' · <span class="muted">RP 模式下切换会改变固定前缀</span>' : '')
+      : conv.systemPrompt ? '当前：<b>自定义系统提示词</b>' : '当前：<span class="muted">无系统提示词</span>';
+    const sec = t => { const h = document.createElement('div'); h.className = 'tq-sec'; h.textContent = t; box.appendChild(h); };
+    const list = Templates.filter(templates, { query: q });
+    if (!q) {
+      const rec = Templates.recentOf(templates, settings.recentTemplates).slice(0, 3);
+      if (rec.length) { sec('最近使用'); rec.forEach(t => box.appendChild(tplItem(t))); }
+      sec('全部模板（★ 收藏在前）');
+    }
+    if (!list.length) box.insertAdjacentHTML('beforeend', '<div class="conv-empty">没有匹配的模板</div>');
+    list.forEach(t => box.appendChild(tplItem(t)));
+    const ps = personas.filter(p => p.systemPrompt && (!q || p.name.includes(q) || p.systemPrompt.includes(q)));
+    if (ps.length) { sec('从助手套用（只替换系统提示词，不改模型）'); ps.forEach(p => box.appendChild(tplItem(Templates.fromPersona(p)))); }
+  }
+  $('#btn-template').onclick = openTemplateSheet;
+  $('#tpl-mask').onclick = closeTemplateSheet;
+  $('#tq-search').addEventListener('input', renderTemplateSheet);
+  $('#tq-clear').onclick = () => applyTemplate(null);
+  $('#tq-manage').onclick = () => { closeTemplateSheet(); openTemplates(); };
+  $('#tq-new').onclick = () => { closeTemplateSheet(); openTemplates(); openTemplateEdit(null); };
+
+  // 模板管理页
+  let tmTag = '';
+  function openTemplates() { closeDrawer(); $('#tm-search').value = ''; tmTag = ''; renderTemplateManage(); $('#page-templates').classList.add('show'); }
+  function closeTemplates() { $('#page-templates').classList.remove('show'); renderConvBar(); }
+  function renderTemplateManage() {
+    const tags = Templates.allTags(templates);
+    const tb = $('#tm-tags'); tb.innerHTML = '';
+    ['', ...tags].forEach(g => {
+      const c = document.createElement('button'); c.className = 'chip' + (g === tmTag ? ' active' : ''); c.textContent = g || '全部';
+      c.onclick = () => { tmTag = g; renderTemplateManage(); };
+      tb.appendChild(c);
+    });
+    const box = $('#tm-list'); box.innerHTML = '';
+    const list = Templates.filter(templates, { query: $('#tm-search').value, tag: tmTag });
+    if (!list.length) box.innerHTML = '<div class="conv-empty">没有模板</div>';
+    list.forEach(t => {
+      const el = document.createElement('div'); el.className = 'prov-item tm-row';
+      const def = settings.defaultTemplateId === t.id;
+      el.innerHTML = '<span class="avatar lg tm-ic">' + esc(t.emoji || '📋') + '</span><div class="pi-main"><div class="pi-name">' + esc(t.name) +
+        (def ? '<span class="tpl-cur">新对话默认</span>' : '') + '</div><div class="pi-sub">' + (t.tags.length ? esc(t.tags.join(' · ')) + ' — ' : '') + esc(t.content.replace(/\s+/g, ' ').slice(0, 40)) + '</div></div>' +
+        '<button class="tm-pin' + (t.pinned ? ' on' : '') + '" aria-label="收藏">' + (t.pinned ? '★' : '☆') + '</button><button class="ci-more" aria-label="更多">' + ICON.more + '</button>';
+      el.querySelector('.tm-pin').onclick = e => { e.stopPropagation(); templates = Templates.togglePin(templates, t.id); saveTemplates(); renderTemplateManage(); };
+      el.querySelector('.ci-more').onclick = e => { e.stopPropagation(); templateActions(t); };
+      el.onclick = () => openTemplateEdit(t.id);
+      box.appendChild(el);
+    });
+    $('#template-count').textContent = templates.length + ' 个模板 · 一键切换系统提示词';
+  }
+  function templateActions(t) {
+    const vars = Templates.variables(t.content).length;
+    actionSheet(t.name, [
+      { label: '应用到当前对话', icon: ICON.check, onClick: async () => { if (await applyTemplate(t)) closeTemplates(); } },
+      { label: '编辑', icon: ICON.edit, onClick: () => openTemplateEdit(t.id) },
+      { label: '复制一份', icon: ICON.dup, onClick: () => { templates = Templates.duplicate(templates, t.id); saveTemplates(); renderTemplateManage(); toast('已复制'); } },
+      { label: '上移', icon: ICON.chevR, onClick: () => { templates = Templates.move(templates, t.id, -1); saveTemplates(); renderTemplateManage(); } },
+      { label: '下移', icon: ICON.chevR, onClick: () => { templates = Templates.move(templates, t.id, 1); saveTemplates(); renderTemplateManage(); } },
+      settings.defaultTemplateId === t.id ? { label: '取消新对话默认', icon: ICON.chat, onClick: () => { settings.defaultTemplateId = null; saveSettings(); renderTemplateManage(); toast('新对话不再使用默认模板'); } }
+        : { label: '设为新对话默认', icon: ICON.chat, onClick: () => { if (vars) { toast('含变量的模板不能设为默认'); return; } settings.defaultTemplateId = t.id; saveSettings(); renderTemplateManage(); toast('新对话将默认使用「' + t.name + '」'); } },
+      { label: '删除', icon: ICON.trash, danger: true, onClick: () => deleteTemplate(t) },
+    ]);
+  }
+  async function deleteTemplate(t) {
+    const ok = await dialog({ title: '删除「' + t.name + '」？', body: '已经使用该模板的对话不受影响（系统提示词保留）。' + (t.builtin ? '内置模板删除后不会再自动出现。' : ''), okText: '删除', danger: true });
+    if (!ok) return;
+    templates = Templates.remove(templates, t.id);
+    if (t.builtin) settings.removedTemplates = (settings.removedTemplates || []).concat([t.id]);
+    if (settings.defaultTemplateId === t.id) settings.defaultTemplateId = null;
+    settings.recentTemplates = (settings.recentTemplates || []).filter(x => x !== t.id);
+    saveSettings(); saveTemplates(); renderTemplateManage(); toast('已删除');
+  }
+  $('#tm-search').addEventListener('input', renderTemplateManage);
+  $('#tm-new').onclick = () => openTemplateEdit(null);
+  $('#btn-templates').onclick = () => { closeDrawer(); setTimeout(openTemplates, 120); };
+  $('#tm-more').onclick = () => actionSheet('导入 / 导出', [
+    { label: '导出全部（复制 JSON 到剪贴板）', icon: ICON.copy, onClick: () => { copyText(Templates.exportJSON(templates)); toast('已复制 ' + templates.length + ' 个模板的 JSON，可粘贴保存或分享'); } },
+    { label: '从 JSON 文件导入', icon: ICON.file, onClick: () => $('#tm-file').click() },
+    { label: '粘贴 JSON 导入', icon: ICON.rename, onClick: async () => {
+      const v = await dialog({ title: '粘贴 JSON 导入', body: '粘贴之前导出的模板 JSON：', input: true, value: '', okText: '导入' });
+      if (typeof v === 'string' && v.trim()) importTemplates(v);
+    } },
+  ]);
+  function importTemplates(text) {
+    try {
+      const r = Templates.importJSON(text, templates);
+      templates = r.list; saveTemplates(); renderTemplateManage();
+      toast('已导入 ' + r.added + ' 个模板' + (r.skipped ? '，跳过 ' + r.skipped + ' 个（重复或无内容）' : ''));
+    } catch (e) { dialog({ title: '导入失败', body: e.message, okText: '知道了', info: true }); }
+  }
+  $('#tm-file').onchange = e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    const rd = new FileReader(); rd.onload = () => importTemplates(String(rd.result)); rd.readAsText(f);
+  };
+
+  // 模板编辑页
+  let editingTpl = null;
+  function openTemplateEdit(id) {
+    const t = id ? templates.find(x => x.id === id) : null;
+    editingTpl = t ? t.id : null;
+    $('#te-title').textContent = t ? '编辑模板' : '新建模板';
+    $('#te-emoji').value = t ? t.emoji : ''; $('#te-name').value = t ? t.name : '';
+    $('#te-tags').value = t ? t.tags.join(', ') : ''; $('#te-content').value = t ? t.content : '';
+    $('#te-pin').checked = t ? t.pinned : false;
+    $('#te-delete').style.display = t ? '' : 'none';
+    teVars();
+    $('#page-template').classList.add('show');
+  }
+  function teVars() {
+    const v = Templates.variables($('#te-content').value);
+    $('#te-vars').textContent = v.length ? '变量：' + v.map(x => '{{' + x + '}}').join('、') + '（应用时填写）' : '可以用 {{变量名}} 插入变量，应用模板时会提示填写。';
+  }
+  $('#te-content').addEventListener('input', teVars);
+  function closeTemplateEdit() { $('#page-template').classList.remove('show'); editingTpl = null; }
+  $('#te-save').onclick = () => {
+    const content = $('#te-content').value;
+    if (!content.trim()) { toast('请填写系统提示词'); return; }
+    const old = editingTpl ? templates.find(x => x.id === editingTpl) : null;
+    const t = Templates.normalizeTemplate({ id: editingTpl || undefined, name: $('#te-name').value, emoji: $('#te-emoji').value, tags: $('#te-tags').value, content, pinned: $('#te-pin').checked, builtin: old && old.builtin });
+    templates = Templates.upsert(templates, t);
+    if (settings.defaultTemplateId === t.id && Templates.variables(t.content).length) { settings.defaultTemplateId = null; saveSettings(); }
+    saveTemplates(); closeTemplateEdit(); renderTemplateManage(); toast('已保存');
+  };
+  $('#te-delete').onclick = () => { const t = templates.find(x => x.id === editingTpl); if (!t) return; closeTemplateEdit(); deleteTemplate(t); };
+  function renderDefaultTplSelect() {
+    const sel = $('#set-deftpl');
+    sel.innerHTML = '<option value="">不使用（用下方的默认系统提示词）</option>' +
+      templates.filter(t => !Templates.variables(t.content).length).map(t => '<option value="' + esc(t.id) + '">' + esc((t.emoji || '📋') + ' ' + t.name) + '</option>').join('');
+    sel.value = settings.defaultTemplateId && templates.some(t => t.id === settings.defaultTemplateId) ? settings.defaultTemplateId : '';
+    $('#set-system-row').style.opacity = sel.value ? '.5' : '';
+  }
+  $('#set-deftpl').addEventListener('change', () => { $('#set-system-row').style.opacity = $('#set-deftpl').value ? '.5' : ''; readGeneral(); });
+
   // ---------------- 插件 ----------------
   const pluginHost = {
     settings: () => settings, saveSettings, conv: () => conv,
@@ -1585,6 +1819,10 @@
     if (shown('#model-menu')) { closeModelMenu(); return true; }
     if (shown('#sheet')) { closeSheet(); return true; }
     if (shown('#prompt-sheet')) { closePromptSheet(); return true; }
+    if (shown('#tv-mask')) { closeVarDialog(null); return true; }
+    if (shown('#tpl-sheet')) { closeTemplateSheet(); return true; }
+    if (shown('#page-template')) { closeTemplateEdit(); return true; }
+    if (shown('#page-templates')) { closeTemplates(); return true; }
     if (shown('#page-plugin')) { if (panelPlugin && panelPlugin.onBack && panelPlugin.onBack()) return true; closePluginPanel(); return true; }
     if (shown('#page-plugins')) { closePlugins(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
@@ -1601,6 +1839,8 @@
   if (!Store.get('prompts.json', null)) savePrompts();
   $('#persona-count').textContent = personas.length + ' 个助手 · ' + prompts.length + ' 条提示词';
   $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
+  $('#template-count').textContent = templates.length + ' 个模板 · 一键切换系统提示词';
+  if (!Store.get('templates.json', null)) saveTemplates();
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
   updateSendState();
