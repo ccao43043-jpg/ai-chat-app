@@ -174,6 +174,13 @@
     if (s2 === st) return { state: st, changed: false };
     return { state: Object.assign({}, s2, { pendingStaticCause: Object.assign({ at: at || 0 }, cause || { kind: 'manual' }) }), changed: true };
   }
+  /** 记录「对话历史将被改变」的原因（切换较早回复的版本 / 从较早回复重新生成 / 编辑并重发），下一次请求诊断为 History CHANGED 时显示 */
+  function markHistoryCause(state, cause, at) {
+    return Object.assign({}, normalizeState(state), { pendingHistoryCause: Object.assign({ at: at || 0 }, cause || { kind: 'version' }) });
+  }
+  const HISTORY_CAUSE = c => !c ? null : c.kind === 'regen' ? '从较早的回复重新生成（新分支），对话历史改变'
+    : c.kind === 'branch' ? '编辑并重新发送了较早的消息（新分支），对话历史改变'
+    : c.kind === 'delete' ? '删除了较早回复的版本，对话历史改变' : '切换了较早回复的版本，对话历史改变';
   const STATIC_CAUSE = c => !c ? null : c.kind === 'template' ? '切换了提示词模板「' + c.name + '」，L1 固定前缀改变'
     : c.kind === 'clear' ? '清空了提示词模板，L1 固定前缀改变' : '手动修改了对话系统提示词，L1 固定前缀改变';
 
@@ -325,7 +332,7 @@
     if (d.static === 'CHANGED') out.push(STATIC_CAUSE(entry.static_cause) || '角色卡 / 世界观等永久锚点被修改');
     if (d.memory === 'CHANGED') out.push('长期记忆已更新');
     if (d.summary === 'CHANGED' && !entry.summary_happened) out.push('章节摘要刚更新（手动生成、编辑或回滚）');
-    if (d.history === 'CHANGED' && !entry.summary_happened) out.push(entry.trimmed ? '超出预算，较早历史被一次性截断' : '历史被修改（编辑、删除或重新生成了较早的消息）');
+    if (d.history === 'CHANGED' && !entry.summary_happened) out.push(entry.trimmed ? '超出预算，较早历史被一次性截断' : HISTORY_CAUSE(entry.history_cause) || '历史被修改（编辑、删除或重新生成了较早的消息）');
     if (prev && entry.timestamp - prev.timestamp > 3 * 3600e3) out.push('距上次请求超过 ' + Math.floor((entry.timestamp - prev.timestamp) / 3600e3) + ' 小时，服务端缓存可能已清除');
     if (prev && prev.model !== entry.model) out.push('切换了模型（缓存按模型分开）');
     if (!out.length) {
@@ -391,7 +398,7 @@
       static_hash: fp.static_hash, memory_hash: fp.memory_hash, summary_hash: fp.summary_hash, history_hash: fp.history_hash, state_hash: fp.state_hash,
       input_hash: fp.input_hash, full_prefix_hash: fp.full_prefix_hash, history_count: fp.history_count | 0, versions: fp.versions || {},
       layer_tokens: o.tokens || {}, diag: o.diag || {}, summary_happened: !!o.summaryNo, summary_no: o.summaryNo || 0, summary_reason: o.summaryReason || null,
-      summary_error: o.summaryError || null, static_cause: o.staticCause || null, over_budget: !!o.overBudget, trimmed: !!o.trimmed, msg_id: o.msgId || '',
+      summary_error: o.summaryError || null, static_cause: o.staticCause || null, history_cause: o.historyCause || null, over_budget: !!o.overBudget, trimmed: !!o.trimmed, msg_id: o.msgId || '',
     };
     e.reasons = reasons(e, o.prev || null);
     e.reason = e.reasons[0];
@@ -446,7 +453,7 @@
   }
 
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, SUMMARY_SECTIONS,
-    canonicalize, sha256, vlabel, slabel, newState, normalizeState, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate,
+    canonicalize, sha256, vlabel, slabel, newState, normalizeState, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, addSummary, editSummary, rollbackSummary, staticText, memoryText, summaryText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, oldestBatch, plan, fallbackTrim, assemble, fingerprints, diagnose, reasons,
     buildSummaryPrompt, parseSummary, priceFor, isPeak, costOf, makeLogEntry, appendLog, stats, detectAnomaly };

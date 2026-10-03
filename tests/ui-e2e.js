@@ -76,6 +76,7 @@ async function scenario(browser, theme) {
         const rp = sys.includes('[WORLD]');
         if (rp) text = '（烛光在走廊尽头摇曳）张燕压低声音：“' + uc.slice(-12) + '……你确定要这么做？北方商会的人今晚一定会来。”她把斗篷拉紧，目光扫过旧书店斑驳的木门。' +
           '远处传来巡夜卫兵整齐的脚步声，石板路上积着薄薄的雨水，倒映着摇晃的灯笼。书店老板缩在柜台后，假装整理一摞发黄的旧书，手却一直在发抖。你注意到他的袖口沾着一点墨迹，和账本上的字迹颜色一模一样。'.repeat(3);
+        if (uc.includes('版本测试')) { window.__verN = (window.__verN || 0) + 1; text = '版本回复 ' + window.__verN + '：' + (rp ? text.slice(0, 80) : '好的，这是第 ' + window.__verN + ' 次生成的回答。'); }
         // 模拟 DeepSeek 前缀缓存：与之前请求的最长公共前缀（按 64 token 粒度）
         const ser = JSON.stringify(msgs);
         let lcp = 0;
@@ -798,7 +799,7 @@ async function scenario(browser, theme) {
   assert.strictEqual(ei.value, lastUser.content);
   assert.deepStrictEqual(ei.sel, [lastUser.content.length, lastUser.content.length], '光标在末尾');
   assert.deepStrictEqual(ei.btns, ['取消', '保存', '保存并重新发送']);
-  assert.ok(ei.hint.includes('删除这条之后的 1 条消息') && ei.hint.includes('RP 缓存优化') && ei.warn, ei.hint);
+  assert.ok(ei.hint.includes('之后的 1 条消息保留在旧版本里') && ei.hint.includes('RP 缓存优化') && ei.warn, ei.hint);
   assert.ok(ei.taH >= 0.6 * ei.vh, '文本框至少 60% 视口高度 ' + ei.taH + '/' + ei.vh);
   assert.ok(ei.font >= 16, 'font ' + ei.font);
   assert.strictEqual(Math.round(ei.edH), 640); assert.ok(ei.barBottom <= 640);
@@ -857,12 +858,14 @@ async function scenario(browser, theme) {
   // 保存并重新发送
   const nBefore = (await rpConv()).messages.length;
   await msgEdit('user', 1); await sleep(400);
-  assert.ok((await edInfo()).hint.includes('删除这条之后的 3 条消息'));
+  assert.ok((await edInfo()).hint.includes('之后的 3 条消息保留在旧版本里'));
   await edSet('我们换条路，往东走。'); await page.click('#ed-resend'); await sleep(200); await waitIdle(); await sleep(300);
   rc = await rpConv();
   assert.strictEqual(rc.messages.length, nBefore - 2);
   assert.strictEqual(rc.messages[rc.messages.length - 2].content, '我们换条路，往东走。');
   assert.ok((await lastPost()).body.messages.pop().content.endsWith('[USER_INPUT]\n我们换条路，往东走。'));
+  { const l = (await rpLogs()).slice(-1)[0]; assert.ok(l.summary_happened || l.reasons.some(x => x.includes('编辑并重新发送了较早的消息')), JSON.stringify(l.reasons)); }
+  assert.strictEqual(rc.messages[rc.messages.length - 2].versions.length, 2, '编辑重发开出新分支');
   // RP 分层设定：全屏编辑后仍需点「保存」才生效（显式更新路径不变）
   const stBefore = JSON.stringify((await rpConv()).plugins.rpcache.state.blocks);
   await page.evaluate(() => [...document.querySelectorAll('#conv-bar .hbadge')].find(e => !e.classList.contains('tpl')).click()); await sleep(450); await tab('blocks'); await sleep(200);
@@ -898,6 +901,142 @@ async function scenario(browser, theme) {
   assert.strictEqual(await page.$eval('#input', e => e.value), '改好的输入');
   await setInput('');
   await page.setViewport({ width: 390, height: 820, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+
+  // 16) 回复版本 / 对话分支
+  const msgAt = (i, sel) => page.evaluate((i, sel) => { const e = document.querySelectorAll('#messages > .msg')[i]; const x = e && (sel ? e.querySelector(sel) : e); return x ? x.textContent : null; }, i, sel);
+  const msgCount = () => page.$$eval('#messages > .msg', e => e.length);
+  const clickIn = (i, sel) => page.evaluate((i, sel) => document.querySelectorAll('#messages > .msg')[i].querySelector(sel).click(), i, sel);
+  const curC = () => page.evaluate(() => { const ids = JSON.parse(window.__mem['convs.json']); return JSON.parse(window.__mem['conv_' + ids[0].id + '.json']); });
+  const sendT = async t => { await setInput(t); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(300); };
+  const regenAt = async i => { await clickIn(i, '.act[aria-label="重新生成"], .act[aria-label="从这里重新生成"]'); await sleep(300); };
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#model-pill'); await sleep(250); await pickModel('deepseek-flash'); await sleep(250);
+  await sendT('版本测试：介绍一下你自己');
+  assert.strictEqual(await msgAt(1, '.vs-label'), null, '只有一个版本时不显示切换器');
+  const req0 = (await lastPost()).body;
+  await regenAt(1); await waitIdle(); await sleep(300);
+  assert.strictEqual(await msgCount(), 2, '重新生成不新增消息');
+  assert.strictEqual(await msgAt(1, '.vs-label'), '2 / 2');
+  assert.ok((await msgAt(1, '.md')).startsWith('版本回复 2'));
+  assert.deepStrictEqual((await lastPost()).body.messages, req0.messages, '重新生成的请求不含旧版本');
+  await shot('versions');
+  await clickIn(1, '.vs-prev'); await sleep(300);
+  assert.strictEqual(await msgAt(1, '.vs-label'), '1 / 2'); assert.ok((await msgAt(1, '.md')).startsWith('版本回复 1'));
+  assert.ok(await page.evaluate(() => document.querySelectorAll('#messages > .msg')[1].querySelector('.vs-prev').disabled));
+  let cv = await curC();
+  assert.strictEqual(cv.messages[1].vi, 0); assert.strictEqual(cv.messages[1].versions.length, 2); assert.ok(cv.messages[1].versions[1].content.startsWith('版本回复 2'));
+  // 继续对话：只发送选中的版本
+  await sendT('版本测试：继续');
+  let q = (await lastPost()).body.messages;
+  assert.ok(q.some(m => m.role === 'assistant' && m.content.startsWith('版本回复 1')) && !q.some(m => m.content.startsWith('版本回复 2')), JSON.stringify(q.map(m => m.content.slice(0, 8))));
+  assert.ok(!JSON.stringify(q).includes('versions'));
+  // 持久化：切到别的对话再回来
+  const vcId = cv.id;
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#btn-menu'); await sleep(350);
+  await page.evaluate(() => document.querySelectorAll('.conv-item')[0].click()); await sleep(500);
+  assert.strictEqual((await curC()).id, vcId);
+  assert.strictEqual(await msgAt(1, '.vs-label'), '1 / 2', '重新打开后版本与选择保留');
+  // 较早回复：切换版本 → 后续对话切到对应分支（版本 2 之后还没有对话）
+  await clickIn(1, '.vs-next'); await sleep(400);
+  assert.strictEqual(await msgCount(), 2, '版本 2 的分支只有到这里');
+  await clickIn(1, '.vs-prev'); await sleep(400);
+  assert.strictEqual(await msgCount(), 4, '切回版本 1，后面的 2 条对话回来了');
+  assert.ok((await msgAt(3, '.md')).startsWith('版本回复 3'));
+  // 从较早的回复重新生成 → 新分支 3/3
+  await regenAt(1);
+  assert.ok((await page.$eval('#dialog-body', e => e.textContent)).includes('之后的 2 条对话保留在旧版本里'));
+  await page.click('#dialog-ok'); await sleep(200); await waitIdle(); await sleep(300);
+  assert.strictEqual(await msgCount(), 2); assert.strictEqual(await msgAt(1, '.vs-label'), '3 / 3');
+  await sendT('版本测试：第三分支的问题');
+  assert.strictEqual(await msgCount(), 4);
+  q = (await lastPost()).body.messages.map(m => m.content);
+  assert.ok(q[1].startsWith('版本回复 4') && !q.some(c => c.includes('继续')), JSON.stringify(q));
+  await clickIn(1, '.vs-label'); await sleep(350);
+  r.verMenu = await page.$$eval('#action-list .action-item', e => e.map(x => x.textContent.trim()));
+  assert.ok(r.verMenu[0].startsWith('切换到第 1 个') && r.verMenu.includes('只保留当前版本（第 3 个）') && r.verMenu.includes('删除当前版本'), JSON.stringify(r.verMenu));
+  await shot('version-menu');
+  await page.evaluate(() => [...document.querySelectorAll('#action-list .action-item')].find(e => e.textContent.startsWith('切换到第 1 个')).click()); await sleep(450);
+  assert.strictEqual(await msgAt(1, '.vs-label'), '1 / 3'); assert.ok((await msgAt(2, '.bubble')).includes('继续'));
+  // 删除版本 2（非当前）：菜单只能删当前，先切到 2 再删
+  await clickIn(1, '.vs-next'); await sleep(400);
+  await clickIn(1, '.vs-label'); await sleep(350);
+  await page.evaluate(() => [...document.querySelectorAll('#action-list .action-item')].find(e => e.textContent === '删除当前版本').click()); await sleep(350);
+  assert.ok((await page.$eval('#dialog-title', e => e.textContent)).includes('删除第 2 个版本'));
+  await page.click('#dialog-ok'); await sleep(400);
+  assert.strictEqual(await msgAt(1, '.vs-label'), '1 / 2'); assert.strictEqual(await msgCount(), 4);
+  cv = await curC(); assert.strictEqual(cv.messages[1].versions.length, 2);
+  // 编辑并重新发送用户消息 → 用户消息上的分支 ‹ 1/2 ›
+  await msgEdit('user', 0); await sleep(400);
+  assert.ok((await edInfo()).hint.includes('新分支'));
+  await edSet('版本测试：换个问法继续'); await page.click('#ed-resend'); await sleep(200); await waitIdle(); await sleep(300);
+  assert.strictEqual(await msgCount(), 4);
+  assert.strictEqual(await msgAt(2, '.vs-label'), '2 / 2', '用户消息有两个版本');
+  assert.ok((await msgAt(2, '.bubble')).includes('换个问法'));
+  await clickIn(2, '.vs-prev'); await sleep(400);
+  assert.ok((await msgAt(2, '.bubble')).includes('版本测试：继续')); assert.ok((await msgAt(3, '.md')).startsWith('版本回复 3'), '原分支的回复回来了');
+  await shot('branch');
+  // 只保留当前版本
+  await clickIn(1, '.vs-label'); await sleep(350);
+  await page.evaluate(() => [...document.querySelectorAll('#action-list .action-item')].find(e => e.textContent.startsWith('只保留当前版本')).click()); await sleep(350);
+  await page.click('#dialog-ok'); await sleep(400);
+  assert.strictEqual(await msgAt(1, '.vs-label'), null);
+  assert.ok(!('versions' in (await curC()).messages[1]));
+  // 迁移：v0.1 的旧对话，重新生成后旧回复成为第 1 个版本
+  await page.click('#btn-menu'); await sleep(350);
+  await page.evaluate(() => [...document.querySelectorAll('.conv-item')].find(e => e.textContent.includes('旧对话')).click()); await sleep(500);
+  const oldC = () => page.evaluate(() => JSON.parse(window.__mem['conv_oldc1.json']));
+  const oldReply = (await oldC()).messages[1].content;
+  assert.strictEqual(await msgAt(1, '.vs-label'), null, '迁移：旧消息是单版本');
+  await regenAt(1); await waitIdle(); await sleep(300);
+  cv = await oldC();
+  assert.strictEqual(cv.title, '旧对话'); assert.strictEqual(cv.messages.length, 2);
+  assert.strictEqual(cv.messages[1].versions[0].content, oldReply); assert.strictEqual(cv.messages[1].vi, 1);
+  await clickIn(1, '.vs-prev'); await sleep(300);
+  assert.strictEqual((await oldC()).messages[1].content, oldReply);
+
+  // RP：重新生成最后一条（无警告，请求逐字节一致）；切换较早回复（警告 + 监控原因）
+  await page.click('#btn-menu'); await sleep(350);
+  await page.evaluate(() => { const ids = JSON.parse(window.__mem['convs.json']); const i = ids.findIndex(c => { const x = JSON.parse(window.__mem['conv_' + c.id + '.json']); return x.plugins && x.plugins.rpcache && x.plugins.rpcache.enabled; }); document.querySelectorAll('.conv-item')[i].click(); });
+  await sleep(500);
+  assert.ok(await rpConv());
+  await sendRP('版本测试：我们去码头。');
+  const rpBody = (await lastPost()).body;
+  let n = await msgCount();
+  await regenAt(n - 1);
+  assert.ok(!(await page.$eval('#dialog-mask', e => e.classList.contains('show'))), '重新生成最后一条：没有警告');
+  await waitIdle(); await sleep(300);
+  assert.strictEqual(JSON.stringify((await lastPost()).body), JSON.stringify(rpBody), 'RP：重新生成的请求与原请求逐字节一致');
+  assert.strictEqual(await msgAt(n - 1, '.vs-label'), '2 / 2');
+  r.rpBadge2 = await msgAt(n - 1, '.mbadge');
+  assert.ok(r.rpBadge2 && r.rpBadge2.includes('缓存'), '每个版本有自己的缓存统计 ' + r.rpBadge2);
+  await clickIn(n - 1, '.vs-prev'); await sleep(300);
+  assert.ok(!(await page.$eval('#dialog-mask', e => e.classList.contains('show'))), '切换最后一条：没有警告');
+  assert.ok((await msgAt(n - 1, '.mbadge')).includes('缓存'));
+  let logs16 = await rpLogs();
+  await sendRP('版本测试：上船。');
+  logs16 = await rpLogs();
+  assert.strictEqual(logs16.slice(-1)[0].diag.history, 'APPEND', '切换最后一条回复不影响历史');
+  // 切换较早回复 → 警告
+  await clickIn(n - 1, '.vs-next'); await sleep(350);
+  r.verWarn = await page.$eval('#dialog-body', e => e.textContent);
+  assert.ok(r.verWarn.includes('切换较早回复的版本会改变对话历史，下一轮缓存命中率会下降一次'), r.verWarn);
+  await shot('version-rp-warn');
+  await page.click('#dialog-cancel'); await sleep(300);
+  assert.strictEqual(await msgAt(n - 1, '.vs-label'), '1 / 2', '取消后不变');
+  await clickIn(n - 1, '.vs-next'); await sleep(350); await page.click('#dialog-ok'); await sleep(400);
+  assert.strictEqual(await msgAt(n - 1, '.vs-label'), '2 / 2'); assert.strictEqual(await msgCount(), n, '版本 2 之后还没有对话');
+  const sel = (await rpConv()).messages[n - 1].content;
+  const rq16 = await sendRP('版本测试：换一条路。');
+  const hm = rq16.body.messages.filter(m => m.role === 'assistant').map(m => m.content);
+  assert.ok(hm.includes(sel), '发送选中的版本');
+  logs16 = await rpLogs();
+  const l16 = logs16.slice(-1)[0];
+  assert.ok(l16.diag.history === 'CHANGED' || l16.summary_happened, JSON.stringify(l16.diag));
+  assert.ok(!l16.summary_happened && l16.diag.history === 'CHANGED' && l16.reasons.some(x => x.includes('切换了较早回复的版本')), JSON.stringify(l16.reasons));
+  // 已写入章节摘要的消息：不能重新生成 / 切换
+  r.dimRegen = await page.$$eval('#messages > .msg.dim .act[aria-label="从这里重新生成"]', e => e.length);
+  assert.strictEqual(r.dimRegen, 0);
 
   assert.deepStrictEqual(errors, []);
   await page.close();

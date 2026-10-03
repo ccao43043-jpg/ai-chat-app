@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.3';
+  const APP_VERSION = '0.3.4';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -350,7 +350,7 @@
   function openConv(id) {
     const c = Store.get('conv_' + id + '.json', null);
     if (!c) { convIndex = convIndex.filter(x => x.id !== id); saveIndex(); renderConvList(); return false; }
-    conv = c; renderAll(); return true;
+    conv = Versions.normalizeConv(c); renderAll(); return true;
   }
   async function deleteConv(id) {
     const meta = convIndex.find(x => x.id === id);
@@ -552,8 +552,11 @@
     }
     if (!m.pending) {
       const act = document.createElement('div'); act.className = 'actions';
+      const nv = Versions.count(m);
+      if (nv > 1) act.appendChild(buildVerSwitch(m, nv, pst && pst.dim));
       if (m.content) act.appendChild(mkAct(ICON.copy, '复制', () => copyText(m.content)));
-      if (m.role === 'assistant' && isLast && !running) act.appendChild(mkAct(ICON.redo, '重新生成', regenerate));
+      if (m.role === 'assistant' && !running && !m.imageGen && !(pst && pst.dim) && (isLast || !rpFrozen(m))) act.appendChild(mkAct(ICON.redo, isLast ? '重新生成' : '从这里重新生成', () => regenerate(m)));
+      else if (m.role === 'assistant' && isLast && !running && m.imageGen) act.appendChild(mkAct(ICON.redo, '重新生成', () => regenerate(m)));
       if (m.role === 'user' && !running && !m.imageGen) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (m.role === 'assistant' && !running && !m.imageGen && m.content) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (!running) act.appendChild(mkAct(ICON.trash, '删除', () => deleteMsg(m)));
@@ -626,13 +629,110 @@
   $('#messages').addEventListener('scroll', () => $('.main-top').classList.toggle('scrolled', $('#messages').scrollTop > 4), { passive: true });
 
   function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); saveConv(); renderMessages(); }
+
+  // ---------------- 回复版本 / 对话分支 ----------------
+  /** RP：已写入章节摘要（或超出预算未发送）的消息不能切换版本 */
+  function rpFrozen(m) {
+    const st = Plugins.registry.messageState(m, settings, conv, pluginHost);
+    return !!(st && st.dim);
+  }
+  function buildVerSwitch(m, n, frozen) {
+    const i = Versions.index(m);
+    const w = document.createElement('span'); w.className = 'ver-sw' + (frozen ? ' frozen' : '');
+    w.innerHTML = '<button class="vs-prev" aria-label="上一个版本"' + (i <= 0 ? ' disabled' : '') + '>‹</button>' +
+      '<button class="vs-label" aria-label="版本管理">' + (i + 1) + ' / ' + n + '</button>' +
+      '<button class="vs-next" aria-label="下一个版本"' + (i >= n - 1 ? ' disabled' : '') + '>›</button>';
+    w.querySelector('.vs-prev').onclick = () => switchVersion(m, i - 1);
+    w.querySelector('.vs-next').onclick = () => switchVersion(m, i + 1);
+    w.querySelector('.vs-label').onclick = () => versionMenu(m);
+    return w;
+  }
+  const VER_RP_WARN = '本对话开启了 RP 缓存优化：切换较早回复的版本会改变对话历史，下一轮缓存命中率会下降一次。';
+  /** 改变「较早」历史前的确认（RP 对话）。返回 false = 取消 */
+  async function confirmHistoryChange(m, title, body, kind) {
+    const idx = conv.messages.indexOf(m);
+    const later = idx >= 0 && idx < conv.messages.length - 1;
+    if (!later || !rpOn(conv)) return true;
+    if (body !== false) { // body === false：调用方已经提示过（例如编辑器里的 RP 提示），不再弹窗
+      const ok = await dialog({ title, body: body || VER_RP_WARN, okText: '继续' });
+      if (!ok) return false;
+    }
+    const d = Plugins.registry.convData(conv, 'rpcache');
+    d.state = RPCache.markHistoryCause(d.state, { kind }, Date.now());
+    return true;
+  }
+  /** 保持被操作消息在屏幕上的位置不变（避免跳动） */
+  function rerenderKeeping(m) {
+    const box = $('#messages');
+    const el = box.querySelector('.msg[data-id="' + m.id + '"]');
+    const top = el ? el.getBoundingClientRect().top : null;
+    renderMessages();
+    const el2 = box.querySelector('.msg[data-id="' + m.id + '"]');
+    if (el2 && top != null) box.scrollTop = box.scrollTop + (el2.getBoundingClientRect().top - top);
+  }
+  async function switchVersion(m, k) {
+    if (running) { toast('请先停止当前生成'); return; }
+    const n = Versions.count(m); if (k < 0 || k >= n || k === Versions.index(m)) return;
+    if (rpFrozen(m)) { toast('这条消息已写入章节摘要（或超出预算未发送），不能切换版本'); return; }
+    const i = conv.messages.indexOf(m); if (i < 0) return;
+    const before = conv.messages.length - i - 1;
+    if (!(await confirmHistoryChange(m, '切换到第 ' + (k + 1) + ' 个版本？', null, 'version'))) return;
+    conv.messages = Versions.select(conv.messages, i, k);
+    saveConv(conv, false); rerenderKeeping(m); renderConvBar();
+    const after = conv.messages.length - i - 1;
+    if (before || after) toast('已切换到第 ' + (k + 1) + ' 个版本' + (after ? '，后面显示该版本的 ' + after + ' 条对话' : '（该版本之后还没有对话）'));
+  }
+  function versionMenu(m) {
+    if (running) { toast('请先停止当前生成'); return; }
+    const n = Versions.count(m), i = Versions.index(m);
+    const items = [];
+    for (let k = 0; k < n; k++) if (k !== i) items.push({ label: '切换到第 ' + (k + 1) + ' 个：' + Versions.versionContent(m, k).replace(/\s+/g, ' ').slice(0, 24), icon: ICON.chevR, onClick: () => switchVersion(m, k) });
+    items.push({ label: '只保留当前版本（第 ' + (i + 1) + ' 个）', icon: ICON.check, onClick: () => keepOnlyVersion(m) });
+    items.push({ label: '删除当前版本', icon: ICON.trash, danger: true, onClick: () => deleteVersion(m, i) });
+    actionSheet((m.role === 'user' ? '消息' : '回复') + '版本 ' + (i + 1) + ' / ' + n, items);
+  }
+  async function deleteVersion(m, k) {
+    if (rpFrozen(m)) { toast('这条消息已写入章节摘要，不能修改版本'); return; }
+    const i = conv.messages.indexOf(m); if (i < 0) return;
+    const tl = Versions.tailLength(conv.messages, i, k);
+    const ok = await dialog({ title: '删除第 ' + (k + 1) + ' 个版本？', body: (tl ? '这个版本之后的 ' + tl + ' 条对话也会一起删除。' : '删除后无法恢复。') + (rpOn(conv) && i < conv.messages.length - 1 ? '\n' + VER_RP_WARN : ''), okText: '删除', danger: true });
+    if (!ok) return;
+    if (rpOn(conv) && i < conv.messages.length - 1) { const d = Plugins.registry.convData(conv, 'rpcache'); d.state = RPCache.markHistoryCause(d.state, { kind: 'delete' }, Date.now()); }
+    conv.messages = Versions.removeVersion(conv.messages, i, k);
+    saveConv(conv, false); rerenderKeeping(m); renderConvBar(); toast('已删除该版本');
+  }
+  async function keepOnlyVersion(m) {
+    const i = conv.messages.indexOf(m); if (i < 0) return;
+    const n = Versions.count(m);
+    const ok = await dialog({ title: '只保留当前版本？', body: '其他 ' + (n - 1) + ' 个版本（以及它们之后的对话分支）会被删除，当前显示的内容不变。', okText: '只保留这个', danger: true });
+    if (!ok) return;
+    conv.messages = Versions.keepOnly(conv.messages, i);
+    saveConv(conv, false); rerenderKeeping(m); toast('已只保留当前版本');
+  }
+  // 左右滑动回复切换版本（避开代码块 / 表格等可横向滚动的区域）
+  (function () {
+    let sx = 0, sy = 0, el = null, t0 = 0;
+    const box = $('#messages');
+    box.addEventListener('touchstart', e => {
+      const t = e.touches[0]; el = e.target.closest('.msg'); sx = t.clientX; sy = t.clientY; t0 = Date.now();
+      if (el && e.target.closest('pre, table, .code-block, .src-row, .msg-images, .ver-sw, .actions')) el = null;
+    }, { passive: true });
+    box.addEventListener('touchend', e => {
+      if (!el) return;
+      const t = e.changedTouches[0]; const dx = t.clientX - sx, dy = t.clientY - sy;
+      const m = conv.messages.find(x => x.id === el.dataset.id); el = null;
+      if (!m || Versions.count(m) < 2 || Date.now() - t0 > 600 || Math.abs(dx) < 70 || Math.abs(dy) > 40) return;
+      switchVersion(m, Versions.index(m) + (dx < 0 ? 1 : -1));
+    }, { passive: true });
+  })();
+
   /** 编辑消息：全屏编辑器。用户消息可「保存」或「保存并重新发送」；AI 回复可「保存」 */
   async function editMsg(m) {
     const user = m.role === 'user';
     const idx = conv.messages.indexOf(m);
     const after = conv.messages.length - idx - 1;
     const rp = rpOn(conv);
-    let hint = user ? (after ? '「保存并重新发送」会删除这条之后的 ' + after + ' 条消息，并用新内容重新生成；「保存」只修改这条消息。' : '「保存并重新发送」会用新内容重新生成回复。')
+    let hint = user ? (after ? '「保存并重新发送」会从这里开出一个新分支重新生成，原来的内容和之后的 ' + after + ' 条消息保留在旧版本里（可用 ‹ › 切换回去）；「保存」只修改这条消息。' : '「保存并重新发送」会用新内容重新生成回复。')
       : '修改这条 AI 回复的内容，后续对话会以修改后的内容作为上下文。';
     if ((m.images && m.images.length) || (m.files && m.files.length)) hint += '图片和文件附件会保留。';
     if (rp && (after || !user)) hint += '\n本对话开启了 RP 缓存优化：修改历史消息会改变历史前缀，下一轮缓存命中率会下降一次。';
@@ -643,11 +743,16 @@
     const t = r.text;
     if (r.key === 'resend') {
       if (!t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
-      conv.messages = conv.messages.slice(0, conv.messages.indexOf(m));
-      input.value = t; attachments = (m.images || []).slice();
-      docs = (m.files || []).map(f => Object.assign({}, f, { id: uid(), status: 'ok' }));
-      renderAttachments();
-      saveConv(); renderMessages(); send();
+      if (running) { toast('请先停止当前生成'); return; }
+      const p = ensureProvider(); if (!p) return;
+      if (settings.searchOn && !searchReady()) { askSearchSetup(); return; }
+      if (!(await confirmHistoryChange(m, '编辑并重新发送？', false, 'branch'))) return;
+      // 新分支：这条消息新增一个版本，原来的内容和后面的对话保留在旧版本里（‹ 1/2 › 切换）
+      const init = { content: t, createdAt: Date.now() };
+      if (m.images && m.images.length) init.images = m.images.slice();
+      if (m.files && m.files.length) init.files = m.files.slice();
+      conv.messages = Versions.addVersion(conv.messages, conv.messages.indexOf(m), init);
+      saveConv(); renderMessages(); runChat(p);
       return;
     }
     if (t === (m.content || '')) return;
@@ -700,9 +805,33 @@
     input.value = ''; autosize(); attachments = []; docs = []; renderAttachments();
     runChat(p);
   }
-  function regenerate() {
+  /** 重新生成：保留旧回复为一个版本（‹ 1/2 ›）。较早的回复也可以重新生成，后面的对话保留在旧版本的分支里 */
+  async function regenerate(target) {
     if (running) return;
     const last = conv.messages[conv.messages.length - 1];
+    const m = target && target.role === 'assistant' ? target : last;
+    if (m && m.role === 'assistant' && !m.imageGen) {
+      const i = conv.messages.indexOf(m); if (i < 0) return;
+      const p = ensureProvider(); if (!p) return;
+      if (settings.searchOn && !searchReady()) { askSearchSetup(); return; }
+      if (i < conv.messages.length - 1) {
+        if (rpFrozen(m)) { toast('这条回复已写入章节摘要，不能重新生成'); return; }
+        const rest = conv.messages.length - i - 1;
+        const ok = await dialog({ title: '从这里重新生成？', body: '会为这条回复生成一个新版本。之后的 ' + rest + ' 条对话保留在旧版本里，可以用 ‹ › 切换回去。' +
+          (rpOn(conv) ? '\n\n本对话开启了 RP 缓存优化：从较早的回复重新生成会改变对话历史，下一轮缓存命中率会下降一次。' : ''), okText: '重新生成' });
+        if (!ok) return;
+        if (rpOn(conv)) { const d = Plugins.registry.convData(conv, 'rpcache'); d.state = RPCache.markHistoryCause(d.state, { kind: 'regen' }, Date.now()); }
+      }
+      // 失败 / 空的回复不保留为版本，直接在原位置重试
+      if ((m.error || m.stopped) && !m.content && i === conv.messages.length - 1) {
+        if (Versions.count(m) === 1) conv.messages.pop();
+        else { Versions.applySnap(m, {}); return runChat(p, { bot: m }); }
+      } else {
+        conv.messages = Versions.addVersion(conv.messages, i, {});
+        return runChat(p, { bot: m });
+      }
+      return runChat(p);
+    }
     if (last && last.role === 'assistant') {
       if (last.imageGen) {
         conv.messages.pop(); const u = conv.messages.pop(); const p = ensureProvider();
@@ -790,15 +919,17 @@
     return { role: m.role, content, images: m.images };
   }
 
-  async function runChat(p) {
+  async function runChat(p, opts) {
     const thisConv = conv;
-    const lastUser = conv.messages.slice().reverse().find(m => m.role === 'user' && !m.imageGen);
+    const reuse = opts && opts.bot; // 重新生成：在同一个消息位置写入新版本
+    const lastUser = conv.messages.slice().reverse().find(m => m.role === 'user' && !m.imageGen && m !== reuse);
     const wantSearch = !!(settings.searchOn && searchReady() && lastUser && (lastUser.content || '').trim());
-    const bot = { id: uid(), role: 'assistant', content: '', reasoning: '', pending: true, model: conv.model, createdAt: Date.now() };
+    const bot = reuse || { id: uid(), role: 'assistant' };
+    Object.assign(bot, { content: '', reasoning: '', pending: true, model: conv.model, createdAt: Date.now() });
     if (conv.personaName) { bot.personaName = conv.personaName; bot.personaEmoji = conv.personaEmoji; }
     if (wantSearch) bot.searching = true;
     if (lastUser) delete lastUser.search;
-    conv.messages.push(bot);
+    if (!reuse) conv.messages.push(bot);
     renderMessages();
     settings.lastProviderId = p.id; settings.lastModel = conv.model; saveSettings();
     saveConv(); renderConvList();

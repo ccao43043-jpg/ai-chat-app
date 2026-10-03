@@ -137,3 +137,61 @@ test('切换提示词模板：显式更新 L1，下一轮日志 static=CHANGED �
   logs = JSON.parse(host.raw['rplog_c-tpl.json']);
   assert.strictEqual(logs[2].diag.static, 'SAME');
 });
+
+// v0.3.4：回复版本。请求必须与「只有选中版本」时逐字节一致
+const V = require('../app/src/main/assets/www/versions.js');
+async function bodyOf(conv) {
+  const settings = {}; const host = mkHost(conv, settings, '');
+  const last = conv.messages[conv.messages.length - 1];
+  const ctx = { conv, provider: ds, model: 'deepseek-flash', systemPrompt: conv.systemPrompt, settings, lastUser: last, meta: {}, opts: { stream: true },
+    messages: conv.messages.map(m => ({ role: m.role, content: m.content, _src: m })), setStatus() {}, setCancel() {} };
+  const out = await reg.runBeforeRequest(ctx, host);
+  return P.buildChatRequest(ds, out.model, out.messages, out.systemPrompt, out.opts).body;
+}
+function rpConvWith(msgs, id) {
+  const c = { id, systemPrompt: '你是RP助手', messages: msgs };
+  reg.setForConversation(c, 'rpcache', true);
+  reg.convData(c, 'rpcache').state = R.setBlock(R.normalizeState(null), 'state', 'HP: 80', 1).state;
+  return c;
+}
+test('RP + 版本：请求与只有选中版本时逐字节一致（含切换后、用户消息分支的冻结原文）', async () => {
+  const base = () => [{ id: 'u1', role: 'user', content: '推门', rpSent: '【搜索结果】推门' }, { id: 'a1', role: 'assistant', content: '回复 A' },
+    { id: 'u2', role: 'user', content: '拔剑', rpSent: '拔剑' }, { id: 'a2', role: 'assistant', content: '回复 X' }, { id: 'u3', role: 'user', content: '继续' }];
+  // 带版本：a1 有 A / B 两个版本，选中 B；a2 有 X / Y，选中 Y
+  let msgs = base();
+  msgs = V.addVersion(msgs, 3, { content: '回复 Y', usage: { prompt: 1 } }); msgs.push({ id: 'u3', role: 'user', content: '继续' });
+  const withVer = await bodyOf(rpConvWith(msgs.slice(), 'cv1'));
+  const plain = base(); plain[3].content = '回复 Y';
+  assert.strictEqual(withVer, await bodyOf(rpConvWith(plain, 'cv2')));
+  assert.ok(!withVer.includes('回复 X') && !withVer.includes('versions'));
+  // 较早回复分支：a1 选 B（其后对话不同）
+  let m2 = V.addVersion(base(), 1, { content: '回复 B' }); m2.push({ id: 'u7', role: 'user', content: 'B 线的问题' });
+  const b1 = await bodyOf(rpConvWith(m2, 'cv3'));
+  assert.strictEqual(b1, await bodyOf(rpConvWith([{ id: 'u1', role: 'user', content: '推门', rpSent: '【搜索结果】推门' }, { id: 'a1', role: 'assistant', content: '回复 B' }, { id: 'u7', role: 'user', content: 'B 线的问题' }], 'cv4')));
+  // 切回 A：恢复原分支（含冻结原文）
+  m2 = V.select(m2, 1, 0);
+  assert.strictEqual(await bodyOf(rpConvWith(m2, 'cv5')), await bodyOf(rpConvWith(base(), 'cv6')));
+});
+
+test('RP + 版本：切换较早回复 → 下一轮 History CHANGED，原因写明「切换了较早回复的版本」', async () => {
+  const settings = {}; const conv = { id: 'c-ver', systemPrompt: 'S', messages: [] };
+  reg.setForConversation(conv, 'rpcache', true);
+  const host = mkHost(conv, settings, '');
+  await send(conv, settings, host, '一'); await send(conv, settings, host, '二');
+  // 在第一条回复上新增版本并选中（模拟重新生成后切换），保留后续消息为另一分支
+  let msgs = V.addVersion(conv.messages, 1, { content: '回复：一（第二版）' });
+  msgs = V.select(msgs, 1, 0); // 回到原版本：历史不变
+  conv.messages = msgs;
+  await send(conv, settings, host, '三');
+  let logs = JSON.parse(host.raw['rplog_c-ver.json']);
+  assert.strictEqual(logs[2].diag.history, 'APPEND', '切回原版本 = 历史不变');
+  conv.messages = V.select(conv.messages, 1, 1);
+  const d = reg.convData(conv, 'rpcache'); d.state = R.markHistoryCause(d.state, { kind: 'version' }, 9);
+  assert.deepStrictEqual(conv.messages.map(m => m.content), ['一', '回复：一（第二版）']);
+  await send(conv, settings, host, '四');
+  logs = JSON.parse(host.raw['rplog_c-ver.json']);
+  assert.strictEqual(logs[3].diag.history, 'CHANGED');
+  assert.strictEqual(logs[3].reason, '切换了较早回复的版本，对话历史改变');
+  assert.strictEqual(logs[3].history_cause.kind, 'version');
+  assert.strictEqual(reg.convData(conv, 'rpcache').state.pendingHistoryCause, null, '成功后清除');
+});
