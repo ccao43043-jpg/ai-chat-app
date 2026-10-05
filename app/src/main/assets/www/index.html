@@ -82,28 +82,36 @@
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新对话
     </button>
   </div>
+  <div class="drawer-sec-label" id="drawer-sec-chats">对话</div>
   <div id="conv-list"></div>
   <div class="drawer-foot">
-    <button class="row-btn" id="btn-personas">
-      <span class="row-ic grad"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg></span>
-      <span class="row-text"><span>助手与提示词</span><small id="persona-count">选择助手开始新对话</small></span>
-    </button>
-    <button class="row-btn" id="btn-templates">
-      <span class="row-ic"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg></span>
-      <span class="row-text"><span>提示词模板</span><small id="template-count">一键切换对话的系统提示词</small></span>
-    </button>
-    <button class="row-btn" id="btn-usage">
-      <span class="row-ic"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16V10M12 16V7M16 16v-5"/></svg></span>
-      <span class="row-text"><span>用量统计</span><small id="usage-count">全部对话的 Token 用量</small></span>
-    </button>
-    <button class="row-btn" id="btn-plugins">
-      <span class="row-ic"><svg viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 114 0V6h3a1 1 0 011 1v3h-1.5a2 2 0 100 4H18v3a1 1 0 01-1 1h-3v-1.5a2 2 0 10-4 0V18H7a1 1 0 01-1-1v-3h1.5a2 2 0 100-4H6V7a1 1 0 011-1h3z"/></svg></span>
-      <span class="row-text"><span>插件</span><small id="plugin-count">RP 缓存优化等</small></span>
-    </button>
-    <button class="row-btn" id="btn-settings">
-      <span class="row-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></span>
-      <span class="row-text"><span>设置</span><small>服务商、API Key 与偏好</small></span>
-    </button>
+    <div class="drawer-sec-label">功能</div>
+    <div class="drawer-grid">
+      <button class="feat-btn" id="btn-personas">
+        <span class="feat-ic grad"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg></span>
+        <span class="feat-text"><span>助手</span><small id="persona-count">助手与提示词</small></span>
+      </button>
+      <button class="feat-btn" id="btn-templates">
+        <span class="feat-ic"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg></span>
+        <span class="feat-text"><span>模板</span><small id="template-count">提示词模板</small></span>
+      </button>
+      <button class="feat-btn" id="btn-usage">
+        <span class="feat-ic"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16V10M12 16V7M16 16v-5"/></svg></span>
+        <span class="feat-text"><span>用量</span><small id="usage-count">Token 统计</small></span>
+      </button>
+      <button class="feat-btn" id="btn-balance">
+        <span class="feat-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="M3.5 10h17"/><circle cx="15.5" cy="14" r="1.2"/></svg></span>
+        <span class="feat-text"><span>余额</span><small id="balance-count">账户余额</small></span>
+      </button>
+      <button class="feat-btn" id="btn-plugins">
+        <span class="feat-ic"><svg viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 114 0V6h3a1 1 0 011 1v3h-1.5a2 2 0 100 4H18v3a1 1 0 01-1 1h-3v-1.5a2 2 0 10-4 0V18H7a1 1 0 01-1-1v-3h1.5a2 2 0 100-4H6V7a1 1 0 011-1h3z"/></svg></span>
+        <span class="feat-text"><span>插件</span><small id="plugin-count">RP 等</small></span>
+      </button>
+      <button class="feat-btn" id="btn-settings">
+        <span class="feat-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></span>
+        <span class="feat-text"><span>设置</span><small>服务商与偏好</small></span>
+      </button>
+    </div>
   </div>
 </aside>
 
@@ -152,6 +160,7 @@
     </div>
 
     <div class="group-title">插件</div>
+    <div class="group"><button class="prov-item" id="set-balance"><span class="avatar lg" style="background:var(--grad)">💳</span><div class="pi-main"><div class="pi-name">账户余额</div><div class="pi-sub" id="set-balance-sub">查看各服务商余额与额度</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
     <div class="group"><button class="prov-item" id="set-usage"><span class="avatar lg" style="background:var(--grad)">📈</span><div class="pi-main"><div class="pi-name">用量统计</div><div class="pi-sub" id="set-usage-sub">全部对话的 Token 与估算花费</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
     <div class="group"><button class="prov-item" id="set-plugins"><span class="avatar lg" style="background:var(--grad)">🧩</span><div class="pi-main"><div class="pi-name">插件</div><div class="pi-sub" id="set-plugins-sub">管理内置插件</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
 
@@ -159,7 +168,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.3.5 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.3.6 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -245,6 +254,17 @@
   </div>
 </section>
 
+
+
+<!-- 账户余额 -->
+<section id="page-balance" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title">账户余额</div>
+    <button class="text-btn" id="bal-refresh">刷新全部</button>
+  </header>
+  <div class="page-body" id="bal-body"></div>
+</section>
 
 <!-- 用量统计 -->
 <section id="page-usage" class="page">
@@ -481,6 +501,7 @@
 <script src="templates.js"></script>
 <script src="versions.js"></script>
 <script src="usage-stats.js"></script>
+<script src="balance.js"></script>
 <script src="plugins.js"></script>
 <script src="rpcache.js"></script>
 <script src="rp-plugin.js"></script>

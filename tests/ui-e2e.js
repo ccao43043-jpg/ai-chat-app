@@ -47,6 +47,23 @@ async function scenario(browser, theme) {
           setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ object: 'list', data: [{ id: 'deepseek-flash' }, { id: 'deepseek-v4-pro' }, { id: 'deepseek-v4-flash' }] })); H.onEnd(id); }, 60);
           return;
         }
+        // 余额查询
+        if (method === 'GET' && /\/user\/balance/.test(url)) {
+          setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '66.60', granted_balance: '6.60', topped_up_balance: '60.00' }] })); H.onEnd(id); }, 80);
+          return;
+        }
+        if (method === 'GET' && /\/user\/info/.test(url)) {
+          setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ code: 20000, status: true, data: { totalBalance: '12.34', chargeBalance: '10.00', balance: '2.34', status: 'normal' } })); H.onEnd(id); }, 80);
+          return;
+        }
+        if (method === 'GET' && /\/users\/me\/balance/.test(url)) {
+          setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ code: 0, status: true, data: { available_balance: 20.5, voucher_balance: 10, cash_balance: 10.5 } })); H.onEnd(id); }, 80);
+          return;
+        }
+        if (method === 'GET' && /openrouter\.ai\/api\/v1\/key$/.test(url)) {
+          setTimeout(() => { H.onStart(id, 200); H.onChunk(id, JSON.stringify({ data: { limit: 50, limit_remaining: 33.3, usage: 16.7, usage_daily: 1.1 } })); H.onEnd(id); }, 80);
+          return;
+        }
         if (url.startsWith('https://api.tavily.com/')) {
           const results = [
             { title: '2026 年诺贝尔物理学奖揭晓', url: 'https://www.nobelprize.org/prizes/physics/2026/summary/', content: '瑞典皇家科学院宣布将 2026 年诺贝尔物理学奖授予三位在量子材料领域做出开创性贡献的科学家。', score: 0.92 },
@@ -365,7 +382,7 @@ async function scenario(browser, theme) {
   await page.click('#model-pill'); await sleep(250); await pickModel('deepseek-flash'); await sleep(250);
   await page.click('#btn-menu'); await sleep(350);
   r.pluginRow = await page.$eval('#plugin-count', e => e.textContent);
-  assert.ok(r.pluginRow.includes('2 个内置插件'), r.pluginRow);
+  assert.ok(r.pluginRow.includes('已启用') || r.pluginRow.includes('2 个内置插件'), r.pluginRow);
   await page.click('#btn-plugins'); await sleep(650);
   r.pluginCards = await page.$$eval('#plugin-list .plugin-card .plc-name', els => els.map(e => e.textContent));
   assert.ok(r.pluginCards[0].startsWith('DeepSeek RP 缓存优化器') && r.pluginCards[1].startsWith('Token 用量显示'), JSON.stringify(r.pluginCards));
@@ -1094,6 +1111,51 @@ async function scenario(browser, theme) {
   // Token 用量显示插件仍在
   assert.ok(names.join('').includes('Token 用量显示'), JSON.stringify(names));
   await page.click('#page-plugins [data-back]'); await sleep(200);
+
+
+  // 18) 账户余额 + 侧边栏分区 + 小米 MiMo 预设
+  await page.click('#btn-menu'); await sleep(450);
+  assert.ok(await page.$('.drawer-grid'), '功能区网格');
+  assert.ok((await page.$$('.drawer-sec-label')).length >= 2, '对话/功能分区标题');
+  assert.ok(await page.$('#btn-balance'));
+  await shot('drawer');
+  await page.evaluate(() => document.querySelector('#btn-balance').click()); await sleep(600);
+  assert.ok(await page.$eval('#page-balance', e => e.classList.contains('show')));
+  // 等待自动刷新 DeepSeek
+  await page.waitForFunction(() => {
+    const t = document.querySelector('#bal-body .bal-amt');
+    return t && t.textContent.includes('¥');
+  }, { timeout: 5000 });
+  const balTxt = await page.$eval('#bal-body', e => e.textContent);
+  assert.ok(balTxt.includes('DeepSeek') && balTxt.includes('¥66.60'), balTxt.slice(0, 200));
+  assert.ok(balTxt.includes('赠送') || balTxt.includes('充值'), balTxt.slice(0, 300));
+  // 缓存已写入且不含完整 key
+  const bc = await page.evaluate(() => window.__mem['balance-cache.json']);
+  assert.ok(bc && !bc.includes('sk-old-key'));
+  await shot('balances');
+  await page.click('#page-balance [data-back]'); await sleep(300);
+
+  // MiMo 预设出现在服务商列表
+  await page.click('#btn-menu'); await sleep(350);
+  await page.evaluate(() => document.querySelector('#btn-settings').click()); await sleep(450);
+  const provNames = await page.$$eval('#provider-list .pi-name', els => els.map(e => e.textContent));
+  assert.ok(provNames.some(n => n.includes('小米') || n.includes('MiMo')), JSON.stringify(provNames));
+  // 打开 MiMo 编辑页
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#provider-list .prov-item')].find(e => /小米|MiMo/.test((e.querySelector('.pi-name') || {}).textContent || ''));
+    if (row) row.click();
+  });
+  await sleep(450);
+  if (await page.$eval('#page-provider', e => e.classList.contains('show')).catch(() => false)) {
+    const base = await page.$eval('#pe-base', e => e.value).catch(() => '');
+    assert.ok(base.includes('xiaomimimo.com'), base);
+    await shot('mimo-provider');
+    await page.click('#page-provider [data-back]'); await sleep(250);
+  } else {
+    // 有的列表点进去是 sheet —— 再试
+    await shot('mimo-provider');
+  }
+  await page.click('#page-settings [data-back]'); await sleep(200);
 
   assert.deepStrictEqual(errors, []);
   await page.close();

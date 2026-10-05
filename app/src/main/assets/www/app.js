@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.5';
+  const APP_VERSION = '0.3.6';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -24,7 +24,7 @@
     warn: '<svg viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.2v.1"/></svg>',
   };
   const PROVIDER_COLORS = { openai: '#10a37f', deepseek: '#4d6bfe', qwen: '#615ced', moonshot: '#16191e', zhipu: '#2f5bff',
-    siliconflow: '#7c3aed', openrouter: '#6467f2', anthropic: '#d97757', gemini: '#4285f4', custom: '#64748b' };
+    siliconflow: '#7c3aed', xiaomi: '#ff6900', openrouter: '#6467f2', anthropic: '#d97757', gemini: '#4285f4', custom: '#64748b' };
   function avatarHtml(p, cls) {
     const color = PROVIDER_COLORS[p && p.presetId] || PROVIDER_COLORS.custom;
     const ch = ((p && p.name) || '?').trim().charAt(0).toUpperCase();
@@ -187,9 +187,9 @@
     const t = UsageStats.sumList(today);
     const el = $('#usage-count');
     if (!el) return;
-    if (!t.requests) { el.textContent = '全部对话的 Token 用量'; return; }
+    if (!t.requests) { el.textContent = 'Token 统计'; return; }
     const fmt = n => n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 1 : 2).replace(/\.?0+$/, '') + '万' : String(Math.round(n));
-    el.textContent = '今日 ' + fmt(t.total) + ' Token · ' + t.requests + ' 次';
+    el.textContent = '今日 ' + fmt(t.total);
     const sub = $('#set-usage-sub');
     if (sub) {
       const all = UsageStats.sumList(usageState.log);
@@ -1539,7 +1539,7 @@
     add.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建助手</span>';
     add.onclick = () => openPersonaEdit(null);
     box.appendChild(add);
-    $('#persona-count').textContent = personas.length + ' 个助手 · ' + prompts.length + ' 条提示词';
+    $('#persona-count').textContent = personas.length + ' 助手 · ' + prompts.length + ' 提示词';
   }
   async function deletePersona(ps) {
     const ok = await dialog({ title: '删除助手？', body: '「' + ps.name + '」将被删除，已有的对话不受影响。', okText: '删除', danger: true });
@@ -1651,7 +1651,7 @@
       el.onclick = () => openPromptEdit(x.id);
       box.appendChild(el);
     });
-    $('#persona-count').textContent = personas.length + ' 个助手 · ' + prompts.length + ' 条提示词';
+    $('#persona-count').textContent = personas.length + ' 助手 · ' + prompts.length + ' 提示词';
   }
   let editingPrompt = null;
   function openPromptEdit(id, preset) {
@@ -1694,6 +1694,10 @@
   const presetHints = {
     deepseek: 'DeepSeek 官方地址：https://api.deepseek.com',
     qwen: '也可使用百炼业务空间专属域名：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    xiaomi: '小米 MiMo 官方 OpenAI 兼容地址：https://api.xiaomimimo.com/v1（也可用 api-key 请求头；本应用使用 Bearer）',
+    moonshot: '余额查询：GET /users/me/balance',
+    siliconflow: '余额查询：GET /user/info',
+    openrouter: '额度查询：GET /key（账户总余额需管理密钥）',
   };
   function openProviderEdit(id, fresh) {
     editing = fresh || Object.assign({}, getProvider(id));
@@ -1960,7 +1964,7 @@
       el.onclick = () => openTemplateEdit(t.id);
       box.appendChild(el);
     });
-    $('#template-count').textContent = templates.length + ' 个模板 · 一键切换系统提示词';
+    $('#template-count').textContent = templates.length + ' 个模板';
   }
   function templateActions(t) {
     const vars = Templates.variables(t.content).length;
@@ -2076,6 +2080,10 @@
     const on = Plugins.registry.all().filter(pl => Plugins.registry.isGloballyEnabled(pl.id, settings)).length;
     return Plugins.registry.all().length + ' 个内置插件 · 已启用 ' + on;
   }
+  function pluginSummaryShort() {
+    const on = Plugins.registry.all().filter(pl => Plugins.registry.isGloballyEnabled(pl.id, settings)).length;
+    return '已启用 ' + on;
+  }
   function openPlugins() { closeDrawer(); renderPluginList(); $('#page-plugins').classList.add('show'); }
   function closePlugins() { $('#page-plugins').classList.remove('show'); renderAll(); }
   function renderPluginList() {
@@ -2091,7 +2099,7 @@
         '<div class="plc-settings" hidden></div>';
       card.querySelector('.switch').onchange = e => {
         Plugins.registry.setGlobal(settings, pl.id, e.target.checked); saveSettings();
-        card.classList.toggle('on', e.target.checked); $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
+        card.classList.toggle('on', e.target.checked); $('#plugin-count').textContent = pluginSummaryShort(); $('#set-plugins-sub').textContent = pluginSummary();
         toast((e.target.checked ? '已启用 ' : '已停用 ') + pl.name);
       };
       const op = card.querySelector('.plc-open'); if (op) op.onclick = () => openPluginPanel(pl.id);
@@ -2124,6 +2132,9 @@
   $('#btn-usage').onclick = () => { closeDrawer(); setTimeout(openUsage, 120); };
   $('#set-usage').onclick = () => openUsage();
   $('#us-more').onclick = () => usageMore();
+  $('#btn-balance').onclick = () => { closeDrawer(); setTimeout(openBalance, 120); };
+  $('#set-balance').onclick = () => openBalance();
+  $('#bal-refresh').onclick = () => refreshBalances();
 
   // ---------------- 返回键 ----------------
   // 长文本框：全屏编辑按钮
@@ -2161,6 +2172,7 @@
     if (shown('#page-template')) { closeTemplateEdit(); return true; }
     if (shown('#page-templates')) { closeTemplates(); return true; }
     if (shown('#page-plugin')) { if (panelPlugin && panelPlugin.onBack && panelPlugin.onBack()) return true; closePluginPanel(); return true; }
+    if (shown('#page-balance')) { closeBalance(); return true; }
     if (shown('#page-usage')) { closeUsage(); return true; }
     if (shown('#page-plugins')) { closePlugins(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
@@ -2171,6 +2183,123 @@
     return false;
   };
 
+
+
+  // ---------------- 账户余额页 ----------------
+  let balanceCache = Store.get('balance-cache.json', {}) || {}; // { [providerId]: { at, result } }
+  const saveBalanceCache = () => Store.set('balance-cache.json', balanceCache);
+  function updateBalanceSubtitle() {
+    const el = $('#balance-count'); if (!el) return;
+    const n = configured().length;
+    const ok = Object.values(balanceCache).filter(x => x && x.result && x.result.ok).length;
+    el.textContent = n ? (ok ? ok + '/' + n + ' 已查询' : n + ' 个服务商') : '未配置 Key';
+    const sub = $('#set-balance-sub');
+    if (sub) sub.textContent = n ? ('已配置 ' + n + ' 个服务商' + (ok ? ' · ' + ok + ' 个有余额数据' : '')) : '填写 API Key 后可查询';
+  }
+  function openBalance() {
+    closeDrawer();
+    if ($('#page-settings').classList.contains('show')) closeSettings();
+    renderBalancePage();
+    $('#page-balance').classList.add('show');
+    // 自动刷新过期（>30 分钟）或从未查询的
+    const stale = configured().filter(p => {
+      const c = balanceCache[p.id];
+      return !c || !c.at || (Date.now() - c.at > 30 * 60 * 1000);
+    });
+    if (stale.length) setTimeout(() => refreshBalances(stale.map(p => p.id)), 200);
+  }
+  function closeBalance() { $('#page-balance').classList.remove('show'); updateBalanceSubtitle(); }
+  function renderBalancePage() {
+    const box = $('#bal-body'); if (!box) return;
+    const list = configured();
+    if (!list.length) {
+      box.innerHTML = '<div class="bal-empty">还没有配置带 API Key 的服务商。<br>去「设置」里填写 Key 后再来查看余额。</div>' +
+        '<div style="text-align:center"><button class="chip-btn accent" id="bal-go-set">打开设置</button></div>';
+      const b = box.querySelector('#bal-go-set'); if (b) b.onclick = () => { closeBalance(); openSettings(); };
+      return;
+    }
+    let html = '<div class="bal-hint">支持官方余额接口的服务商可一键查询；其余显示「不支持查询」并提供控制台链接。不会在界面或日志中展示完整 API Key。</div>';
+    list.forEach(p => {
+      const info = Balance.supportInfo(p.presetId);
+      const cached = balanceCache[p.id];
+      const r = cached && cached.result;
+      let amt = '', amtCls = 'muted', details = '', actions = '';
+      if (!info.supported) {
+        amt = '不支持查询'; amtCls = 'muted';
+        actions = info.consoleUrl ? '<button class="chip-btn bal-console" data-url="' + esc(info.consoleUrl) + '">打开控制台</button>' : '';
+      } else if (cached && cached.loading) {
+        amt = '查询中…'; amtCls = 'muted';
+      } else if (r && r.ok) {
+        amt = r.primary ? r.primary.text : '—'; amtCls = '';
+        if (r.details && r.details.length) {
+          details = '<div class="bal-details">' + r.details.map(d =>
+            '<div class="bal-d"><span>' + esc(d.label) + '</span><b>' + esc(d.text) + '</b></div>').join('') + '</div>';
+        }
+        const when = cached.at ? new Date(cached.at) : null;
+        const tstr = when ? (when.getMonth() + 1) + '/' + when.getDate() + ' ' + String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0') : '';
+        actions = '<button class="chip-btn bal-one" data-id="' + esc(p.id) + '">刷新</button>' +
+          (info.consoleUrl ? '<button class="chip-btn bal-console" data-url="' + esc(info.consoleUrl) + '">控制台</button>' : '') +
+          (tstr ? '<span class="bal-sub" style="margin-left:auto">更新于 ' + tstr + '</span>' : '');
+      } else if (r && r.unsupported) {
+        amt = '不支持查询'; amtCls = 'muted';
+        actions = (r.consoleUrl || info.consoleUrl) ? '<button class="chip-btn bal-console" data-url="' + esc(r.consoleUrl || info.consoleUrl) + '">打开控制台</button>' : '';
+      } else if (r && r.error) {
+        amt = r.error; amtCls = 'err';
+        actions = '<button class="chip-btn bal-one" data-id="' + esc(p.id) + '">重试</button>' +
+          (info.consoleUrl ? '<button class="chip-btn bal-console" data-url="' + esc(info.consoleUrl) + '">控制台</button>' : '');
+      } else {
+        amt = '尚未查询'; amtCls = 'muted';
+        actions = '<button class="chip-btn bal-one" data-id="' + esc(p.id) + '">查询</button>' +
+          (info.consoleUrl ? '<button class="chip-btn bal-console" data-url="' + esc(info.consoleUrl) + '">控制台</button>' : '');
+      }
+      html += '<div class="bal-card" data-pid="' + esc(p.id) + '"><div class="bal-top">' + avatarHtml(p, 'lg') +
+        '<div style="min-width:0"><div class="bal-name">' + esc(p.name) + '</div>' +
+        '<div class="bal-sub">' + esc(p.presetId || p.type) + (info.supported ? ' · 可查询' : '') + '</div></div>' +
+        '<div class="bal-amt ' + amtCls + '">' + esc(amt) + '</div></div>' + details +
+        (actions ? '<div class="bal-actions">' + actions + '</div>' : '') + '</div>';
+    });
+    // 列出无 Key 但已有预设的，提示可去设置
+    const noKey = settings.providers.filter(p => p.presetId !== 'custom' && !(p.apiKey && p.apiKey.trim()));
+    if (noKey.length) {
+      html += '<div class="group-title">未填写 API Key</div><div class="hint">在设置中为 ' +
+        noKey.slice(0, 4).map(p => esc(p.name)).join('、') + (noKey.length > 4 ? ' 等' : '') + ' 填写 Key 后即可出现在上方。</div>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('.bal-console').forEach(b => b.onclick = () => openUrl(b.dataset.url));
+    box.querySelectorAll('.bal-one').forEach(b => b.onclick = () => refreshBalances([b.dataset.id]));
+  }
+  async function refreshBalances(ids) {
+    const targets = (ids && ids.length) ? configured().filter(p => ids.includes(p.id)) : configured();
+    if (!targets.length) { toast('没有可查询的服务商'); return; }
+    const btn = $('#bal-refresh'); if (btn) btn.disabled = true;
+    targets.forEach(p => {
+      balanceCache[p.id] = Object.assign({}, balanceCache[p.id], { loading: true });
+    });
+    renderBalancePage();
+    await Promise.all(targets.map(async p => {
+      const info = Balance.supportInfo(p.presetId);
+      if (!info.supported) {
+        balanceCache[p.id] = { at: Date.now(), result: { ok: false, unsupported: true, error: info.hint, consoleUrl: info.consoleUrl } };
+        return;
+      }
+      const req = Balance.buildBalanceRequest(p);
+      if (!req) {
+        balanceCache[p.id] = { at: Date.now(), result: { ok: false, error: '无法构造请求', consoleUrl: info.consoleUrl } };
+        return;
+      }
+      try {
+        const r = await httpSimple(req);
+        const parsed = Balance.parseBalanceResponse(p.presetId, r.status, r.text);
+        balanceCache[p.id] = { at: Date.now(), result: parsed };
+      } catch (e) {
+        balanceCache[p.id] = { at: Date.now(), result: { ok: false, error: '网络错误：' + (e && e.message || e), consoleUrl: info.consoleUrl } };
+      }
+    }));
+    saveBalanceCache();
+    if (btn) btn.disabled = false;
+    if ($('#page-balance').classList.contains('show')) renderBalancePage();
+    updateBalanceSubtitle();
+  }
 
   // ---------------- 用量统计页 ----------------
   let usRange = '30d', usTab = 'day', usCustom = null;
@@ -2313,11 +2442,12 @@
   saveSettings();
   if (!Store.get('personas.json', null)) savePersonas();
   if (!Store.get('prompts.json', null)) savePrompts();
-  $('#persona-count').textContent = personas.length + ' 个助手 · ' + prompts.length + ' 条提示词';
-  $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
-  $('#template-count').textContent = templates.length + ' 个模板 · 一键切换系统提示词';
+  $('#persona-count').textContent = personas.length + ' 助手 · ' + prompts.length + ' 提示词';
+  $('#plugin-count').textContent = pluginSummaryShort(); $('#set-plugins-sub').textContent = pluginSummary();
+  $('#template-count').textContent = templates.length + ' 个模板';
   if (!Store.get('templates.json', null)) saveTemplates();
   backfillUsageStats();
+  updateBalanceSubtitle();
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
   updateSendState();

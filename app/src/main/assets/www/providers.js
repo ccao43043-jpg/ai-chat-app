@@ -16,6 +16,8 @@
       models: ['glm-5.3', 'glm-5.3-flash', 'glm-4.7-flash'], imageModel: 'cogview-3-flash', vision: true },
     { presetId: 'siliconflow', name: '硅基流动 SiliconFlow', type: 'openai', baseUrl: 'https://api.siliconflow.cn/v1',
       models: ['deepseek-ai/DeepSeek-V3.2', 'Qwen/Qwen3.5-397B-A17B', 'Qwen/Qwen3-32B'], imageModel: 'Kwai-Kolors/Kolors', vision: false },
+    { presetId: 'xiaomi', name: '小米 MiMo', type: 'openai', baseUrl: 'https://api.xiaomimimo.com/v1',
+      models: ['mimo-v2.6-flash', 'mimo-v2.6-pro', 'mimo-v2.6-pro-ultraspeed', 'mimo-v2.5-pro', 'mimo-v2.5'], imageModel: '', vision: true },
     { presetId: 'openrouter', name: 'OpenRouter', type: 'openai', baseUrl: 'https://openrouter.ai/api/v1',
       models: ['openai/gpt-6-astra', 'anthropic/claude-opus-5.5', 'google/gemini-3.8-flash'], imageModel: '', vision: true },
     { presetId: 'anthropic', name: 'Anthropic Claude', type: 'anthropic', baseUrl: 'https://api.anthropic.com',

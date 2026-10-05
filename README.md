@@ -35,6 +35,14 @@
 
 ## 功能
 
+**v0.3.6：账户余额、小米 MiMo、侧边栏分区与新图标**
+- 侧边栏 / 设置新增「账户余额」：汇总已配置 API Key 的服务商；「刷新全部」并行查询。已核实支持：DeepSeek、硅基流动、Kimi/Moonshot、OpenRouter；其余显示「不支持查询」并给出控制台链接。结果带时间戳缓存，错误清晰展示，从不显示完整 Key
+- 新增预设「小米 MiMo」：`https://api.xiaomimimo.com/v1`，模型含 mimo-v2.6-flash / pro / ultraspeed、mimo-v2.5-pro / mimo-v2.5（官方 OpenAI 兼容文档）
+- 侧边栏重排：上方「对话」列表与下方「功能」两列网格分开，不再和聊天记录挤在一起
+- 应用图标改为简洁双色聊天气泡（靛蓝底 + 白气泡三点），自适应各密度已重渲染
+
+<img src="docs/icon-512.png" width="72"> <img src="docs/light-drawer.png" width="200"> <img src="docs/light-balances.png" width="200">
+
 **v0.3.5：用量统计**
 - 侧边栏新增「用量统计」入口（设置页也可进入）：汇总全部对话的 Token 用量，不是插件，无需开关
 - 记录每次返回用量的对话 / 图片 / 章节摘要请求：输入、输出、缓存命中与未命中、模型、服务商、对话、时间
@@ -158,7 +166,7 @@
 - 顶部「模型胶囊」：点一下弹出已配置服务商的模型列表，一键切换；也可自定义模型名和本对话系统提示词
 - 服务商设置里可「从接口获取模型列表」（OpenAI 兼容 `GET /models`、Claude `/v1/models`、Gemini `models`），勾选后添加
 - 服务商：
-  - **OpenAI 兼容**（自定义 Base URL + Key + 模型），预设：OpenAI、DeepSeek、通义千问（DashScope 兼容模式）、Moonshot/Kimi、智谱 GLM、硅基流动 SiliconFlow、OpenRouter
+  - **OpenAI 兼容**（自定义 Base URL + Key + 模型），预设：OpenAI、DeepSeek、通义千问（DashScope 兼容模式）、Moonshot/Kimi、智谱 GLM、硅基流动 SiliconFlow、小米 MiMo、OpenRouter
   - **Anthropic Claude**（原生 Messages API）
   - **Google Gemini**（原生 generateContent API）
   - 可添加任意多个自定义服务商
@@ -241,6 +249,7 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
   - `templates.js`：提示词模板（增删改、排序、收藏、搜索、变量、导入导出）
   - `versions.js`：回复/消息版本与对话分支（每个版本保存其后续分支，当前路径始终是线性的 `messages`）
   - `usage-stats.js`：全局 Token 用量统计（记录、回填、聚合、花费估算、导出）
+  - `balance.js`：各家账户余额请求构造与响应解析（仅官方核实接口）
   - `plugins.js`：插件注册表
   - `rpcache.js`：RP 缓存优化器的 Context Builder
   - `rp-plugin.js`：插件的界面

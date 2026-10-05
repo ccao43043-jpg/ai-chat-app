@@ -1,20 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1B1557"/>
-      <stop offset="0.48" stop-color="#4C1FB8"/>
-      <stop offset="1" stop-color="#0891B2"/>
-    </linearGradient>
-    <radialGradient id="glow1" cx="0.28" cy="0.22" r="0.6">
-      <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="glow2" cx="0.85" cy="0.9" r="0.55">
-      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="108" height="108" fill="url(#g)"/>
-  <rect width="108" height="108" fill="url(#glow1)"/>
-  <rect width="108" height="108" fill="url(#glow2)"/>
+  <!-- 纯色靛蓝，无渐变杂讯 -->
+  <rect width="108" height="108" fill="#4F46E5"/>
 </svg>
