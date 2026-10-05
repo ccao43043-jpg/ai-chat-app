@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.4';
+  const APP_VERSION = '0.3.5';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -109,6 +109,16 @@
   const savePrompts = () => Store.set('prompts.json', prompts);
   let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
   const saveTemplates = () => Store.set('templates.json', templates);
+  // 全局 Token 用量统计（非插件，独立页面）
+  let usageState = UsageStats.normalize(Store.get('usage-stats.json', null));
+  // 若 RP 插件里改过价格，合并过来（用户只改一处）
+  (function syncPricesFromRp() {
+    const rp = settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.prices;
+    if (rp) usageState.prices = Object.assign({}, usageState.prices, rp);
+    if (settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.priceMode)
+      usageState.priceMode = settings.plugins.rpcache.priceMode;
+  })();
+  const saveUsageStats = () => Store.set('usage-stats.json', usageState);
   const saveSettings = () => Store.set('settings.json', settings);
   const saveIndex = () => Store.set('convs.json', convIndex);
   function saveConv(c, touch) {
@@ -152,6 +162,54 @@
     if (bridge && bridge.openUrl) bridge.openUrl(u); else window.open(u, '_blank', 'noopener');
   }
   function copyText(t) { if (bridge) bridge.copy(t); else navigator.clipboard && navigator.clipboard.writeText(t).catch(() => {}); toast('已复制'); }
+
+  /** 记录一次带 usage 的请求（对话 / 图片 / 摘要）。无 usage 或无输入则忽略。 */
+  function recordUsage(opts) {
+    opts = opts || {};
+    const u = opts.usage;
+    if (!u || u.prompt == null) return;
+    const c = opts.conv || conv;
+    const p = opts.provider || (c && getProvider(c.providerId));
+    const entry = UsageStats.makeEntry({
+      usage: u, at: opts.at || Date.now(), type: opts.type || 'chat',
+      model: opts.model || (c && c.model) || '',
+      providerId: (p && (p.presetId || p.id)) || (c && c.providerId) || '',
+      providerName: (p && p.name) || '',
+      convId: c && c.id || '', convTitle: c && c.title || '',
+      msgId: opts.msgId || '', key: opts.key,
+    });
+    usageState = UsageStats.record(usageState, entry);
+    saveUsageStats();
+    updateUsageSubtitle();
+  }
+  function updateUsageSubtitle() {
+    const today = UsageStats.filterLog(usageState.log, UsageStats.rangeOf('today'));
+    const t = UsageStats.sumList(today);
+    const el = $('#usage-count');
+    if (!el) return;
+    if (!t.requests) { el.textContent = '全部对话的 Token 用量'; return; }
+    const fmt = n => n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 1 : 2).replace(/\.?0+$/, '') + '万' : String(Math.round(n));
+    el.textContent = '今日 ' + fmt(t.total) + ' Token · ' + t.requests + ' 次';
+    const sub = $('#set-usage-sub');
+    if (sub) {
+      const all = UsageStats.sumList(usageState.log);
+      sub.textContent = '累计 ' + fmt(all.total) + ' Token · ' + all.requests + ' 次请求';
+    }
+  }
+  function backfillUsageStats() {
+    if (usageState.backfilled) { updateUsageSubtitle(); return; }
+    const convs = convIndex.map(meta => {
+      const c = Store.get('conv_' + meta.id + '.json', null) || meta;
+      const p = getProvider(c.providerId);
+      return {
+        id: c.id, title: c.title, providerId: c.providerId,
+        providerName: p ? p.name : '', model: c.model, updatedAt: c.updatedAt, messages: c.messages || [],
+      };
+    });
+    usageState = UsageStats.backfill(usageState, convs);
+    saveUsageStats();
+    updateUsageSubtitle();
+  }
 
   let dialogResolve = null;
   function dialog({ title, body, input, value, okText, danger, info }) {
@@ -1010,7 +1068,9 @@
     } catch (e) {
       bot.error = '网络错误：' + e.message + '\n请检查网络连接和 Base URL。';
     }
-    Plugins.registry.runAfterResponse(rctx, { ok: !bot.error && !bot.stopped && status >= 200 && status < 300, usage: bot.usage || null, bot, status }, pluginHost);
+    const okResp = !bot.error && !bot.stopped && status >= 200 && status < 300;
+    Plugins.registry.runAfterResponse(rctx, { ok: okResp, usage: bot.usage || null, bot, status }, pluginHost);
+    if (okResp && bot.usage) recordUsage({ usage: bot.usage, type: 'chat', conv: thisConv, provider: p, model: rctx.model || thisConv.model, msgId: bot.id, at: bot.createdAt || Date.now() });
     finish();
   }
 
@@ -1034,6 +1094,11 @@
       try {
         const imgs = Providers.parseImageResponse(raw);
         if (!imgs.length) bot.error = '未返回图片：' + raw.slice(0, 300); else bot.images = imgs;
+        try {
+          const obj = JSON.parse(raw);
+          const u = Providers.normalizeUsage(p.type, obj.usage || obj.meta || null);
+          if (u) { bot.usage = u; recordUsage({ usage: u, type: 'image', conv: thisConv, provider: p, model: p.imageModel, msgId: bot.id, at: bot.createdAt || Date.now() }); }
+        } catch (_) {}
       } catch (e) { bot.error = '无法解析响应：' + raw.slice(0, 300); }
     }).catch(e => { bot.error = '网络错误：' + e.message; })
       .finally(() => { bot.pending = false; setRunning(null); saveConv(thisConv); if (conv === thisConv) renderMessages(); renderConvList(); });
@@ -1995,11 +2060,15 @@
       o = o || {};
       const p = getProvider(conv.providerId);
       if (!p || !p.apiKey) throw new Error('请先为本对话选择已配置 API Key 的服务商');
-      const req = Providers.buildChatRequest(p, o.model || conv.model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096 });
+      const model = o.model || conv.model;
+      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096 });
       const r = await requestText(req, o.setCancel || null, 180000);
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       const ds = Providers.parseFullResponse(p.type, r.text);
       const err = ds.find(d => d.kind === 'error'); if (err) throw new Error(err.text);
+      let usage = null;
+      ds.forEach(d => { if (d.kind === 'usage') usage = Providers.mergeUsage(usage, d.usage); });
+      if (usage) recordUsage({ usage, type: o.usageType || 'summary', conv, provider: p, model, at: Date.now() });
       return ds.filter(d => d.kind === 'text').map(d => d.text).join('');
     },
   };
@@ -2052,6 +2121,9 @@
   }
   $('#btn-plugins').onclick = () => { closeDrawer(); setTimeout(openPlugins, 120); };
   $('#set-plugins').onclick = () => openPlugins();
+  $('#btn-usage').onclick = () => { closeDrawer(); setTimeout(openUsage, 120); };
+  $('#set-usage').onclick = () => openUsage();
+  $('#us-more').onclick = () => usageMore();
 
   // ---------------- 返回键 ----------------
   // 长文本框：全屏编辑按钮
@@ -2089,6 +2161,7 @@
     if (shown('#page-template')) { closeTemplateEdit(); return true; }
     if (shown('#page-templates')) { closeTemplates(); return true; }
     if (shown('#page-plugin')) { if (panelPlugin && panelPlugin.onBack && panelPlugin.onBack()) return true; closePluginPanel(); return true; }
+    if (shown('#page-usage')) { closeUsage(); return true; }
     if (shown('#page-plugins')) { closePlugins(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
     if (shown('#page-personas')) { closePersonas(); return true; }
@@ -2098,6 +2171,144 @@
     return false;
   };
 
+
+  // ---------------- 用量统计页 ----------------
+  let usRange = '30d', usTab = 'day', usCustom = null;
+  const usFmtN = n => (n == null ? '—' : n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 1 : 2).replace(/\.?0+$/, '') + '万' : String(Math.round(n)));
+  const usFmtUsd = v => (v == null ? '—' : '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3)));
+  function openUsage() {
+    closeDrawer();
+    if ($('#page-settings').classList.contains('show')) closeSettings();
+    usRange = usRange || '30d'; usTab = usTab || 'day';
+    renderUsagePage();
+    $('#page-usage').classList.add('show');
+  }
+  function closeUsage() { $('#page-usage').classList.remove('show'); updateUsageSubtitle(); }
+  function usageList() {
+    const range = UsageStats.rangeOf(usRange, Date.now(), usCustom);
+    return UsageStats.filterLog(usageState.log, range);
+  }
+  function renderUsagePage() {
+    const box = $('#us-body'); if (!box) return;
+    const list = usageList();
+    const tot = UsageStats.sumList(list);
+    const est = UsageStats.estimateCost(list, usageState.prices, usageState.priceMode);
+    const ranges = [['today', '今天'], ['7d', '近7天'], ['30d', '近30天'], ['all', '全部'], ['custom', '自定义']];
+    let html = '<div class="us-range">' + ranges.map(([k, t]) =>
+      '<button type="button" class="chip' + (usRange === k ? ' active' : '') + '" data-ur="' + k + '">' + t + '</button>').join('') + '</div>';
+    html += '<div class="us-cards">' +
+      '<div class="us-card"><div class="us-k">总输入</div><div class="us-v">' + usFmtN(tot.prompt) + '</div></div>' +
+      '<div class="us-card"><div class="us-k">总输出</div><div class="us-v">' + usFmtN(tot.completion) + '</div></div>' +
+      '<div class="us-card"><div class="us-k">总 Token</div><div class="us-v">' + usFmtN(tot.total) + '</div><div class="us-s">' + tot.requests + ' 次请求</div></div>' +
+      '<div class="us-card"><div class="us-k">缓存命中 / 未命中</div><div class="us-v" style="font-size:15px">' + usFmtN(tot.hit) + ' / ' + usFmtN(tot.miss) + '</div>' +
+        '<div class="us-s">' + (tot.hit + tot.miss ? ('命中率 ' + Math.round(tot.hit / (tot.hit + tot.miss) * 1000) / 10 + '%') : '无缓存数据') + '</div></div>' +
+      '<div class="us-card wide"><div class="us-k">估算花费</div><div class="us-v">' + usFmtUsd(est.cost) + '</div>' +
+        '<div class="us-s">按当前价格表估算，仅供参考（DeepSeek 等）；非标价模型用「default」单价</div></div></div>';
+    html += '<div class="us-price-note">价格：美元 / 百万 Token（高峰价）。可在下方「价格」里修改；若已在 RP 缓存插件里改过 DeepSeek 价格，启动时会自动同步。</div>';
+
+    const tabs = [['day', '按天'], ['model', '按模型'], ['provider', '按服务商'], ['conv', '按对话'], ['recent', '最近请求'], ['prices', '价格']];
+    html += '<div class="us-tabs">' + tabs.map(([k, t]) =>
+      '<button type="button" class="chip' + (usTab === k ? ' active' : '') + '" data-ut="' + k + '">' + t + '</button>').join('') + '</div>';
+
+    if (!list.length && usTab !== 'prices') {
+      html += '<div class="us-empty">这段时间还没有用量记录。<br>发送对话后，服务商返回的 Token 会自动记在这里。<br>升级前已有的用量会在首次打开时回填一次。</div>';
+    } else if (usTab === 'day') {
+      const days = UsageStats.byDay(list, usRange === '7d' ? 7 : 30);
+      const max = Math.max(1, ...days.map(d => d.total));
+      html += '<div class="group-title">近 ' + days.length + ' 天</div><div class="group"><div class="us-bars">' +
+        days.map(d => '<div class="us-bar" title="' + d.key + '：' + d.total + '"><i style="height:' + Math.max(2, Math.round(d.total / max * 90)) + 'px"></i><span>' + d.label.slice(3) + '</span></div>').join('') +
+        '</div></div>';
+      html += '<div class="group">' + days.filter(d => d.requests).reverse().map(d =>
+        '<div class="us-row"><div style="flex:1"><div class="us-name">' + d.key + '</div><div class="us-meta">' + d.requests + ' 次 · 入 ' + usFmtN(d.prompt) + ' · 出 ' + usFmtN(d.completion) + '</div></div>' +
+        '<div class="us-num">' + usFmtN(d.total) + '</div></div>').join('') + '</div>';
+    } else if (usTab === 'model' || usTab === 'provider' || usTab === 'conv') {
+      const groups = usTab === 'model' ? UsageStats.groupBy(list, e => e.model || '（未知模型）')
+        : usTab === 'provider' ? UsageStats.groupBy(list, e => e.providerName || e.providerId || '（未知）')
+        : UsageStats.groupBy(list, e => e.convTitle || e.convId || '（无标题）').slice(0, 30);
+      const max = Math.max(1, ...groups.map(g => g.total));
+      html += '<div class="group">' + groups.map(g => {
+        const jump = usTab === 'conv' && g.items[0] && g.items[0].convId
+          ? ' data-cid="' + esc(g.items[0].convId) + '"' : '';
+        return '<div class="us-row us-jump"' + jump + '><div style="flex:1;min-width:0"><div class="us-name">' + esc(g.key) + '</div>' +
+          '<div class="us-meta">' + g.requests + ' 次 · 入 ' + usFmtN(g.prompt) + ' · 出 ' + usFmtN(g.completion) +
+          (g.hit ? ' · 缓存 ' + usFmtN(g.hit) : '') + '</div>' +
+          '<div class="us-meter"><i style="width:' + Math.round(g.total / max * 100) + '%"></i></div></div>' +
+          '<div class="us-num">' + usFmtN(g.total) + '</div></div>';
+      }).join('') + '</div>';
+    } else if (usTab === 'recent') {
+      const recent = list.slice().reverse().slice(0, 50);
+      html += '<div class="group us-recent">' + recent.map(e => {
+        const when = new Date(e.at);
+        const tstr = (when.getMonth() + 1) + '/' + when.getDate() + ' ' + String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
+        return '<div class="us-r us-jump" data-cid="' + esc(e.convId || '') + '"><div class="us-rt"><span>' + esc(UsageStats.TYPE_CN[e.type] || e.type) + ' · ' + esc(e.model || '—') +
+          '</span><span>' + usFmtN(e.prompt + e.completion) + '</span></div>' +
+          '<div class="us-rd">' + tstr + ' · ' + esc(e.providerName || e.providerId || '') + ' · ' + esc(e.convTitle || '') +
+          ' · 入 ' + usFmtN(e.prompt) + ' / 出 ' + usFmtN(e.completion) +
+          (e.cache ? ' · 缓存 ' + usFmtN(e.hit) : '') + '</div></div>';
+      }).join('') + '</div>';
+    } else if (usTab === 'prices') {
+      const prices = usageState.prices;
+      const row = (id, label) => {
+        const p = prices[id] || { hit: 0, miss: 0, out: 0 };
+        return '<div class="price-row"><span title="' + esc(id) + '">' + esc(label) + '</span>' +
+          '<input type="number" step="0.001" min="0" data-m="' + id + '" data-k="hit" value="' + p.hit + '">' +
+          '<input type="number" step="0.001" min="0" data-m="' + id + '" data-k="miss" value="' + p.miss + '">' +
+          '<input type="number" step="0.001" min="0" data-m="' + id + '" data-k="out" value="' + p.out + '"></div>';
+      };
+      html += '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价）</div>' +
+        '<div class="price-row head"><span>模型</span><span>缓存命中</span><span>未命中/输入</span><span>输出</span></div>' +
+        row('deepseek-flash', 'deepseek-flash') + row('deepseek-v4-pro', 'deepseek-v4-pro') + row('default', '其他模型') +
+        '<label class="field" style="margin-top:10px"><span>时段</span><select id="us-price-mode">' +
+        '<option value="auto">自动（按请求时间判断高峰/非高峰）</option><option value="peak">按高峰价</option><option value="offpeak">按非高峰价（半价）</option></select></label>' +
+        '<button class="chip-btn" id="us-price-reset" type="button" style="margin-top:8px">恢复默认价格</button>' +
+        '<div class="hint" style="margin-top:10px">DeepSeek 非高峰为半价；「其他模型」的「未命中/输入」用作整段输入单价。估算仅供参考，以服务商账单为准。</div>';
+    }
+    box.innerHTML = html;
+
+    box.querySelectorAll('[data-ur]').forEach(b => b.onclick = async () => {
+      const k = b.dataset.ur;
+      if (k === 'custom') {
+        const from = await dialog({ title: '自定义起点', body: '开始日期（YYYY-MM-DD）', input: true, value: new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10), okText: '下一步' });
+        if (from == null || !String(from).trim()) return;
+        const to = await dialog({ title: '自定义终点', body: '结束日期（YYYY-MM-DD）', input: true, value: new Date().toISOString().slice(0, 10), okText: '确定' });
+        if (to == null || !String(to).trim()) return;
+        const a = Date.parse(String(from).trim() + 'T00:00:00'), b2 = Date.parse(String(to).trim() + 'T00:00:00');
+        if (!a || !b2) { toast('日期格式不对'); return; }
+        usCustom = { from: Math.min(a, b2), to: Math.max(a, b2) }; usRange = 'custom';
+      } else { usRange = k; }
+      renderUsagePage();
+    });
+    box.querySelectorAll('[data-ut]').forEach(b => b.onclick = () => { usTab = b.dataset.ut; renderUsagePage(); });
+    box.querySelectorAll('.us-jump[data-cid]').forEach(el => el.onclick = () => {
+      const id = el.getAttribute('data-cid'); if (!id) return;
+      closeUsage(); openConv(id); closeDrawer();
+    });
+    if (usTab === 'prices') {
+      const mode = box.querySelector('#us-price-mode');
+      if (mode) { mode.value = usageState.priceMode || 'auto'; mode.onchange = e => { usageState.priceMode = e.target.value; saveUsageStats(); renderUsagePage(); }; }
+      box.querySelectorAll('.price-row input').forEach(inp => {
+        inp.onchange = () => {
+          const v = parseFloat(inp.value); if (isNaN(v) || v < 0) { inp.value = usageState.prices[inp.dataset.m][inp.dataset.k]; return; }
+          usageState.prices[inp.dataset.m] = Object.assign({}, usageState.prices[inp.dataset.m], { [inp.dataset.k]: v });
+          saveUsageStats();
+        };
+      });
+      const rst = box.querySelector('#us-price-reset');
+      if (rst) rst.onclick = () => { usageState.prices = Object.assign({}, UsageStats.DEFAULT_PRICES); saveUsageStats(); renderUsagePage(); toast('已恢复默认价格'); };
+    }
+  }
+  async function usageMore() {
+    actionSheet('用量统计', [
+      { label: '导出 CSV（复制）', icon: ICON.copy, onClick: () => { copyText(UsageStats.toCSV(usageList())); toast('已复制 CSV'); } },
+      { label: '导出 JSON（复制）', icon: ICON.copy, onClick: () => { copyText(UsageStats.toJSON(usageList())); toast('已复制 JSON'); } },
+      { label: '清空统计', icon: ICON.trash, danger: true, onClick: async () => {
+        const ok = await dialog({ title: '清空用量统计？', body: '将删除本地保存的全部用量记录（不会影响对话内容）。此操作不可撤销。', okText: '清空', danger: true });
+        if (!ok) return;
+        usageState = UsageStats.clear(usageState); saveUsageStats(); renderUsagePage(); updateUsageSubtitle(); toast('已清空');
+      }},
+    ]);
+  }
+
   // ---------------- 启动 ----------------
   saveSettings();
   if (!Store.get('personas.json', null)) savePersonas();
@@ -2106,6 +2317,7 @@
   $('#plugin-count').textContent = pluginSummary(); $('#set-plugins-sub').textContent = pluginSummary();
   $('#template-count').textContent = templates.length + ' 个模板 · 一键切换系统提示词';
   if (!Store.get('templates.json', null)) saveTemplates();
+  backfillUsageStats();
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
   updateSendState();

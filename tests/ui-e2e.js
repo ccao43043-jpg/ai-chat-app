@@ -18,7 +18,7 @@ const OLD_SETTINGS = {
   systemPrompt: '', stream: true, temperature: '', maxTokens: '', imageSize: '1024x1024', lastProviderId: 'deepseek', lastModel: 'deepseek-chat',
 };
 const OLD_CONV = { id: 'oldc1', title: '旧对话', providerId: 'deepseek', model: 'deepseek-reasoner', systemPrompt: '',
-  messages: [{ id: 'u1', role: 'user', content: '你好' }, { id: 'a1', role: 'assistant', content: '你好！有什么可以帮你？', model: 'deepseek-reasoner' }],
+  messages: [{ id: 'u1', role: 'user', content: '你好' }, { id: 'a1', role: 'assistant', content: '你好！有什么可以帮你？', model: 'deepseek-reasoner', createdAt: Date.now() - 864e5 * 2, usage: { prompt: 12, completion: 8, hit: 0, miss: 12, cacheSupported: true } }],
   createdAt: Date.now() - 864e5 * 2, updatedAt: Date.now() - 864e5 * 2 };
 
 async function scenario(browser, theme) {
@@ -1037,6 +1037,63 @@ async function scenario(browser, theme) {
   // 已写入章节摘要的消息：不能重新生成 / 切换
   r.dimRegen = await page.$$eval('#messages > .msg.dim .act[aria-label="从这里重新生成"]', e => e.length);
   assert.strictEqual(r.dimRegen, 0);
+
+
+  // 17) 用量统计（全局页面，非插件）
+  // 回填：启动时已把旧对话里带 usage 的消息写入 usage-stats.json
+  const usState = () => page.evaluate(() => JSON.parse(window.__mem['usage-stats.json'] || 'null'));
+  let us0 = await usState();
+  assert.ok(us0 && us0.backfilled, '启动后完成回填');
+  assert.ok(us0.log.some(e => e.key && e.key.startsWith('bf:') && e.prompt === 12 && e.completion === 8), JSON.stringify(us0.log.slice(0, 3)));
+  const usLogBefore = us0.log.length;
+  // 发一条新对话，应追加直播记录
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#model-pill'); await sleep(250); await pickModel('deepseek-flash'); await sleep(250);
+  await setInput('统计测试：你好'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(300);
+  us0 = await usState();
+  assert.ok(us0.log.length >= usLogBefore + 1, '新请求写入用量日志 ' + us0.log.length + ' vs ' + usLogBefore);
+  assert.ok(us0.log.slice(-1)[0].type === 'chat' && us0.log.slice(-1)[0].prompt > 0);
+  // 侧边栏入口
+  await page.click('#btn-menu'); await sleep(400);
+  await page.evaluate(() => { const b = document.querySelector('#btn-usage'); b.scrollIntoView(); });
+  await sleep(200);
+  assert.ok(await page.$('#btn-usage'));
+  r.usageSub = await page.$eval('#usage-count', e => e.textContent);
+  assert.ok(r.usageSub.includes('Token') || r.usageSub.includes('今日') || r.usageSub.includes('用量'), r.usageSub);
+  await page.evaluate(() => document.querySelector('#btn-usage').click()); await sleep(500);
+  assert.ok(await page.$eval('#page-usage', e => e.classList.contains('show')));
+  const cards = await page.$$eval('#us-body .us-card .us-v', els => els.map(e => e.textContent));
+  assert.ok(cards.length >= 4, JSON.stringify(cards));
+  assert.ok(cards.some(t => /\d/.test(t)), '有数字汇总');
+  await shot('usage');
+  // 切换「按模型」
+  await page.evaluate(() => [...document.querySelectorAll('#us-body [data-ut]')].find(e => e.dataset.ut === 'model').click());
+  await sleep(300);
+  assert.ok((await page.$$('#us-body .us-row')).length >= 1);
+  await shot('usage-models');
+  // 最近请求可跳转对话
+  await page.evaluate(() => [...document.querySelectorAll('#us-body [data-ut]')].find(e => e.dataset.ut === 'recent').click());
+  await sleep(300);
+  const recentN = await page.$$eval('#us-body .us-r', e => e.length);
+  assert.ok(recentN >= 1);
+  // 导出
+  await page.click('#us-more'); await sleep(350);
+  const acts = await page.$$eval('#action-list .action-item', e => e.map(x => x.textContent.trim()));
+  assert.ok(acts.some(t => t.includes('导出 CSV')) && acts.some(t => t.includes('清空统计')), JSON.stringify(acts));
+  await page.evaluate(() => [...document.querySelectorAll('#action-list .action-item')].find(e => e.textContent.includes('导出 CSV')).click());
+  await sleep(400);
+  const csv = await page.evaluate(() => window.__copied || '');
+  assert.ok(csv.includes('输入') && csv.includes('输出'), csv.slice(0, 120));
+  // 不是插件
+  await page.click('#page-usage [data-back]'); await sleep(350);
+  assert.ok(!(await page.$eval('#page-usage', e => e.classList.contains('show'))));
+  await page.click('#btn-menu'); await sleep(400);
+  await page.evaluate(() => document.querySelector('#btn-plugins').click()); await sleep(450);
+  const names = await page.$$eval('#plugin-list .plc-name', els => els.map(e => e.textContent));
+  assert.ok(!names.join('').includes('用量统计') && !names.join('').includes('Token 用量统计'), JSON.stringify(names));
+  // Token 用量显示插件仍在
+  assert.ok(names.join('').includes('Token 用量显示'), JSON.stringify(names));
+  await page.click('#page-plugins [data-back]'); await sleep(200);
 
   assert.deepStrictEqual(errors, []);
   await page.close();
