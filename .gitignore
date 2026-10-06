@@ -20,3 +20,7 @@ node_modules/
 npm-debug.log*
 # 其它
 /icon-512.png
+# 桌面版（Electron）：构建时从 app/src/main/assets/www 复制的网页资源与打包输出
+desktop/web/
+desktop/dist/
+desktop/node_modules/

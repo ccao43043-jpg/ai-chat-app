@@ -1,0 +1,56 @@
+/* AI Chat 桌面版样式补丁：只在 <html class="desktop"> 下生效（由桌面外壳加上），Android 不加载此文件。 */
+
+html.desktop { --side: 300px; --col: 820px; }
+
+/* 桌面滚动条更细 */
+html.desktop ::-webkit-scrollbar { width: 10px; height: 10px; }
+html.desktop ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+html.desktop ::-webkit-scrollbar-thumb:hover { background: var(--fg-3); background-clip: padding-box; border: 2px solid transparent; }
+html.desktop ::-webkit-scrollbar-track { background: transparent; }
+
+/* 鼠标悬停反馈（手机端只有 :active） */
+html.desktop .icon-btn:hover, html.desktop .tool-btn:hover { background: var(--surface-3); }
+html.desktop .tool-chip:not(.active):hover { background: var(--surface-2); }
+html.desktop .text-btn:hover { background: var(--accent-soft); }
+
+/* 允许选中复制消息文字 */
+html.desktop .md, html.desktop .bubble { -webkit-user-select: text; user-select: text; }
+
+/* 宽窗口：侧边栏常驻，聊天区居中限宽 */
+@media (min-width: 900px) {
+  html.desktop #drawer {
+    transform: none; transition: none; width: var(--side); max-width: none;
+    border-radius: 0; box-shadow: none; border-right: 1px solid var(--line); z-index: 19;
+  }
+  html.desktop #drawer-mask { display: none; }
+  html.desktop #btn-menu { visibility: hidden; pointer-events: none; }
+  html.desktop #app { margin-left: var(--side); }
+
+  html.desktop #messages { padding-left: 24px; padding-right: 24px; }
+  html.desktop #messages > * { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  html.desktop .composer { padding-left: 24px; padding-right: 24px; }
+  html.desktop .composer-card { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  html.desktop #input { max-height: 260px; }
+
+  /* 弹层相对聊天区居中 */
+  html.desktop .popover { left: calc(50% + var(--side) / 2); }
+  html.desktop #toast { left: calc(50% + var(--side) / 2); }
+  html.desktop .sheet {
+    left: var(--side); right: 0; margin-left: auto; margin-right: auto; max-width: 640px;
+    border-radius: 22px 22px 0 0;
+  }
+
+  /* 设置等全屏页：内容居中限宽 */
+  html.desktop .page-body { padding-left: max(24px, calc((100% - 780px) / 2)); padding-right: max(24px, calc((100% - 780px) / 2)); }
+
+  /* 全屏编辑器：文本区限宽，更易读 */
+  html.desktop .editor textarea { max-width: 960px; margin-left: auto; margin-right: auto; }
+}
+
+/* 一般桌面宽度下（含窄窗口）的底部面板也不铺满超宽 */
+@media (min-width: 700px) and (max-width: 899.98px) {
+  html.desktop .sheet { left: 0; right: 0; margin-left: auto; margin-right: auto; max-width: 640px; }
+}
+
+/* 窄窗口时收起的侧边栏不在左边缘留下阴影 */
+html.desktop #drawer:not(.show) { box-shadow: none; }

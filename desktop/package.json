@@ -1,0 +1,61 @@
+{
+  "name": "ai-chat-desktop",
+  "productName": "AI Chat",
+  "version": "0.3.6",
+  "description": "AI Chat 桌面版（Windows）：复用 Android 版同一套网页资源",
+  "author": "ccao43043-jpg",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "prepare-web": "node scripts/copy-web.js",
+    "icon": "node scripts/make-icon.js",
+    "start": "npm run prepare-web && electron .",
+    "test": "npm run prepare-web && node test/e2e.js",
+    "dist:win": "npm run prepare-web && electron-builder --win nsis portable --x64 --publish never",
+    "dist:win:portable": "npm run prepare-web && electron-builder --win portable --x64 --publish never",
+    "dist:dir": "npm run prepare-web && electron-builder --win dir --x64 --publish never"
+  },
+  "build": {
+    "appId": "com.aichat.desktop",
+    "productName": "AI Chat",
+    "copyright": "AI Chat",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "src/**/*",
+      "web/**/*",
+      "resources/icon.png",
+      "package.json"
+    ],
+    "asar": true,
+    "electronLanguages": ["zh-CN", "en-US"],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": ["nsis", "portable"],
+      "artifactName": "AI-Chat-Windows-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI Chat",
+      "uninstallDisplayName": "AI Chat",
+      "deleteAppDataOnUninstall": false,
+      "language": "2052",
+      "installerLanguages": ["zh_CN"],
+      "artifactName": "AI-Chat-Windows-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "AI-Chat-Windows-Portable.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  }
+}

@@ -33,6 +33,19 @@
 <img src="docs/light-prompts.png" width="200">
 </p>
 
+## Windows 桌面版
+
+在 [Releases](https://github.com/ccao43043-jpg/ai-chat-app/releases) 下载：
+
+- `AI-Chat-Windows-Setup.exe`：安装版（可选安装目录，创建桌面 / 开始菜单快捷方式）
+- `AI-Chat-Windows-Portable.exe`：便携版，单文件，双击即用
+
+桌面版与 Android 版使用**同一套网页代码**（`app/src/main/assets/www`），原生桥 `AndroidBridge` 由 Electron 实现：请求从本机直接发往服务商（无 CORS、支持流式），API Key、对话、设置只保存在 `%APPDATA%\AI Chat\store\`。宽窗口时侧边栏常驻；Enter 发送、Shift+Enter 换行、Esc 返回，可拖拽 / 粘贴文件。源码与打包说明见 [desktop/README.md](desktop/README.md)。
+
+exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可。
+
+<img src="docs/windows-preview.png" width="640">
+
 ## 功能
 
 **v0.3.6：账户余额、小米 MiMo、侧边栏分区与新图标**
