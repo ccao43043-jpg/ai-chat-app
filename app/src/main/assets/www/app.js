@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.4.0';
+  const APP_VERSION = '0.5.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -23,7 +23,7 @@
     chat: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 01-11.6 7.1L4 20l1-4.1A8 8 0 1120 12z"/></svg>',
     warn: '<svg viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.2v.1"/></svg>',
   };
-  const PROVIDER_COLORS = { openai: '#10a37f', deepseek: '#4d6bfe', qwen: '#615ced', moonshot: '#16191e', zhipu: '#2f5bff',
+  const PROVIDER_COLORS = { openai: '#10a37f', deepseek: '#4d6bfe', qwen: '#615ced', 'qwen-intl': '#615ced', moonshot: '#16191e', zhipu: '#2f5bff',
     siliconflow: '#7c3aed', xiaomi: '#ff6900', openrouter: '#6467f2', anthropic: '#d97757', gemini: '#4285f4', custom: '#64748b' };
   function avatarHtml(p, cls) {
     const color = PROVIDER_COLORS[p && p.presetId] || PROVIDER_COLORS.custom;
@@ -1685,7 +1685,7 @@
   };
 
   // ---------------- 服务商编辑 ----------------
-  let editing = null, editModels = [];
+  let editing = null, editModels = [], editMeta = {};
   const baseHints = {
     openai: '填写到版本路径这一级（通常以 /v1 结尾），程序会自动拼接 /chat/completions。',
     anthropic: '一般为 https://api.anthropic.com（程序拼接 /v1/messages）。',
@@ -1693,7 +1693,8 @@
   };
   const presetHints = {
     deepseek: 'DeepSeek 官方地址：https://api.deepseek.com',
-    qwen: '也可使用百炼业务空间专属域名：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    qwen: '阿里云百炼（北京）OpenAI 兼容地址；也可使用业务空间专属域名：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1。API Key 与地域绑定，国际站 Key 请用「千问（国际）」。',
+    'qwen-intl': '阿里云百炼国际站（新加坡）OpenAI 兼容地址；API Key 需在国际站（modelstudio.console.alibabacloud.com）创建，与中国站不通用。',
     xiaomi: '小米 MiMo 官方 OpenAI 兼容地址：https://api.xiaomimimo.com/v1（也可用 api-key 请求头；本应用使用 Bearer）',
     moonshot: '余额查询：GET /users/me/balance',
     siliconflow: '余额查询：GET /user/info',
@@ -1710,6 +1711,9 @@
     $('#pe-imgmodel').value = editing.imageModel || '';
     $('#pe-streamusage').checked = Providers.streamUsageEnabled(Object.assign({}, editing, { type: 'openai' }));
     $('#pe-su-row').style.display = editing.type === 'openai' ? '' : 'none';
+    $('#pe-thinking').value = editing.thinking || '';
+    $('#pe-think-row').style.display = Providers.isQwenEndpoint(editing) ? '' : 'none';
+    editMeta = Object.assign({}, editing.modelMeta || {});
     $('#pe-model-add').value = '';
     $('#pe-base-hint').textContent = presetHints[editing.presetId] || baseHints[editing.type];
     $('#pe-delete').style.display = fresh ? 'none' : '';
@@ -1744,6 +1748,7 @@
     const def = { anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' }[t];
     if (def && (!$('#pe-base').value || $('#pe-base').value === 'https://')) $('#pe-base').value = def;
   };
+  $('#pe-base').addEventListener('input', () => { $('#pe-think-row').style.display = Providers.isQwenEndpoint({ presetId: editing && editing.presetId, baseUrl: $('#pe-base').value }) ? '' : 'none'; });
   $('#pe-key-toggle').onclick = () => {
     const k = $('#pe-key'); const show = k.type === 'password';
     k.type = show ? 'text' : 'password'; $('#pe-key-toggle').textContent = show ? '隐藏' : '显示';
@@ -1756,6 +1761,10 @@
     if (!editModels.length) { toast('请至少添加一个模型'); return; }
     const p = { id: editing.id, presetId: editing.presetId, name: $('#pe-name').value.trim() || '未命名', type: $('#pe-type').value,
       baseUrl: base, apiKey: $('#pe-key').value.trim(), models: editModels.slice(), imageModel: $('#pe-imgmodel').value.trim() };
+    const th = $('#pe-thinking').value;
+    if (th && Providers.isQwenEndpoint(p)) p.thinking = th;
+    const meta = {}; p.models.forEach(m => { if (editMeta[m]) meta[m] = editMeta[m]; });
+    if (Object.keys(meta).length) p.modelMeta = meta; // 模型列表接口返回的上下文窗口，供 RP 插件自动推导预算
     if ($('#pe-type').value === 'openai') {
       const su = $('#pe-streamusage').checked;
       if (su !== Providers.streamUsageEnabled(Object.assign({}, p, { streamUsage: undefined }))) p.streamUsage = su; // 只保存与默认不同的选择
@@ -1783,6 +1792,7 @@
       const r = await httpSimple(Providers.buildModelsRequest(prov));
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       fetched = Providers.parseModelsResponse(prov.type, r.text);
+      Object.assign(editMeta, Providers.parseModelsMeta(prov.type, r.text));
       if (!fetched.length) throw new Error('接口没有返回任何模型');
       fetchSel = new Set();
       $('#fetch-search').value = '';
@@ -2069,7 +2079,8 @@
       const p = getProvider(conv.providerId);
       if (!p || !p.apiKey) throw new Error('请先为本对话选择已配置 API Key 的服务商');
       const model = o.model || conv.model;
-      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096 });
+      // 摘要等后台调用：千问关闭思考模式（enable_thinking=false）省钱省时；其他服务商不受影响
+      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096, thinking: false });
       const r = await requestText(req, o.setCancel || null, 180000);
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       const ds = Providers.parseFullResponse(p.type, r.text);
@@ -2080,6 +2091,7 @@
       return ds.filter(d => d.kind === 'text').map(d => d.text).join('');
     },
   };
+  Plugins.registry.setHost(pluginHost); // 插件自动启用（autoActive）需要查询对话的服务商
   function pluginSummary() {
     const on = Plugins.registry.all().filter(pl => Plugins.registry.isGloballyEnabled(pl.id, settings)).length;
     return Plugins.registry.all().length + ' 个内置插件 · 已启用 ' + on;

@@ -109,6 +109,11 @@ async function scenario(browser, theme) {
           if (lastChunk && url.includes('deepseek') && B.stream_options && B.stream_options.include_usage) o.usage = usage; // DeepSeek：usage 在最后一个内容块上
           sse.push('data: ' + JSON.stringify(o) + '\n\n');
         }
+        // 千问：usage 在单独的最后一块（choices 为空），缓存字段在 prompt_tokens_details
+        if (url.includes('dashscope') && B.stream_options && B.stream_options.include_usage) {
+          const marked = (body || '').includes('cache_control');
+          sse.push('data: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: ptok, completion_tokens: usage.completion_tokens, prompt_tokens_details: Object.assign({ cached_tokens: hit }, marked ? { cache_creation_input_tokens: Math.max(0, ptok - hit) } : {}) } }) + '\n\n');
+        }
         sse.push('data: [DONE]\n\n');
         setTimeout(() => H.onStart(id, 200), 20);
         sse.forEach((c, i) => setTimeout(() => H.onChunk(id, c), 30 + i * 12));
@@ -365,15 +370,15 @@ async function scenario(browser, theme) {
   const typeBlock = v => page.evaluate(v => { const t = document.querySelector('#rb-text'); t.value = v; t.dispatchEvent(new Event('input')); }, v);
   const tab = k => page.evaluate(k => document.querySelector('#pp-body .seg button[data-tab="' + k + '"]').click(), k);
   // 面板里不应残留英文界面文字（允许：品牌 / 模型名、Token、RP，以及发送给模型的全大写标记如 [WORLD]、FACTS）
-  const ALLOW_EN = new Set(['Token', 'DeepSeek', 'RP', 'OpenAI', 'Claude', 'NPC']);
+  const ALLOW_EN = new Set(['Token', 'DeepSeek', 'RP', 'OpenAI', 'Claude', 'NPC', 'cache_control']);
   const englishLeft = () => page.evaluate(() => {
     const c = document.querySelector('#pp-body').cloneNode(true);
     c.querySelectorAll('.rb-prev, textarea, .l20-r').forEach(e => e.remove()); // 用户自己写的设定 / 摘要内容
     document.body.appendChild(c); const t = c.innerText; c.remove();
-    return t.replace(/指纹 [0-9a-f]+…?/g, '');
+    return t.replace(/指纹 [0-9a-f]+…?/g, '').replace(/(qwen|qwq|deepseek)[\w.\-]*/gi, ''); // 模型名
   }).then(t => {
     const words = (t.match(/[A-Za-z][A-Za-z_\-]*[A-Za-z0-9]|\bv\d+/g) || []);
-    return [...new Set(words.filter(w => !ALLOW_EN.has(w) && !/^[A-Z][A-Z0-9_]+$/.test(w) && !/^deepseek/.test(w)))];
+    return [...new Set(words.filter(w => !ALLOW_EN.has(w) && !/^[A-Z][A-Z0-9_]+$/.test(w) && !/^(deepseek|qwen)/.test(w)))];
   });
   const closePanels = async () => { for (let i = 0; i < 4 && await page.evaluate(() => document.querySelector('#page-plugin.show,#page-plugins.show') != null); i++) { await page.evaluate(() => window.onAndroidBack()); await sleep(350); } };
   const sendRP = async t => { await setInput(t); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250); return lastPost(); };
@@ -385,7 +390,7 @@ async function scenario(browser, theme) {
   assert.ok(r.pluginRow.includes('已启用') || r.pluginRow.includes('2 个内置插件'), r.pluginRow);
   await page.click('#btn-plugins'); await sleep(650);
   r.pluginCards = await page.$$eval('#plugin-list .plugin-card .plc-name', els => els.map(e => e.textContent));
-  assert.ok(r.pluginCards[0].startsWith('DeepSeek RP 缓存优化器') && r.pluginCards[1].startsWith('Token 用量显示'), JSON.stringify(r.pluginCards));
+  assert.ok(r.pluginCards[0].startsWith('RP 缓存优化器') && r.pluginCards[1].startsWith('Token 用量显示'), JSON.stringify(r.pluginCards));
   await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(200);
   r.priceInputs = await page.$$eval('#plugin-list input[data-k]', e => e.map(x => x.value));
   r.priceMatch = await page.$$eval('#plugin-list input.pr-match', e => e.map(x => x.value));
@@ -615,6 +620,83 @@ async function scenario(browser, theme) {
   assert.ok(!plain.some(x => x.content.includes('[WORLD]') || x.content.includes('[CURRENT_STATE]')), '关闭后不再注入');
   assert.strictEqual(plain[plain.length - 1].content, '普通消息');
 
+  // 13b) v0.5.0：千问（阿里云百炼）预设 + RP 优化器自动策略（显式缓存断点、自动预算）
+  await page.click('#btn-menu'); await sleep(350);
+  await page.click('#btn-settings'); await sleep(500);
+  r.provNames = await page.$$eval('.prov-item', e => e.map(x => x.textContent));
+  assert.ok(r.provNames.some(t => t.includes('阿里云百炼 · 千问（中国）')) && r.provNames.some(t => t.includes('阿里云百炼 · 千问（国际）')), JSON.stringify(r.provNames));
+  await page.evaluate(() => [...document.querySelectorAll('.prov-item')].find(e => e.textContent.includes('千问（中国）')).click()); await sleep(450);
+  assert.strictEqual(await page.$eval('#pe-base', e => e.value), 'https://dashscope.aliyuncs.com/compatible-mode/v1');
+  r.qwModels = await page.$$eval('#pe-model-chips .mc-name', e => e.map(x => x.textContent));
+  ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen-plus-character', 'qwen3-vl-plus'].forEach(m => assert.ok(r.qwModels.includes(m), m));
+  assert.notStrictEqual(await page.$eval('#pe-think-row', e => e.style.display), 'none', '千问显示思考模式');
+  assert.strictEqual(await page.$eval('#pe-streamusage', e => e.checked), true);
+  await page.evaluate(() => { const k = document.querySelector('#pe-key'); k.value = 'sk-test-qwen'; const t = document.querySelector('#pe-thinking'); t.value = 'off'; });
+  await page.evaluate(() => { document.querySelector('#page-provider .page-body').scrollTop = 99999; });
+  await shot('qwen-provider');
+  await page.click('#pe-save'); await sleep(350);
+  r.qwSaved = await page.evaluate(() => { const p = JSON.parse(window.__mem['settings.json']).providers.find(p => p.presetId === 'qwen'); return { thinking: p.thinking, hasKey: !!p.apiKey }; });
+  assert.deepStrictEqual(r.qwSaved, { thinking: 'off', hasKey: true });
+  // DeepSeek 服务商编辑页不显示思考模式
+  await page.evaluate(() => [...document.querySelectorAll('.prov-item')].find(e => e.textContent.includes('DeepSeek')).click()); await sleep(400);
+  assert.strictEqual(await page.$eval('#pe-think-row', e => e.style.display), 'none');
+  for (let i = 0; i < 4 && await page.evaluate(() => document.querySelector('.page.show') != null); i++) { await page.evaluate(() => window.onAndroidBack()); await sleep(350); }
+  // 插件全局设置：自动启用 → 支持缓存的服务商上所有对话（演示自动启用；默认是「角色扮演类对话」）
+  await page.click('#btn-menu'); await sleep(350);
+  await page.click('#btn-plugins'); await sleep(600);
+  await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(250);
+  assert.strictEqual(await page.$eval('#rp-auto-mode', e => e.value), 'rp');
+  r.autoModes = await page.$$eval('#rp-auto-mode option', e => e.map(x => x.textContent));
+  assert.ok(r.autoModes[0].includes('角色扮演'));
+  await page.evaluate(() => { const s = document.querySelector('#rp-auto-mode'); s.value = 'cache'; s.dispatchEvent(new Event('change')); }); await sleep(200);
+  await shot('rp-auto-mode');
+  await closePanels();
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#model-pill'); await sleep(250); await pickModel('qwen3.7-plus'); await sleep(250);
+  const longTxt = '我推开旧书店的门，' + '雨夜的王都街道上灯笼摇晃，'.repeat(120);
+  const q1 = await sendRP(longTxt);
+  assert.ok(q1.url.startsWith('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'));
+  assert.strictEqual(q1.body.enable_thinking, false, '服务商设置：关闭思考');
+  assert.deepStrictEqual(q1.body.stream_options, { include_usage: true });
+  const q2 = await sendRP('拔剑');
+  const markIdx = q2.body.messages.map((m, i) => Array.isArray(m.content) && m.content.some(p => p.cache_control) ? i : -1).filter(i => i >= 0);
+  assert.ok(markIdx.length >= 1 && markIdx.length <= 4, '自动显式缓存断点 ' + JSON.stringify(markIdx));
+  assert.strictEqual(q2.body.messages[q2.body.messages.length - 1].content, '拔剑', '本轮输入不加断点');
+  r.qwBadges = await page.$$eval('.msg.assistant', els => els.length ? [...els[els.length - 1].querySelectorAll('.mbadge')].map(b => b.textContent) : []);
+  assert.ok(r.qwBadges.some(t => t.startsWith('缓存 ')), JSON.stringify(r.qwBadges));
+  r.qwHeader = await page.$$eval('#conv-bar .hbadge', e => e.map(x => x.textContent));
+  assert.ok(r.qwHeader.some(t => t.startsWith('🎭 RP')), JSON.stringify(r.qwHeader));
+  // 面板：自动标签 + 自动策略
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#conv-bar .hbadge')].find(x => x.textContent.includes('🎭')); if (b) b.click(); }); await sleep(500);
+  if (!await page.$eval('#page-plugin', e => e.classList.contains('show'))) {
+    await page.click('#model-pill'); await sleep(250);
+    await page.evaluate(() => [...document.querySelectorAll('#model-menu .pm-item.tool')].find(e => e.textContent.includes('RP 缓存优化')).click()); await sleep(500);
+  }
+  assert.ok(await page.$('#rp-auto-tag'), '显示「自动」标签');
+  await tab('opts'); await sleep(300);
+  r.autoText = await page.$eval('#rp-auto', e => e.innerText);
+  assert.ok(r.autoText.includes('千问显式缓存') && r.autoText.includes('显式缓存（自动断点）'), r.autoText);
+  assert.ok(r.autoText.includes('1,000,000') && r.autoText.includes('内置价格表'), r.autoText);
+  assert.ok(await page.$('#rp-cache-mode') && await page.$eval('#rp-auto-budget', e => e.checked) && await page.$eval('#rp-auto-sum', e => e.checked));
+  assert.strictEqual(await page.$eval('#rp-maxctx', e => e.value), '160000', '按模型自动推导的上下文上限');
+  r.autoEn = await englishLeft(); assert.deepStrictEqual(r.autoEn, [], '自动策略 ' + JSON.stringify(r.autoEn));
+  await page.evaluate(() => { document.querySelector('#page-plugin .page-body').scrollTop = 0; });
+  await shot('rp-auto');
+  // 手动改预算 → 自动预算关闭，保留手动值
+  await page.evaluate(() => { const i = document.querySelector('#rp-maxctx'); i.value = 120000; i.dispatchEvent(new Event('change')); }); await sleep(250);
+  r.manual = await page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.model === 'qwen3.7-plus' && c.plugins && c.plugins.rpcache && c.plugins.rpcache.state) return c.plugins.rpcache.state.settings; } return null; });
+  assert.deepStrictEqual([r.manual.auto_budget, r.manual.max_context, r.manual.summary.trigger_tokens], [false, 120000, 48000]);
+  await closePanels();
+  // 恢复默认自动启用模式与 DeepSeek 模型，避免影响后续步骤
+  await page.click('#btn-menu'); await sleep(350);
+  await page.click('#btn-plugins'); await sleep(600);
+  await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(250);
+  await page.evaluate(() => { const s = document.querySelector('#rp-auto-mode'); s.value = 'rp'; s.dispatchEvent(new Event('change')); }); await sleep(200);
+  await closePanels();
+  assert.strictEqual(await page.evaluate(() => JSON.parse(window.__mem['settings.json']).plugins.rpcache.auto_mode), 'rp');
+  await page.click('#btn-new'); await sleep(300);
+  await page.click('#model-pill'); await sleep(250); await pickModel('deepseek-flash'); await sleep(250);
+
   // 14) 提示词模板：快速切换系统提示词（与 ⚡ 提示词库 / 助手区分）
   const tplStore = () => page.evaluate(() => JSON.parse(window.__mem['templates.json'] || '[]'));
   const tqPick = name => page.evaluate(n => [...document.querySelectorAll('#tq-list .tpl-item')].find(e => e.querySelector('.pi-t').textContent.includes(n)).click(), name);
@@ -777,8 +859,8 @@ async function scenario(browser, theme) {
 
   // RP 插件：切换模板 = 显式的 L1 静态更新（确认警告 + 监控原因）
   await page.click('#btn-menu'); await sleep(350);
-  const rpMeta = await page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache) return { id: c.id, title: c.title }; } return null; });
-  const rpIdx = await page.evaluate(() => JSON.parse(window.__mem['convs.json']).findIndex(c => { const x = JSON.parse(window.__mem['conv_' + c.id + '.json']); return x.plugins && x.plugins.rpcache; }));
+  const rpMeta = await page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache && c.model !== 'qwen3.7-plus') return { id: c.id, title: c.title }; } return null; });
+  const rpIdx = await page.evaluate(() => JSON.parse(window.__mem['convs.json']).findIndex(c => { const x = JSON.parse(window.__mem['conv_' + c.id + '.json']); return x.plugins && x.plugins.rpcache && x.model !== 'qwen3.7-plus'; })); // 跳过 13b 的千问对话
   await page.evaluate(i => document.querySelectorAll('.conv-item')[i].click(), rpIdx); await sleep(500);
   assert.ok(!(await page.$eval('#drawer', e => e.classList.contains('show'))));
   assert.strictEqual(await page.$eval('#mp-model', e => e.textContent), 'deepseek-flash', rpMeta.title);
@@ -817,7 +899,7 @@ async function scenario(browser, theme) {
   assert.ok(lg.reasons.some(x => x.includes('切换了提示词模板「简洁回答」')), JSON.stringify(lg.reasons));
   rst = (await rpConv()).plugins.rpcache.state;
   assert.ok(!rst.pendingStaticCause, '发送成功后清除原因'); assert.strictEqual(rst.staticVersion, rpBefore + 1);
-  await page.evaluate(() => [...document.querySelectorAll('.msg.assistant .mbadge')].pop().click()); await sleep(500);
+  await page.evaluate(() => [...document.querySelectorAll('.msg.assistant .mbadge')].filter(b => b.textContent.includes('缓存')).pop().click()); await sleep(500); // v0.5：自适应摘要可能在同一条回复上多一个「📚 章节」徽章
   r.tplReason = await page.$eval('#pp-body .dg-reason', e => e.textContent);
   assert.ok(r.tplReason.includes('切换了提示词模板'), r.tplReason);
   await shot('template-rp-monitor');

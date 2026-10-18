@@ -1,10 +1,11 @@
-/* DeepSeek RP 缓存优化器 V2 —— Context Builder 核心逻辑（纯函数，可在 Node 中测试）
+/* RP 缓存优化器 V2/V3（DeepSeek / 千问）—— Context Builder 核心逻辑（纯函数，可在 Node 中测试）
  * 设计文档：docs/plugins/deepseek-rp-cache-design-v1.md（V1）+ docs/plugins/README.md「V2 变更」；
  * 核心：能不动就不动，能追加就不重写，能摘要就不盲删，能把动态内容放后面就绝不放前面。
  * 请求顺序：system = L1 永久锚点 → L2 长期记忆（稳定事实）→ L3 冻结章节 #001、#002…（只追加）
  *           messages = L4 最近完整对话（原样追加）→ 最后一条用户消息 = L6 本轮输入 + 记忆增量 + L5 当前状态
  * V2：章节只追加（超过上限才合并一次）、记忆增量放在尾部、摘要最小间隔、按实际用量校准 Token 估算、
  *     服务商适用性判断（默认只对 DeepSeek 生效）、价格 / 高峰时段可配置。
+ *  V3：千问（显式 / 隐式缓存）、缓存能力识别与策略选择、按上下文窗口自动预算、自适应摘要时机、缓存冷却感知、内置价格表。
  */
 (function (root) {
   'use strict';
@@ -47,6 +48,9 @@
     summary_model: '', save_prompt: false,
     force_enable: false,      // V2：非 DeepSeek 服务商也强制启用（默认不适用，不改写请求）
     refresh_on_regen: false,  // V2：重新生成最后一条回复时，是否用最新内容（联网搜索 / 文件）刷新冻结的用户消息
+    auto_budget: true,        // V3：按模型上下文窗口 / 价格阶梯自动推导预算（手动修改任一预算数值即关闭）
+    auto_summary: true,       // V3：自适应摘要时机（成本回本 + 缓存冷却），关闭则只按固定阈值
+    cache_mode: 'auto',       // V3：auto | explicit | implicit —— 支持显式缓存的模型（千问）用哪种缓存
   };
   const DEFAULT_PEAK = { windows: '09:00-12:00,14:00-18:00', tz: 8, weekdays: true, off_factor: 0.5 };
   // DeepSeek 官方价格（美元 / 百万 tokens，高峰时段；非高峰为一半）—— 2026-10 核对 api-docs.deepseek.com/quick_start/pricing
@@ -54,6 +58,33 @@
   const DEFAULT_PRICES = {
     'deepseek-flash': { hit: 0.006, miss: 0.3, out: 1.2, match: 'deepseek' },
     'deepseek-v4-pro': { hit: 0.044, miss: 1.32, out: 3.96, match: 'deepseek-v4-pro,deepseek-pro' },
+  };
+  // V3：内置价格表（用户规则没有匹配时自动使用，「新模型自动匹配价格」）。千问为阿里云百炼中国站第一档价格（元 / 百万 Token），
+  // 按 1 美元 ≈ 7.2 元换算成美元；隐式缓存命中 = 输入 20%，显式缓存命中 = 10%，显式缓存创建 = 125%；千问无高峰时段（peak:false）。
+  // 来源：help.aliyun.com/zh/model-studio/model-pricing（2026-10-15 更新）、/context-cache、/explicit-cache-guide
+  const CNY_PER_USD = 7.2;
+  const qp = (miss, out, match) => {
+    const m = miss / CNY_PER_USD, r = v => Math.round(v * 1e5) / 1e5;
+    return { hit: r(m * 0.2), hit_explicit: r(m * 0.1), write: r(m * 1.25), miss: r(m), out: r(out / CNY_PER_USD), match, peak: false, builtin: true };
+  };
+  const BUILTIN_PRICES = {
+    'deepseek-flash': Object.assign({}, DEFAULT_PRICES['deepseek-flash'], { builtin: true }),
+    'deepseek-v4-pro': Object.assign({}, DEFAULT_PRICES['deepseek-v4-pro'], { builtin: true }),
+    'qwen3.8-max': qp(12, 36, 'qwen3.8-max,qwen3.7-max'),
+    'qwen3.7-plus': qp(2, 8, 'qwen3.7-plus'),
+    'qwen3.6-plus': qp(2, 12, 'qwen3.6-plus'),
+    'qwen3.5-plus': qp(0.8, 4.8, 'qwen3.5-plus'),
+    'qwen-plus': qp(0.8, 2, 'qwen-plus,qwen'),            // 兜底：未知千问模型按 qwen-plus 估算
+    'qwen3.8-flash': qp(0.8, 2.7, 'qwen3.8-flash'),
+    'qwen3.7-flash': qp(0.2, 0.8, 'qwen3.7-flash'),
+    'qwen3.6-flash': qp(1.2, 7.2, 'qwen3.6-flash'),
+    'qwen3.5-flash': qp(0.2, 2, 'qwen3.5-flash'),
+    'qwen-flash': qp(0.15, 1.5, 'qwen-flash,qwen-turbo'),
+    'qwen-max': qp(2.4, 9.6, 'qwen-max'),
+    'qwen3-coder-flash': qp(1, 4, 'qwen3-coder-flash,qwen3-coder'),
+    'qwen3-vl-plus': qp(1, 10, 'qwen3-vl-plus,qwen-vl'),
+    'qwen-plus-character': qp(0.8, 2, 'qwen-plus-character,character'),
+    'qwen-long': qp(0.5, 2, 'qwen-long'),
   };
   const HISTORY_LIMIT = 30;
   const LOG_LIMIT = 500;
@@ -149,6 +180,8 @@
     });
     const ss = st.settings || {};
     const settings = Object.assign({}, DEFAULT_SETTINGS, ss, { summary: Object.assign({}, DEFAULT_SETTINGS.summary, ss.summary || {}) });
+    // 旧版（v0.4 及以前）保存的设置没有 auto_budget：数值仍是默认值 → 自动；用户改过 → 保持手动
+    if (ss.max_context != null && ss.auto_budget == null) settings.auto_budget = budgetIsDefault(settings);
     let chapters = Array.isArray(st.chapters) ? st.chapters : null;
     let chapterSeq = st.chapterSeq | 0;
     if (!chapters) { chapters = migrateSummaries(st.summaries) || []; chapterSeq = Math.max(chapterSeq, chapters.length); }
@@ -157,6 +190,11 @@
       summaries: Array.isArray(st.summaries) ? st.summaries : [], chapters, chapterSeq: Math.max(chapterSeq, chapters.reduce((n, c) => Math.max(n, c.no | 0), 0)),
       archive: Array.isArray(st.archive) ? st.archive : [], lastSummaryRound: st.lastSummaryRound | 0, calib,
       window: Object.assign({ startId: null, startOrdinal: 0 }, st.window || {}), seq: st.seq | 0 });
+  }
+  function budgetIsDefault(s) {
+    const d = DEFAULT_SETTINGS, a = s.summary || {}, b = d.summary;
+    return s.max_context === d.max_context && s.output_reserve === d.output_reserve && s.safety_margin === d.safety_margin &&
+      a.trigger_tokens === b.trigger_tokens && a.chapter_cap_tokens === b.chapter_cap_tokens;
   }
   const getBlock = (st, id) => st.blocks.find(b => b.id === id);
   const defOf = id => BLOCK_DEFS.find(d => d.id === id);
@@ -348,9 +386,9 @@
    * Context Builder（规划，不调用模型）。items：对话中可发送的消息（按原顺序），最后一条为本轮用户输入。
    * 返回各层内容、Token 预算（已乘校准系数）、是否需要生成章节 / 合并章节。
    */
-  function plan(state, baseSystem, items) {
+  function plan(state, baseSystem, items, env) {
     const st = normalizeState(state);
-    const s = st.settings, sum = s.summary;
+    const s = effectiveSettings(st.settings, env), sum = s.summary;
     const k = st.calib || 1; const cal = n => Math.round(n * k);
     const covered = new Set(coveredIds(st));
     const elig = items.filter(m => !covered.has(m.id));
@@ -388,9 +426,59 @@
     }
     const chapterTokens = tokens.summary;
     const cap = Math.max(1000, sum.chapter_cap_tokens | 0 || DEFAULT_SETTINGS.summary.chapter_cap_tokens);
-    const needConsolidate = !!summaryReason && st.chapters.length > 1 && chapterTokens >= cap;
-    return { st, system, hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
-      summaryBlocked, sinceLast, minGap, rounds, chapterTokens, cap, needConsolidate, calib: k, trimmed: start > 0, dropped: start };
+    const p = { st, system, hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
+      summaryBlocked, sinceLast, minGap, rounds, chapterTokens, cap, needConsolidate: false, calib: k, trimmed: start > 0, dropped: start, settings: s, auto: null };
+    // V3：自适应摘要时机（只在宿主提供 env 时启用；不传 env 与 v0.4 完全一致）
+    if (env && s.auto_summary !== false && sum.enabled && batch.length && !summaryReason) {
+      const a = adaptiveSummary(p, env);
+      p.auto = a;
+      if (a.reason) { p.summaryReason = a.reason; p.needSummary = true; p.summaryBlocked = null; }
+    }
+    const cold = !!(env && env.cold);
+    // 合并章节：章节合计超上限；V3：缓存已冷（反正要重建）时提前到 60% 上限就合并
+    p.needConsolidate = !!p.summaryReason && st.chapters.length > 1 && (chapterTokens >= cap || (cold && s.auto_summary !== false && chapterTokens >= cap * 0.6));
+    return p;
+  }
+  /** V3：自动预算覆盖会话设置（auto_budget 开启且 env.budget 存在时） */
+  function effectiveSettings(s, env) {
+    if (!env || !env.budget || s.auto_budget === false) return s;
+    const b = env.budget, d = DEFAULT_SETTINGS, sum = s.summary || {};
+    // 逐项：仍是默认值的字段用推导值；单独改过的字段视为手动覆盖，保留
+    const pick = (cur, def, auto) => (cur === def || cur == null ? auto : cur);
+    return Object.assign({}, s, { max_context: pick(s.max_context, d.max_context, b.max_context), output_reserve: pick(s.output_reserve, d.output_reserve, b.output_reserve),
+      safety_margin: pick(s.safety_margin, d.safety_margin, b.safety_margin),
+      summary: Object.assign({}, sum, { trigger_tokens: pick(sum.trigger_tokens, d.summary.trigger_tokens, b.trigger_tokens),
+        chapter_cap_tokens: pick(sum.chapter_cap_tokens, d.summary.chapter_cap_tokens, b.chapter_cap_tokens) }) });
+  }
+  /**
+   * V3：自适应摘要。返回 { reason: 'cold'|'adaptive'|null, why, breakEven, unsummarized, trigger }
+   *  - cold：距上次请求已超过缓存有效期（缓存大概率已失效），本轮无论如何都要重建 → 提前到阈值 50% 就摘要，重建不额外花钱
+   *  - adaptive：未摘要历史 ≥ 阈值 70% 时按成本估算：摘要一次的花费 ÷ 每轮少发送的历史花费（按近期命中率加权）≤ 回本轮数上限 → 现在摘要更省
+   */
+  function adaptiveSummary(p, env) {
+    const s = p.settings, sum = s.summary, k = p.calib || 1;
+    const U = Math.round(estimateItems(p.unsummarized) * k), T = sum.trigger_tokens;
+    const r = { reason: null, why: '', breakEven: null, unsummarized: U, trigger: T };
+    const minRounds = Math.max(3, Math.ceil((sum.min_new_turns | 0) / 3));
+    if (U < T * 0.5) { r.why = '未摘要历史不足阈值一半'; return r; }
+    if (p.batchRounds < minRounds) { r.why = '可摘要的旧对话不足 ' + minRounds + ' 轮'; return r; }
+    if (p.sinceLast < Math.ceil(p.minGap / 2)) { r.why = '距上一章太近'; return r; }
+    if (env.cold) { r.reason = 'cold'; r.why = '缓存大概率已过期（空闲 ' + Math.round((env.idleSec || 0) / 60) + ' 分钟），本轮重建不额外花钱'; return r; }
+    if (U < T * 0.7) { r.why = '未摘要历史不足阈值 70%'; return r; }
+    const c = env.cost || {};
+    const pr = c.model ? priceFor(c.model, c.prices) : null;
+    if (!pr) { r.why = '没有价格信息，按固定阈值'; return r; }
+    const est = summaryCost(p, Object.assign({}, c, { warm: env.warm != null ? env.warm : 1 }));
+    const batchTok = Math.round(estimateItems(p.batch) * k);
+    const hr = env.hitRate != null ? env.hitRate : 0.8;
+    const hitP = env.strategy === 'explicit' && pr.hit_explicit != null ? pr.hit_explicit : pr.hit;
+    const perTurn = Math.max(0, batchTok - est.callOut) * (hr * hitP + (1 - hr) * pr.miss) / 1e6 * factorFor(pr, c.at || Date.now(), c.mode, c.peak);
+    if (!(perTurn > 0) || est.usd == null) { r.why = '无法估算收益'; return r; }
+    r.breakEven = est.usd / perTurn;
+    const horizon = env.horizon || 12;
+    if (r.breakEven <= horizon) { r.reason = 'adaptive'; r.why = '摘要约 ' + r.breakEven.toFixed(1) + ' 轮回本（≤ ' + horizon + '），命中率 ' + Math.round(hr * 100) + '%'; }
+    else r.why = '摘要需 ' + r.breakEven.toFixed(1) + ' 轮才回本，暂不摘要';
+    return r;
   }
   /** 无法摘要（关闭 / 失败 / 无可摘要历史）而仍超预算时：一次性截掉一大块旧历史，起点固定到下次超预算为止 */
   function fallbackTrim(st, p) {
@@ -418,12 +506,98 @@
   }
 
   // ---------------- 服务商适用性（V2） ----------------
-  /** DeepSeek 预设 / DeepSeek 接口地址 / 模型名含 deepseek → 适用 */
-  function isApplicable(provider, model) {
-    const p = provider || {};
-    if (p.presetId === 'deepseek') return true;
-    if (/deepseek/i.test(String(p.baseUrl || ''))) return true;
-    return /deepseek/i.test(String(model || ''));
+  /** 默认适用（auto）：DeepSeek（预设 / 接口地址 / 模型名）与千问（DashScope 接口 / 模型名含 qwen、qwq） */
+  function isApplicable(provider, model) { return capability(provider, model).auto; }
+
+  // ---------------- V3：服务商缓存能力 / 上下文窗口 / 自动预算 ----------------
+  // 千问显式缓存支持的模型（help.aliyun.com/zh/model-studio/explicit-cache-guide，2026-10）；其余千问模型走隐式缓存
+  const QWEN_EXPLICIT = /^(qwen3\.[78]-max|qwen3\.[567]-plus|qwen3\.[5-8]-flash|qwen3\.8-(2\.4t|27b)|qwen-plus|qwen-flash|qwen3-coder-flash|qwen3-vl-plus)/;
+  const isDashscope = p => !!p && (p.presetId === 'qwen' || p.presetId === 'qwen-intl' || /dashscope|\.maas\.aliyuncs\.com/i.test(String(p.baseUrl || '')));
+  /**
+   * { vendor, kind: 'implicit'|'explicit'|'none', auto（默认启用）, ttl（秒，缓存大致有效期）, explicit: {maxMarkers, minTokens} | null, label }
+   */
+  function capability(provider, model) {
+    const p = provider || {}, base = String(p.baseUrl || '').toLowerCase();
+    const m = String(model || '').toLowerCase(), bare = m.replace(/^.*\//, '');
+    if (p.presetId === 'deepseek' || /deepseek/.test(base) || /deepseek/.test(m))
+      return { vendor: 'deepseek', kind: 'implicit', auto: true, ttl: 3 * 3600, explicit: null, label: 'DeepSeek 自动前缀缓存（硬盘缓存，通常数小时）' };
+    if (isDashscope(p) || /qwen|qwq/.test(m)) {
+      if (isDashscope(p) && QWEN_EXPLICIT.test(bare) && !/flash-character/.test(bare))
+        return { vendor: 'qwen', kind: 'explicit', auto: true, ttl: 300, explicit: { maxMarkers: 4, minTokens: 1024, lookback: 20 },
+          label: '千问显式缓存（cache_control，5 分钟有效，命中时重置）+ 隐式缓存' };
+      return { vendor: 'qwen', kind: 'implicit', auto: true, ttl: 600, explicit: null, label: '千问隐式缓存（自动，命中按输入价 20%）' };
+    }
+    if (p.type === 'anthropic' || /claude/.test(m)) return { vendor: 'anthropic', kind: 'explicit', auto: false, ttl: 300, explicit: { maxMarkers: 4, minTokens: 1024 }, label: 'Claude cache_control（需手动启用）' };
+    if (p.type === 'gemini' || /gemini/.test(m)) return { vendor: 'gemini', kind: 'implicit', auto: false, ttl: 300, explicit: null, label: 'Gemini 隐式缓存（需手动启用）' };
+    if (p.presetId === 'openai' || /api\.openai\.com/.test(base) || /^(gpt-|o\d)/.test(bare)) return { vendor: 'openai', kind: 'implicit', auto: false, ttl: 600, explicit: null, label: 'OpenAI 自动前缀缓存（需手动启用）' };
+    return { vendor: 'other', kind: 'none', auto: false, ttl: 0, explicit: null, label: '未知 / 无上下文缓存（不改写请求）' };
+  }
+  // 内置上下文窗口表（模型列表接口返回 context_length 等时优先使用）；tier = 价格第一档上限（超过后单价上调）
+  const CONTEXT_TABLE = [
+    [/deepseek/, 128000],
+    [/qwen3\.7-flash/, 1000000, 32000], [/qwen3-coder-flash/, 1000000, 32000], [/qwen3-vl-plus/, 256000, 32000],
+    [/qwen3\.7-plus/, 1000000, 256000], [/qwen3\.6-(plus|flash)/, 1000000, 256000],
+    [/qwen3\.5-(plus|flash)|qwen-plus-character|qwen-flash-character/, 0],
+    [/character/, 32000],
+    [/qwen3\.5-(plus|flash)/, 1000000, 128000], [/qwen-plus|qwen-flash|qwen-turbo/, 1000000, 128000],
+    [/qwen3\.8-flash/, 1000000],
+    [/qwen3\.[78]-max/, 256000], [/qwen-max/, 32000], [/qwen-long/, 10000000], [/qwq|qwen/, 128000],
+    [/claude/, 200000], [/gemini/, 1000000], [/gpt-|^o\d/, 400000],
+  ];
+  function contextInfo(model, meta) {
+    const m = String(model || '').toLowerCase().replace(/^.*\//, '');
+    let window = 0, tier = 0, source = 'default';
+    for (const row of CONTEXT_TABLE) {
+      if (!row[0].test(m)) continue;
+      if (row[1] === 0) { if (/character/.test(m)) { window = 32000; } else continue; } else { window = row[1]; tier = row[2] || 0; }
+      source = 'table'; break;
+    }
+    if (meta && meta.context > 0) { window = meta.context; source = 'meta'; }
+    if (!window) window = 64000;
+    return { window, tier, source };
+  }
+  const round1k = n => Math.max(1000, Math.round(n / 1000) * 1000);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  /**
+   * 按上下文窗口推导预算：上限 = min(窗口, 价格第一档, 200K) × 0.8；输出预留 10%（4K–16K）；余量 2%（1K–4K）；
+   * 摘要阈值 30%；章节合计上限 12%（4K–24K）。DeepSeek 保持 v0.4 默认值不变（100K / 12K / 2K / 30K / 12K）。
+   */
+  function autoBudget(cap, model, meta) {
+    const d = DEFAULT_SETTINGS;
+    const ci = contextInfo(model, meta);
+    if (cap && cap.vendor === 'deepseek' && ci.source !== 'meta')
+      return { max_context: d.max_context, output_reserve: d.output_reserve, safety_margin: d.safety_margin, trigger_tokens: d.summary.trigger_tokens, chapter_cap_tokens: d.summary.chapter_cap_tokens, window: ci.window, tier: 0, source: 'deepseek-default' };
+    const usable = Math.min(ci.window, ci.tier || Infinity, 200000);
+    const max = round1k(Math.max(8000, usable * 0.8));
+    return { max_context: max, output_reserve: round1k(clamp(max * 0.1, 4000, 16000)), safety_margin: Math.round(clamp(max * 0.02, 1000, 4000)),
+      trigger_tokens: round1k(max * 0.3), chapter_cap_tokens: round1k(clamp(max * 0.12, 4000, 24000)), window: ci.window, tier: ci.tier, source: ci.source };
+  }
+  /** 选择缓存策略：explicit（显式断点）/ implicit（自动前缀）/ none */
+  function chooseStrategy(cap, mode, gapMedianSec) {
+    if (!cap || cap.kind === 'none') return { strategy: 'none', why: '服务商没有可用的上下文缓存' };
+    if (cap.kind !== 'explicit' || cap.vendor !== 'qwen') return { strategy: cap.kind === 'explicit' ? 'explicit' : 'implicit', why: cap.label };
+    if (mode === 'implicit') return { strategy: 'implicit', why: '手动选择隐式缓存' };
+    if (mode === 'explicit') return { strategy: 'explicit', why: '手动选择显式缓存' };
+    // 显式缓存 5 分钟有效：平均间隔太长时每轮都要按 125% 重新创建，不如隐式缓存
+    if (gapMedianSec != null && gapMedianSec > 240) return { strategy: 'implicit', why: '最近请求间隔中位数 ' + Math.round(gapMedianSec / 60) + ' 分钟 > 4 分钟，显式缓存容易过期，改用隐式缓存' };
+    return { strategy: 'explicit', why: '连续对话（间隔 ≤ 4 分钟）：显式缓存命中按 10% 计费，比隐式缓存（20%）更省且确定命中' };
+  }
+  /** 从日志推导运行时信息：近期命中率、空闲时长、请求间隔中位数 */
+  function runtimeEnv(logs, now, cap) {
+    const all = logs || []; const sup = all.filter(e => e.supported);
+    const recent = sup.slice(-5);
+    const hitRate = recent.length ? recent.reduce((n, e) => n + (e.hit_rate || 0), 0) / recent.length : null;
+    const older = sup.slice(-10, -5);
+    const trend = recent.length && older.length ? hitRate - older.reduce((n, e) => n + (e.hit_rate || 0), 0) / older.length : null;
+    const last = all[all.length - 1];
+    const idleSec = last && last.timestamp ? Math.max(0, (now - last.timestamp) / 1000) : null;
+    const ts = all.slice(-11).map(e => e.timestamp).filter(Boolean);
+    const gaps = []; for (let i = 1; i < ts.length; i++) gaps.push((ts[i] - ts[i - 1]) / 1000);
+    gaps.sort((a, b) => a - b);
+    const gapMedian = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : null;
+    const ttl = cap && cap.ttl || 0;
+    const cold = !!(ttl && idleSec != null && idleSec > ttl);
+    return { hitRate, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
   }
 
   // ---------------- 指纹与诊断 ----------------
@@ -459,16 +633,21 @@
     const d = entry.diag || {}; const out = [];
     if (!prev) return ['首次请求，缓存尚未建立'];
     if (entry.summary_happened) out.push(entry.summary_merged ? '章节总量超过上限，已合并为 ' + slabel(entry.summary_no) + '，章节及之后的缓存重建一次'
-      : (entry.summary_reason === 'budget' ? '超出预算，追加了章节 ' : '历史达到摘要阈值，追加了章节 ') + slabel(entry.summary_no) + '：之前的章节保持命中，从新章节处重新建立');
+      : ({ budget: '超出预算，追加了章节 ', cold: '缓存已过期（空闲较久），趁重建顺便追加了章节 ', adaptive: '按成本估算提前摘要（几轮即可回本），追加了章节 ' }[entry.summary_reason] || '历史达到摘要阈值，追加了章节 ') + slabel(entry.summary_no) + '：之前的章节保持命中，从新章节处重新建立');
     if (d.static === 'CHANGED') out.push(STATIC_CAUSE(entry.static_cause) || '角色卡 / 世界观等永久锚点被修改');
     if (d.memory === 'CHANGED') out.push('长期记忆已更新（建议改用「记忆增量」，不破坏前缀）');
     if (d.summary === 'CHANGED' && !entry.summary_happened) out.push('章节摘要刚更新（编辑、撤销或合并）');
     if (d.summary === 'APPEND' && !entry.summary_happened) out.push('手动追加了新章节，之前的章节保持命中');
     if (d.history === 'CHANGED' && !entry.summary_happened) out.push(entry.trimmed ? '超出预算，较早历史被一次性截断' : HISTORY_CAUSE(entry.history_cause) || '历史被修改（编辑、删除或重新生成了较早的消息）');
+    const ai = entry.auto_info || {};
+    if (prev && entry.cache_mode === 'explicit' && entry.timestamp - prev.timestamp > 300e3 && entry.timestamp - prev.timestamp <= 3 * 3600e3)
+      out.push('距上次请求超过 5 分钟，千问显式缓存已过期，本轮重新创建');
+    else if (prev && ai.vendor === 'qwen' && entry.timestamp - prev.timestamp > 600e3 && entry.timestamp - prev.timestamp <= 3 * 3600e3)
+      out.push('距上次请求超过 10 分钟，千问隐式缓存可能已清除');
     if (prev && entry.timestamp - prev.timestamp > 3 * 3600e3) out.push('距上次请求超过 ' + Math.floor((entry.timestamp - prev.timestamp) / 3600e3) + ' 小时，服务端缓存可能已清除');
     if (prev && prev.model !== entry.model) out.push('切换了模型（缓存按模型分开）');
     if (!out.length) {
-      if (entry.supported && entry.hit_rate != null && entry.hit_rate < 0.3) out.push('前缀未变，但服务端没有命中（缓存尚未建立或已过期，DeepSeek 缓存为尽力而为）');
+      if (entry.supported && entry.hit_rate != null && entry.hit_rate < 0.3) out.push('前缀未变，但服务端没有命中（缓存尚未建立或已过期；DeepSeek / 千问隐式缓存为尽力而为）');
       else out.push('正常动态更新');
     }
     return out;
@@ -520,8 +699,13 @@
   }
 
   // ---------------- 价格（V2：可配置的匹配规则与高峰时段） ----------------
+  /** 用户价格规则优先；都不匹配时用内置价格表（V3：新模型自动匹配） */
   function priceFor(model, prices) {
+    return priceForRules(model, prices) || (model ? priceForRules(model, BUILTIN_PRICES, true) : null);
+  }
+  function priceForRules(model, prices, builtinOnly) {
     prices = prices || DEFAULT_PRICES; const m = String(model || '').toLowerCase();
+    if (builtinOnly) { let b = null, bl = -1; Object.keys(prices).forEach(n => String(prices[n].match).split(',').forEach(k => { if (k && m.includes(k) && k.length > bl) { b = prices[n]; bl = k.length; } })); return b; }
     let best = null, bestLen = -1;
     Object.keys(prices).forEach(name => {
       const p = prices[name]; if (!p) return;
@@ -550,11 +734,15 @@
     const f = Number(off); const offF = isNaN(f) ? 0.5 : f;
     return mode === 'peak' ? 1 : mode === 'offpeak' ? offF : (isPeak(at, peak) ? 1 : offF);
   }
+  /** 价格规则 peak:false（如千问）不分高峰 / 非高峰 */
+  const factorFor = (p, at, mode, peak) => (p && p.peak === false ? 1 : peakFactor(at, mode, peak));
   function costOf(e, prices, mode, peak) {
     const p = priceFor(e.model, prices);
     if (!p || !e.supported) return null;
-    const f = peakFactor(e.timestamp, mode, peak);
-    const actual = (e.cache_hit_tokens * p.hit + e.cache_miss_tokens * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
+    const f = factorFor(p, e.timestamp, mode, peak);
+    const hitP = e.cache_mode === 'explicit' && p.hit_explicit != null ? p.hit_explicit : p.hit;
+    const write = (e.cache_write_tokens || 0) * Math.max(0, (p.write != null ? p.write : p.miss) - p.miss); // 显式缓存创建的溢价
+    const actual = (e.cache_hit_tokens * hitP + e.cache_miss_tokens * p.miss + write + (e.completion_tokens || 0) * p.out) / 1e6 * f;
     const noCache = (e.prompt_tokens * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
     return { actual, noCache, saved: noCache - actual };
   }
@@ -575,8 +763,8 @@
     const r = { merge, callIn, callOut: out, rebuild, chapterTokens: p.chapterTokens || 0, usd: null };
     const pr = o.model ? priceFor(o.model, o.prices) : null;
     if (pr) {
-      const f = peakFactor(o.at || Date.now(), o.mode, o.peak);
-      const missOverHit = Math.max(0, pr.miss - pr.hit);
+      const f = factorFor(pr, o.at || Date.now(), o.mode, o.peak);
+      const missOverHit = Math.max(0, pr.miss - pr.hit) * (o.warm != null ? o.warm : 1); // V3：缓存已冷时重建不额外花钱
       // 合并：新章节之后的全部内容都要重建，且原来命中的章节变成未命中
       const rebuildCost = (rebuild + (merge ? p.chapterTokens || 0 : 0)) * missOverHit;
       r.usd = (callIn * pr.miss + out * pr.out + rebuildCost) / 1e6 * f;
@@ -589,7 +777,7 @@
     const rebuild = (p.tokens.summary || 0) + (p.tokens.history || 0);
     const r = { rebuild, usd: null };
     const pr = o.model ? priceFor(o.model, o.prices) : null;
-    if (pr) r.usd = rebuild * Math.max(0, pr.miss - pr.hit) / 1e6 * peakFactor(o.at || Date.now(), o.mode, o.peak);
+    if (pr) r.usd = rebuild * Math.max(0, pr.miss - pr.hit) / 1e6 * factorFor(pr, o.at || Date.now(), o.mode, o.peak);
     return r;
   }
   /** 合并记忆增量：追加到长期记忆末尾（L2 版本 +1），清空增量 */
@@ -609,6 +797,7 @@
     const e = {
       request_id: o.request_id || '', timestamp: o.at || 0, model: o.model || '', provider: o.provider || '', supported,
       prompt_tokens: u.prompt || 0, est_tokens: (o.tokens && o.tokens.raw_total) || 0, cache_hit_tokens: supported ? u.hit || 0 : 0, cache_miss_tokens: supported ? u.miss || 0 : 0, completion_tokens: u.completion || 0,
+      cache_write_tokens: supported ? u.cacheWrite || 0 : 0, cache_mode: o.cacheMode || null, auto_info: o.autoInfo || null,
       hit_rate: supported ? (u.hit || 0) / ((u.hit || 0) + (u.miss || 0) || u.prompt) : null,
       static_hash: fp.static_hash, memory_hash: fp.memory_hash, summary_hash: fp.summary_hash, history_hash: fp.history_hash, delta_hash: fp.delta_hash, state_hash: fp.state_hash,
       chapters: fp.chapters || [], summary_merged: !!o.summaryMerged, summary_cost: o.summaryCost || null,
@@ -669,7 +858,8 @@
     return res;
   }
 
-  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS,
+  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
+    capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, consolidate, editChapter, removeLastChapter,
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,

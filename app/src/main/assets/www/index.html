@@ -168,7 +168,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.4.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.5.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -202,6 +202,7 @@
       <div class="input-row"><input id="pe-model-add" placeholder="输入模型名称后添加" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="chip-btn" id="pe-model-add-btn" type="button">添加</button></div>
       <div class="hint small" style="margin-top:8px">第一个为默认模型；点 × 删除，点模型名设为默认。</div>
       <label class="field inline" id="pe-su-row" style="margin-top:6px"><span>流式请求返回用量<small>发送 stream_options.include_usage，用于缓存命中统计；不支持的服务商可能报错</small></span><input type="checkbox" id="pe-streamusage" class="switch"></label>
+      <label class="field" id="pe-think-row" style="margin-top:6px"><span>思考模式（千问 enable_thinking）<small>默认 = 不发送该参数，由模型决定；思考内容会显示在回复上方</small></span><select id="pe-thinking"><option value="">默认（模型自身设置）</option><option value="on">开启思考</option><option value="off">关闭思考（更快、更省）</option></select></label>
       <label class="field" style="margin-top:6px"><span>图片生成模型（可选，仅 OpenAI 兼容）</span>
         <input id="pe-imgmodel" autocapitalize="off" spellcheck="false" placeholder="如 gpt-image-2.5-flare / cogview-3-flash"></label>
     </div>

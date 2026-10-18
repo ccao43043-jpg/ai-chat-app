@@ -28,16 +28,29 @@
     /**
      * 在某个对话中是否生效：
      *  - perConversation=false：全局开启即对所有对话生效，可在对话中单独关闭（conv.plugins[id].enabled === false）
-     *  - perConversation=true ：全局开启后，还需要在对话中手动开启（conv.plugins[id].enabled === true）
+     *  - perConversation=true ：全局开启后，在对话中手动开启（conv.plugins[id].enabled === true），
+     *                          或未手动设置时由插件的 autoActive 自动判断（手动开 / 关始终优先）
      */
-    function isActive(id, settings, conv) {
+    let hostRef = null;
+    /** 宿主对象（插件自动启用判断需要查询服务商等） */
+    function setHost(h) { hostRef = h || null; }
+    function isActive(id, settings, conv, host) {
       const p = get(id);
       if (!p || !isGloballyEnabled(id, settings)) return false;
       const cs = conv && conv.plugins && conv.plugins[id];
-      if (p.perConversation) return !!(cs && cs.enabled === true);
+      if (p.perConversation) {
+        if (cs && typeof cs.enabled === 'boolean') return cs.enabled; // 用户在对话里手动开 / 关过：以手动为准
+        // 未手动设置：插件可提供 autoActive(conv, settings, host) 自动判断（如 RP 对话 + 支持缓存的服务商）
+        return !!(conv && p.autoActive && safe(p, 'autoActive', () => p.autoActive(conv, settings, host || hostRef)));
+      }
       return !(cs && cs.enabled === false);
     }
-    function active(settings, conv) { return list.filter(p => isActive(p.id, settings, conv)); }
+    /** 对话中未手动设置、由 autoActive 自动开启 */
+    function isAutoActive(id, settings, conv, host) {
+      const cs = conv && conv.plugins && conv.plugins[id];
+      return !(cs && typeof cs.enabled === 'boolean') && isActive(id, settings, conv, host);
+    }
+    function active(settings, conv, host) { return list.filter(p => isActive(p.id, settings, conv, host)); }
 
     function setGlobal(settings, id, enabled) {
       settings.plugins = settings.plugins || {};
@@ -70,7 +83,8 @@
     async function runBeforeRequest(ctx, host) {
       let cur = ctx;
       cur.meta = cur.meta || {};
-      const act = active(cur.settings, cur.conv);
+      if (host) hostRef = host;
+      const act = active(cur.settings, cur.conv, host);
       cur.plugins = act.map(p => p.id);
       for (const p of act) {
         if (!p.hooks.onBeforeRequest) continue;
@@ -88,7 +102,7 @@
     }
     /** 响应结束后：onResponseUsage(usage, ctx, host) 与 onAfterResponse(result, ctx, host) */
     function runAfterResponse(ctx, result, host) {
-      active(ctx.settings, ctx.conv).forEach(p => {
+      active(ctx.settings, ctx.conv, host).forEach(p => {
         if (result && result.usage && p.hooks.onResponseUsage) safe(p, 'onResponseUsage', () => p.hooks.onResponseUsage(result.usage, ctx, host));
         if (p.hooks.onAfterResponse) safe(p, 'onAfterResponse', () => p.hooks.onAfterResponse(result || {}, ctx, host));
       });
@@ -96,7 +110,7 @@
     /** 徽章：[{text, tone:'ok'|'warn'|'bad'|'info', title, action}] */
     function messageBadges(msg, settings, conv, host) {
       const out = [];
-      active(settings, conv).forEach(p => {
+      active(settings, conv, host).forEach(p => {
         if (!p.hooks.messageBadges) return;
         (safe(p, 'messageBadges', () => p.hooks.messageBadges(msg, conv, host)) || []).forEach(b => out.push(Object.assign({ plugin: p.id }, b)));
       });
@@ -104,7 +118,7 @@
     }
     function headerBadges(settings, conv, host) {
       const out = [];
-      active(settings, conv).forEach(p => {
+      active(settings, conv, host).forEach(p => {
         if (!p.hooks.headerBadges) return;
         (safe(p, 'headerBadges', () => p.hooks.headerBadges(conv, host)) || []).forEach(b => out.push(Object.assign({ plugin: p.id }, b)));
       });
@@ -113,7 +127,7 @@
     /** 消息在界面上的附加状态（如「已压缩」） */
     function messageState(msg, settings, conv, host) {
       let st = null;
-      active(settings, conv).forEach(p => {
+      active(settings, conv, host).forEach(p => {
         if (!p.hooks.messageState) return;
         const r = safe(p, 'messageState', () => p.hooks.messageState(msg, conv, host));
         if (r) st = Object.assign(st || {}, r);
@@ -121,7 +135,7 @@
       return st;
     }
 
-    return { register, all, get, isGloballyEnabled, isActive, active, setGlobal, setForConversation, config, convData,
+    return { register, all, get, isGloballyEnabled, isActive, isAutoActive, setHost, active, setGlobal, setForConversation, config, convData,
       runBeforeRequest, runAfterResponse, messageBadges, headerBadges, messageState, errors };
   }
 

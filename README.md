@@ -48,6 +48,14 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.5.0：千问（阿里云百炼）+ RP 缓存优化器自动化**
+- **千问预设**：「阿里云百炼 · 千问（中国）」`https://dashscope.aliyuncs.com/compatible-mode/v1` 与「千问（国际）」`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`（也识别业务空间专属域名 `*.maas.aliyuncs.com`）。预设模型 qwen3.8-max、qwen3.7-plus、qwen3.8-flash、qwen-plus、qwen-flash、qwen-plus-character（角色扮演）、qwen3-coder-flash、qwen3-vl-plus（看图）
+- **思考模式**：服务商设置里可选 `enable_thinking` 开 / 关 / 默认；思考内容（`reasoning_content`）显示在回复上方。插件的摘要调用自动关闭思考
+- **缓存统计**：默认开启 `stream_options.include_usage`，解析 `prompt_tokens_details.cached_tokens` 与显式缓存的 `cache_creation_input_tokens`
+- **RP 优化器支持千问**：DashScope 接口或模型名含 qwen / qwq（包括 OpenRouter、硅基流动上的千问模型）都会识别。支持显式缓存的模型自动在「system 末尾（设定 + 记忆 + 章节）」和「稳定历史末尾」加 `cache_control` 断点（≥ 1024 Token 才加，最多 4 个）；DeepSeek 的请求结构不变
+- **更自动**：RP 类对话在 DeepSeek / 千问上自动启用（手动开 / 关始终优先，可改为「所有对话」或「只手动」）；按模型上下文窗口与价格档自动推导预算；自适应摘要时机（缓存过期时趁重建摘要、按「几轮回本」提前摘要）；缓存冷却时顺便合并章节；请求间隔常超过 4 分钟时千问自动改用隐式缓存；新模型自动匹配内置价格表（含千问各模型，人民币按 7.2 换算美元）
+- 设计说明见 [docs/plugins/README.md](docs/plugins/README.md) 第 2.1 节（V3 自动策略）
+
 **v0.4.0：DeepSeek RP 缓存优化器 V2**
 - **章节只追加**：每次自动摘要只把新移出的旧对话写成新的一章，接在之前的章节后面一起发送；之前的章节逐字不变，摘要那一轮也能命中「固定设定 + 长期记忆 + 之前全部章节」。章节合计超过上限（默认 12000 Token，可调）时才合并一次，并提前提示额外花费。旧版的单份摘要自动迁移为章节 #001
 - **默认只对 DeepSeek 生效**：其他服务商的对话即使开了插件也不改写请求（逐字节不变），顶栏显示「不适用」；可以在面板里强制启用，Claude 会自动加 `cache_control` 缓存断点
@@ -221,7 +229,8 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
 |---|---|
 | OpenAI | `https://api.openai.com/v1` |
 | DeepSeek | `https://api.deepseek.com` |
-| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1`（或业务空间专属域名 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`） |
+| 阿里云百炼 · 千问（中国） | `https://dashscope.aliyuncs.com/compatible-mode/v1`（或业务空间专属域名 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`） |
+| 阿里云百炼 · 千问（国际） | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`（新加坡；API Key 与中国站不通用） |
 | Moonshot | `https://api.moonshot.cn/v1` |
 | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` |
 | 硅基流动 | `https://api.siliconflow.cn/v1` |
@@ -235,7 +244,8 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
 |---|---|
 | OpenAI | gpt-6-astra、gpt-6.1-sol、gpt-6-luna；生图 gpt-image-2.5-flare |
 | DeepSeek | deepseek-flash、deepseek-v4-pro |
-| 通义千问 | qwen3.8-max、qwen3.8-flash、qwen3.7-plus |
+| 千问（中国） | qwen3.8-max、qwen3.7-plus、qwen3.8-flash、qwen-plus、qwen-flash、qwen-plus-character、qwen3-coder-flash、qwen3-vl-plus |
+| 千问（国际） | qwen3.8-max、qwen3.7-plus、qwen3.8-flash、qwen-plus、qwen-flash、qwen3-coder-flash、qwen3-vl-plus（国际站可用模型以控制台为准，可「从接口获取模型列表」） |
 | Kimi | kimi-k3、kimi-k2.6、kimi-k2.7-code |
 | 智谱 GLM | glm-5.3、glm-5.3-flash、glm-4.7-flash；生图 cogview-3-flash |
 | 硅基流动 | deepseek-ai/DeepSeek-V3.2、Qwen/Qwen3.5-397B-A17B、Qwen/Qwen3-32B；生图 Kwai-Kolors/Kolors |

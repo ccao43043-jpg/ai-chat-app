@@ -8,8 +8,11 @@
       models: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'], imageModel: 'gpt-image-2.5-flare', vision: true },
     { presetId: 'deepseek', name: 'DeepSeek', type: 'openai', baseUrl: 'https://api.deepseek.com',
       models: ['deepseek-flash', 'deepseek-v4-pro'], imageModel: '', vision: true },
-    { presetId: 'qwen', name: '通义千问', type: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      models: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus'], imageModel: '', vision: true },
+    // 阿里云百炼（DashScope OpenAI 兼容模式）：help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope · model-pricing（2026-10-15 更新）
+    { presetId: 'qwen', name: '阿里云百炼 · 千问（中国）', type: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      models: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen-plus', 'qwen-flash', 'qwen-plus-character', 'qwen3-coder-flash', 'qwen3-vl-plus'], imageModel: '', vision: true },
+    { presetId: 'qwen-intl', name: '阿里云百炼 · 千问（国际）', type: 'openai', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      models: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash', 'qwen-plus', 'qwen-flash', 'qwen3-coder-flash', 'qwen3-vl-plus'], imageModel: '', vision: true },
     { presetId: 'moonshot', name: 'Kimi (Moonshot)', type: 'openai', baseUrl: 'https://api.moonshot.cn/v1',
       models: ['kimi-k3', 'kimi-k2.6', 'kimi-k2.7-code'], imageModel: '', vision: true },
     { presetId: 'zhipu', name: '智谱 GLM', type: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
@@ -116,6 +119,22 @@
     return dedupe(ids.filter(Boolean)).sort((a, b) => a.localeCompare(b));
   }
 
+  /** 模型列表中的元数据 -> { id: { context, maxOutput } }（OpenRouter context_length、Anthropic max_input_tokens、Gemini inputTokenLimit 等） */
+  function parseModelsMeta(type, text) {
+    let obj; try { obj = JSON.parse(text); } catch (e) { return {}; }
+    const list = Array.isArray(obj) ? obj : (obj.data || obj.models || []);
+    const out = {};
+    list.forEach(m => {
+      if (!m || typeof m !== 'object') return;
+      const id = String(m.id || m.name || '').replace(/^models\//, ''); if (!id) return;
+      const ctx = m.context_length || m.context_window || m.max_context_length || m.max_input_tokens || m.inputTokenLimit ||
+        (m.top_provider && m.top_provider.context_length) || 0;
+      const outT = m.outputTokenLimit || m.max_output_tokens || (m.top_provider && m.top_provider.max_completion_tokens) || 0;
+      if (ctx > 0) out[id] = Object.assign({ context: Number(ctx) }, outT > 0 ? { maxOutput: Number(outT) } : {});
+    });
+    return out;
+  }
+
   function trimSlash(u) { return String(u || '').trim().replace(/\/+$/, ''); }
 
   /** data:image/png;base64,xxxx -> {mime, data} */
@@ -203,18 +222,27 @@
 
     // OpenAI 兼容
     const out = [];
-    if (sys) out.push({ role: 'system', content: sys });
+    // 显式缓存（千问等 OpenAI 兼容接口）：被标记的消息改为数组形式，在最后一段加 cache_control（消息级断点）
+    const cc = !!opts.cacheControl;
+    const mark = content => {
+      const parts = Array.isArray(content) ? content.map(x => Object.assign({}, x)) : [{ type: 'text', text: content || '' }];
+      const last = parts[parts.length - 1]; if (last) last.cache_control = { type: 'ephemeral' };
+      return parts;
+    };
+    if (sys) out.push({ role: 'system', content: cc && opts.cacheSystem !== false ? mark(sys) : sys });
     msgs.forEach(m => {
+      let content;
       if (m.role === 'user' && m.images && m.images.length) {
         const parts = [];
         if (m.content) parts.push({ type: 'text', text: m.content });
         m.images.forEach(img => parts.push({ type: 'image_url', image_url: { url: img } }));
-        out.push({ role: 'user', content: parts });
-      } else {
-        out.push({ role: m.role, content: m.content || '' });
-      }
+        content = parts;
+      } else content = m.content || '';
+      out.push({ role: m.role, content: cc && m._cache ? mark(content) : content });
     });
     const body = { model, messages: out, stream };
+    const th = opts.thinking != null ? opts.thinking : provider.thinking === 'on' ? true : provider.thinking === 'off' ? false : null;
+    if (th !== null && isQwenEndpoint(provider)) body.enable_thinking = !!th; // 千问：enable_thinking（思考过程在 reasoning_content 中流式返回）
     if (stream && streamUsageEnabled(provider)) body.stream_options = { include_usage: true };
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
@@ -224,11 +252,17 @@
   }
 
   // 流式请求附带 usage（stream_options.include_usage）：已核实官方文档支持的预设默认开启，其他可在服务商设置里打开
-  const STREAM_USAGE_PRESETS = ['openai', 'deepseek', 'qwen', 'openrouter'];
+  const STREAM_USAGE_PRESETS = ['openai', 'deepseek', 'qwen', 'qwen-intl', 'openrouter'];
   function streamUsageEnabled(provider) {
     if (!provider || provider.type !== 'openai') return false;
     if (provider.streamUsage === true || provider.streamUsage === false) return provider.streamUsage;
-    return STREAM_USAGE_PRESETS.includes(provider.presetId) || /\/\/api\.deepseek\.com/i.test(provider.baseUrl || '');
+    return STREAM_USAGE_PRESETS.includes(provider.presetId) || /\/\/api\.deepseek\.com/i.test(provider.baseUrl || '') || isQwenEndpoint(provider);
+  }
+  /** 阿里云百炼 / DashScope 接口（中国、国际、业务空间专属域名） */
+  function isQwenEndpoint(provider) {
+    const p = provider || {};
+    if (p.presetId === 'qwen' || p.presetId === 'qwen-intl') return true;
+    return /dashscope(-intl|-us)?\.aliyuncs\.com|\.maas\.aliyuncs\.com|dashscope/i.test(String(p.baseUrl || ''));
   }
 
   const num = v => (typeof v === 'number' && isFinite(v) ? v : undefined);
@@ -266,6 +300,11 @@
         out.cacheSupported = true; out.source = 'deepseek';
       } else if (num(det.cached_tokens) !== undefined) { // OpenAI 等
         out.hit = det.cached_tokens; out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'openai';
+      }
+      // 千问显式缓存：创建缓存的 Token（按输入价 125% 计费）
+      if (num(det.cache_creation_input_tokens) !== undefined) {
+        out.cacheWrite = det.cache_creation_input_tokens;
+        if (out.hit === undefined) { out.hit = 0; out.miss = out.prompt || 0; out.cacheSupported = true; out.source = 'openai'; }
       }
     }
     return Object.keys(out).length ? out : null;
@@ -415,7 +454,7 @@
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS };
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

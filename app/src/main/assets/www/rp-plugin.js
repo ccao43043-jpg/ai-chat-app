@@ -1,4 +1,4 @@
-/* 内置插件：DeepSeek RP 缓存优化器 V1（钩子 + 界面）与 Token 用量显示。依赖 plugins.js、rpcache.js
+/* 内置插件：RP 缓存优化器 V3（DeepSeek / 千问；钩子 + 界面）与 Token 用量显示。依赖 plugins.js、rpcache.js
  * 设计文档：docs/plugins/deepseek-rp-cache-design-v1.md */
 (function () {
   'use strict';
@@ -28,19 +28,64 @@
     // 旧版本保存的价格没有 match 字段：补上默认匹配规则
     Object.keys(R.DEFAULT_PRICES).forEach(k => { if (c.prices[k] && c.prices[k].match == null) c.prices[k] = Object.assign({}, c.prices[k], { match: R.DEFAULT_PRICES[k].match }); });
     c.priceMode = c.priceMode || 'auto';
+    c.auto_mode = c.auto_mode || 'rp'; // V3：rp = RP 类对话自动启用 · cache = 支持缓存的服务商上所有对话 · off = 只手动
     c.peak = Object.assign({}, R.DEFAULT_PEAK, c.peak || {});
     return c;
   }
   const logKey = conv => 'rplog_' + conv.id + '.json';
   const loadLogs = (host, conv) => host.store.get(logKey(conv), []) || [];
   const providerOf = (host, conv) => (host.provider ? host.provider(conv) : null) || null;
-  /** V2：服务商适用性。DeepSeek → 适用；其他服务商默认「不适用」（请求不改写），可在面板中强制启用 */
+  /** 服务商适用性。DeepSeek / 千问 → 适用；其他服务商默认「不适用」（请求不改写），可在面板中强制启用 */
   function applicability(host, conv, provider, model) {
     const p = provider || providerOf(host, conv);
     const m = model != null ? model : conv.model;
-    const ok = R.isApplicable(p, m);
+    const cap = R.capability(p, m);
+    const ok = cap.auto;
     const forced = !ok && !!data(conv).state.settings.force_enable;
-    return { ok, forced, effective: ok || forced, provider: p, model: m, claude: !!(p && p.type === 'anthropic') };
+    return { ok, forced, effective: ok || forced, provider: p, model: m, cap, claude: !!(p && p.type === 'anthropic') };
+  }
+  /** V3：像不像角色扮演对话（用于自动启用） */
+  const RP_WORDS = /角色扮演|扮演|role\s*-?play|\bRP\b|人设|世界观|角色卡|跑团|NPC|剧情|你是[^。\n]{0,20}(角色|少女|少年|骑士|魔法)/i;
+  function rpLike(conv) {
+    const d = conv.plugins && conv.plugins[ID];
+    const st = d && d.state;
+    if (st && ((st.blocks || []).some(b => b.content) || (st.chapters || []).length)) return true; // 已经在用分层设定 / 章节
+    if (/character/i.test(conv.model || '')) return true;
+    return RP_WORDS.test(String(conv.systemPrompt || '').slice(0, 4000));
+  }
+  /** V3：自动启用判断（只在对话里没有手动开 / 关时调用） */
+  function autoActive(conv, settings, host) {
+    if (!host) return false;
+    const c = reg.config(settings, ID); const mode = c.auto_mode || 'rp';
+    if (mode === 'off') return false;
+    const cap = R.capability(providerOf(host, conv), conv.model);
+    if (!cap.auto) return false; // 不支持缓存 / 未验证的服务商：默认绝不改写请求
+    return mode === 'cache' ? true : rpLike(conv);
+  }
+  /** V3：运行时自动策略（预算、缓存策略、空闲 / 命中率） */
+  function envFor(host, conv, ap, logs, now) {
+    now = now || Date.now();
+    const c = cfg(host); const s = data(conv).state.settings;
+    const p = ap.provider || {};
+    const meta = p.modelMeta && p.modelMeta[ap.model];
+    const cap = ap.cap || R.capability(p, ap.model);
+    const rt = R.runtimeEnv(logs, now, cap);
+    const strat = R.chooseStrategy(cap, s.cache_mode, rt.gapMedian);
+    const model = s.summary_model || ap.model;
+    return Object.assign({}, rt, { cap, budget: R.autoBudget(cap, ap.model, meta), strategy: strat.strategy, strategyWhy: strat.why,
+      cost: { model: ap.model, summaryModel: model, prices: c.prices, mode: c.priceMode, peak: c.peak, at: now } });
+  }
+  /** V3：千问显式缓存断点：system 末尾（固定设定 + 记忆 + 章节）与稳定历史末尾；不足 1024 Token 的前缀不加，最多 4 个 */
+  function placeMarkers(a, p, cap) {
+    const ex = cap.explicit || { maxMarkers: 4, minTokens: 1024 };
+    const k = p.calib || 1;
+    const sysTok = p.tokens.static + p.tokens.memory + p.tokens.summary;
+    const marks = { system: false, history: -1, count: 0 };
+    if (sysTok >= ex.minTokens) { marks.system = true; marks.count++; }
+    if (p.hist.length && sysTok + p.tokens.history >= ex.minTokens && marks.count < ex.maxMarkers) {
+      const i = p.hist.length - 1; a.messages[i]._cache = true; marks.history = i; marks.count++;
+    }
+    return marks;
   }
   const effectiveFor = (host, conv) => applicability(host, conv).effective;
 
@@ -67,8 +112,13 @@
       : conv.messages.filter(m => !m.error && !m.imageGen && !m.pending).map(m => ({ role: m.role, content: m.content, images: m.images, _src: m }));
     return base.map(m => { const src = m._src || m; return { id: src.id, role: m.role, content: m.role === 'user' && src.rpSent != null ? src.rpSent : m.content, images: m.images }; });
   }
-  function planConv(conv, host) { const d = data(conv); return R.plan(d.state, conv.systemPrompt, convItems(conv, host)); }
+  function planConv(conv, host) { return planConvAuto(conv, host).p; }
   function costOpts(host, conv) { const c = cfg(host); return { model: conv.model, prices: c.prices, mode: c.priceMode, peak: c.peak, at: Date.now() }; }
+  function planConvAuto(conv, host) {
+    const d = data(conv); const ap = applicability(host, conv);
+    const env = ap.effective ? envFor(host, conv, ap, loadLogs(host, conv)) : null;
+    return { p: R.plan(d.state, conv.systemPrompt, convItems(conv, host), env), env, ap };
+  }
   const costText = r => (r.usd != null ? '约 ' + fmtUsd(r.usd) : '≈' + fmtN(r.callIn + r.callOut + r.rebuild) + ' Token');
 
   /** 生成下一章（只总结本批新移出的旧对话）或合并全部章节；保存为冻结章节 */
@@ -96,8 +146,8 @@
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'DeepSeek RP 缓存优化器', version: '2.0.0', perConversation: true, defaultEnabled: true,
-    desc: '长篇角色扮演专用的上下文构建器（默认只对 DeepSeek 生效）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
+    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.0.0', perConversation: true, defaultEnabled: true, autoActive,
+    desc: '长篇角色扮演专用的上下文构建器（默认对 DeepSeek、千问生效，RP 类对话自动启用；千问自动加显式缓存断点，预算按模型自动推导）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
         const ap = applicability(host, ctx.conv, ctx.provider, ctx.model);
@@ -108,12 +158,14 @@
         const ti = toItems(ctx, st.settings.refresh_on_regen);
         const items = ti.items;
         if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
-        let p = R.plan(st, base, items);
+        const logs0 = loadLogs(host, ctx.conv);
+        const env = envFor(host, ctx.conv, ap, logs0);
+        let p = R.plan(st, base, items, env);
         const overBudget = p.overBudget;
         let summaryNo = 0, summaryReason = null, summaryError = null, summaryMerged = false, summaryCost = null;
         if (p.needSummary) {
           summaryReason = p.summaryReason;
-          summaryCost = R.summaryCost(p, costOpts(host, ctx.conv));
+          summaryCost = R.summaryCost(p, Object.assign(costOpts(host, ctx.conv), { warm: env.warm, model: st.settings.summary_model || ctx.model }));
           ctx.setStatus && ctx.setStatus(p.needConsolidate ? '章节过长，正在合并章节…' : '正在生成章节摘要…');
           try {
             const r = await makeSummary(host, ctx.conv, p, 'auto', ctx.setCancel);
@@ -124,27 +176,33 @@
             host.toast('章节摘要生成失败：' + summaryError);
           }
           ctx.setStatus && ctx.setStatus(null);
-          p = R.plan(st, base, items);
+          p = R.plan(st, base, items, env);
         }
         let trimmedNow = false;
         if (p.overBudget) { // 仍超预算（摘要关闭 / 失败）：一次性截掉一大块旧历史，起点固定
-          st = R.fallbackTrim(st, p); p = R.plan(st, base, items); trimmedNow = true;
+          st = R.fallbackTrim(st, p); p = R.plan(st, base, items, env); trimmedNow = true;
           host.toast('上下文超出预算，本次只发送最近约 ' + fmtN(p.tokens.history) + ' Token 的历史（原文仍保存在本地）');
         }
         d.state = st; normalized.add(st);
         const a = R.assemble(p);
+        let marks = null;
         if (ap.claude && ap.forced) {
           // Claude：system + 稳定历史末尾两个 cache_control 断点
           ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true });
           if (p.hist.length) a.messages[p.hist.length - 1]._cache = true;
+        } else if (env.cap.vendor === 'qwen' && env.strategy === 'explicit') {
+          // 千问显式缓存（DeepSeek 不走这里，请求结构与 v0.4 相同）
+          marks = placeMarkers(a, p, env.cap);
+          if (marks.count) ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true, cacheSystem: marks.system });
         }
         ctx.systemPrompt = a.system; ctx.messages = a.messages;
         const fp = R.fingerprints(p, base);
-        const logs = loadLogs(host, ctx.conv);
-        const prev = logs[logs.length - 1] || null;
+        const prev = logs0[logs0.length - 1] || null;
         ctx.meta.rp = {
           fp, diag: R.diagnose(prev, fp, p.hist), tokens: p.tokens, overBudget, staticCause: st.pendingStaticCause || null, historyCause: st.pendingHistoryCause || null, trimmed: p.trimmed, trimmedNow,
           summaryNo, summaryReason, summaryError, summaryMerged, summaryCost, forced: ap.forced,
+          cacheMode: env.strategy, marks, autoInfo: { vendor: env.cap.vendor, strategy: env.strategy, budget: p.settings.auto_budget !== false ? env.budget.source : 'manual',
+            max_context: p.settings.max_context, trigger: p.settings.summary.trigger_tokens, idle: env.idleSec != null ? Math.round(env.idleSec) : null, cold: env.cold, adaptive: p.auto ? p.auto.why : null },
           prompt: st.settings.save_prompt ? { system: a.system, messages: a.messages.map(m => ({ role: m.role, content: m.content })) } : null,
         };
         if (summaryNo || trimmedNow) host.saveConv(ctx.conv);
@@ -159,7 +217,7 @@
           provider: ctx.provider.presetId || ctx.provider.id, fp: info.fp, diag: info.diag, tokens: info.tokens, summaryNo: info.summaryNo, summaryReason: info.summaryReason,
           summaryError: info.summaryError, summaryMerged: info.summaryMerged, summaryCost: info.summaryCost,
           staticCause: info.diag.static === 'CHANGED' ? info.staticCause : null, historyCause: info.diag.history === 'CHANGED' ? info.historyCause : null, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
-          savePrompt: d.state.settings.save_prompt, prompt: info.prompt });
+          savePrompt: d.state.settings.save_prompt, prompt: info.prompt, cacheMode: info.cacheMode, autoInfo: info.autoInfo });
         let st = d.state;
         if (st.pendingStaticCause || st.pendingHistoryCause) st = Object.assign({}, st, { pendingStaticCause: null, pendingHistoryCause: null });
         // V2：用真实输入 Token 校准本地估算
@@ -184,7 +242,7 @@
       },
       headerBadges(conv, host) {
         const ap = applicability(host, conv);
-        if (!ap.effective) return [{ text: '🎭 RP · 不适用', tone: 'info', title: '当前服务商 / 模型不是 DeepSeek，插件不改写请求（可在面板中强制启用）', action: () => host.openPanel(ID, 'blocks') }];
+        if (!ap.effective) return [{ text: '🎭 RP · 不适用', tone: 'info', title: '当前服务商 / 模型不是 DeepSeek / 千问，插件不改写请求（可在面板中强制启用）', action: () => host.openPanel(ID, 'blocks') }];
         const logs = loadLogs(host, conv); const last = logs[logs.length - 1];
         const out = [{ text: '🎭 RP' + (ap.forced ? '（强制）' : '') + (last ? ' · 命中 ' + (last.supported ? pct(last.hit_rate) : '—') : ''), tone: last && last.supported ? tone(last.hit_rate) : 'info', action: () => host.openPanel(ID, last ? 'monitor' : 'blocks') }];
         const p = planConv(conv, host); const ch = R.chaptersOf(p.st);
@@ -221,7 +279,9 @@
       const row = id => '<div class="price-row" data-row="' + host.esc(id) + '"><span><input type="text" class="pr-match" data-m="' + host.esc(id) + '" value="' + host.esc(c.prices[id].match != null ? c.prices[id].match : id) + '" title="模型名包含任一关键词即使用此价格（逗号分隔，越长越优先）"></span>' +
         ['hit', 'miss', 'out'].map(k => '<input type="number" step="0.001" min="0" data-m="' + host.esc(id) + '" data-k="' + k + '" value="' + c.prices[id][k] + '">').join('') +
         '<button class="chip-btn pr-del" data-m="' + host.esc(id) + '" type="button" title="删除">×</button></div>';
-      box.innerHTML = '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价），用于估算节省 / 额外花费</div>' +
+      box.innerHTML = '<label class="field"><span>自动启用<small>只对支持缓存的服务商（DeepSeek / 千问）生效；对话里手动开 / 关始终优先</small></span><select id="rp-auto-mode">' +
+        '<option value="rp">角色扮演类对话自动启用（推荐）</option><option value="cache">支持缓存的服务商上所有对话</option><option value="off">关闭（只手动启用）</option></select></label>' +
+        '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价），用于估算节省 / 额外花费</div>' +
         '<div class="price-row head"><span>模型关键词</span><span>缓存命中</span><span>未命中</span><span>输出</span><span></span></div>' +
         names.map(row).join('') +
         '<button class="chip-btn" id="rp-price-add" type="button">＋ 添加价格规则</button>' +
@@ -230,9 +290,11 @@
         '<label class="field"><span>时区偏移（小时）<small>北京时间为 8</small></span><input type="number" id="rp-peak-tz" step="0.5" value="' + c.peak.tz + '"></label>' +
         '<label class="field"><span>非高峰价格倍数<small>例如 0.5 = 半价</small></span><input type="number" id="rp-peak-off" step="0.05" min="0" max="1" value="' + c.peak.off_factor + '"></label>' +
         '<label class="field inline"><span>仅工作日有高峰<small>周六日全天按非高峰（节假日未计入）</small></span><input type="checkbox" class="switch" id="rp-peak-wd"' + (c.peak.weekdays ? ' checked' : '') + '></label>' +
-        '<div class="hint small">默认价格来自 DeepSeek 官方定价页（2026-10 核对），官方调价时可在这里修改。</div>' +
+        '<div class="hint small">默认价格来自 DeepSeek 官方定价页（2026-10 核对），官方调价时可在这里修改。没有匹配规则的模型自动使用内置价格表（含千问各模型，按 1 美元 ≈ ' + R.CNY_PER_USD + ' 元换算，千问不分高峰）。</div>' +
         '<button class="chip-btn" id="rp-price-reset" type="button">恢复默认价格与时段</button>';
       box.querySelector('#rp-price-mode').value = c.priceMode;
+      box.querySelector('#rp-auto-mode').value = c.auto_mode;
+      box.querySelector('#rp-auto-mode').onchange = e => { reg.config(host.settings(), ID).auto_mode = e.target.value; c.auto_mode = e.target.value; host.saveSettings(); host.refresh && host.refresh(); };
       const save = () => host.saveSettings();
       box.querySelectorAll('input[data-k]').forEach(inp => inp.addEventListener('change', () => {
         const v = parseFloat(inp.value); if (isNaN(v) || v < 0) { inp.value = c.prices[inp.dataset.m][inp.dataset.k]; return; }
@@ -271,7 +333,9 @@
       const on = reg.isActive(ID, host.settings(), conv);
       box.innerHTML = '';
       const head = document.createElement('div'); head.className = 'group form';
-      head.innerHTML = '<label class="field inline"><span>在本对话启用 RP 缓存优化<small>每个对话是独立会话：设定 / 记忆 / 摘要 / 历史 / 状态 / 统计互不影响</small></span><input type="checkbox" class="switch" id="rp-on"' + (on ? ' checked' : '') + '></label>';
+      const autoOn = on && reg.isAutoActive(ID, host.settings(), conv, host);
+      head.innerHTML = '<label class="field inline"><span>在本对话启用 RP 缓存优化' + (autoOn ? ' <span class="rb-tag soft" id="rp-auto-tag">自动</span>' : '') +
+        '<small>' + (autoOn ? (rpLike(conv) ? '已自动启用：识别为角色扮演对话，且服务商支持上下文缓存（手动关闭后以手动为准）' : '已自动启用：插件设置为「支持缓存的服务商上所有对话」（手动关闭后以手动为准）') : '每个对话是独立会话：设定 / 记忆 / 摘要 / 历史 / 状态 / 统计互不影响') + '</small></span><input type="checkbox" class="switch" id="rp-on"' + (on ? ' checked' : '') + '></label>';
       box.appendChild(head);
       head.querySelector('#rp-on').onchange = e => {
         if (!reg.isGloballyEnabled(ID, host.settings())) { reg.setGlobal(host.settings(), ID, true); host.saveSettings(); }
@@ -281,20 +345,20 @@
       if (!on) {
         const tip = document.createElement('div'); tip.className = 'hint'; tip.style.marginTop = '12px';
         tip.innerHTML = '开启后，本对话的每次请求按固定的结构组织：<br><b>L1 固定设定</b>（世界观 / 角色卡 / 规则…）→ <b>L2 长期记忆</b> → <b>L3 章节</b>（冻结、只追加）→ <b>L4 对话历史</b>（只追加）→ 最后一条用户消息：<b>L6 本轮输入</b> + 记忆增量 + <b>L5 当前状态</b>。<br>' +
-          '稳定内容在前、动态内容在后，让 DeepSeek 的上下文缓存尽可能命中。历史超出阈值时自动追加章节，原始消息永远保留在本地。默认只对 DeepSeek 服务商生效。';
+          '稳定内容在前、动态内容在后，让 DeepSeek / 千问的上下文缓存尽可能命中。历史超出阈值时自动追加章节，原始消息永远保留在本地。默认只对 DeepSeek、千问生效；角色扮演类对话会自动开启。';
         box.appendChild(tip);
         return;
       }
       const ap = applicability(host, conv);
       if (!ap.ok) {
         const na = document.createElement('div'); na.className = 'group form'; na.id = 'rp-na';
-        na.innerHTML = '<div class="rp-suggest"><b>不适用</b>：当前服务商「' + host.esc((ap.provider && ap.provider.name) || '未知') + '」/ 模型「' + host.esc(ap.model || '') + '」不是 DeepSeek。' +
-          '默认情况下插件<b>不改写</b>这个对话的请求，设定 / 章节保留，切回 DeepSeek 后继续生效。</div>' +
+        na.innerHTML = '<div class="rp-suggest"><b>不适用</b>：当前服务商「' + host.esc((ap.provider && ap.provider.name) || '未知') + '」/ 模型「' + host.esc(ap.model || '') + '」不是 DeepSeek / 千问（' + host.esc(ap.cap.label) + '）。' +
+          '默认情况下插件<b>不改写</b>这个对话的请求，设定 / 章节保留，切回 DeepSeek / 千问后继续生效。</div>' +
           '<label class="field inline"><span>仍然在此服务商上启用<small>OpenAI 等会自动按前缀缓存；Claude 会自动加 cache_control 断点（system + 稳定历史末尾）；其他服务商可能没有缓存</small></span><input type="checkbox" class="switch" id="rp-force"' + (ap.forced ? ' checked' : '') + '></label>';
         box.appendChild(na);
         na.querySelector('#rp-force').onchange = e => {
           data(conv).state.settings.force_enable = e.target.checked; host.saveConv(conv); host.refresh();
-          host.toast(e.target.checked ? '已在当前服务商上强制启用 RP 缓存优化' : '已恢复默认：非 DeepSeek 不改写请求'); this._render();
+          host.toast(e.target.checked ? '已在当前服务商上强制启用 RP 缓存优化' : '已恢复默认：非 DeepSeek / 千问不改写请求'); this._render();
         };
         if (!ap.forced) return;
       }
@@ -440,7 +504,7 @@
         kv('上下文预算', '≈' + num(p.tokens.total) + ' / ' + num(p.limit) + ' Token', p.overBudget ? 'bad' : '') +
         kv('已摘要消息', R.coveredIds(st).length + ' 条') + '</div>';
       if (p.needSummary) html += '<div class="rp-suggest" id="rp-next-sum">下次发送时会先自动' + (p.needConsolidate ? '<b>合并全部 ' + chs.length + ' 个章节</b>' : '追加章节 ' + R.slabel(st.chapterSeq + 1)) +
-        '（' + (p.summaryReason === 'budget' ? '超出上下文预算' : '达到摘要阈值') + '）。预计额外花费' + costText(est) + '：摘要调用 ≈' + fmtN(est.callIn) + ' 输入 + ' + fmtN(est.callOut) + ' 输出，缓存重建 ≈' + fmtN(est.rebuild + (est.merge ? est.chapterTokens : 0)) + ' Token。</div>';
+        '（' + ({ budget: '超出上下文预算', cold: '缓存已过期，趁重建摘要', adaptive: '自适应：' + ((p.auto && p.auto.why) || '成本回本') }[p.summaryReason] || '达到摘要阈值') + '）。预计额外花费' + costText(est) + '：摘要调用 ≈' + fmtN(est.callIn) + ' 输入 + ' + fmtN(est.callOut) + ' 输出，缓存重建 ≈' + fmtN(est.rebuild + (est.merge ? est.chapterTokens : 0)) + ' Token。</div>';
       else if (p.summaryBlocked === 'interval') html += '<div class="rp-suggest">已达到摘要阈值，但距上一章只有 ' + p.sinceLast + ' 轮（最小间隔 ' + p.minGap + ' 轮），暂不摘要，避免频繁重建缓存。超出上下文预算时仍会立即摘要。</div>';
       else if (chs.length > 1 && p.chapterTokens >= p.cap * 0.8) html += '<div class="rp-suggest">章节合计接近上限，下一次摘要可能会合并全部章节（缓存重建一次）。</div>';
       if (this.panel.busy) html += '<div class="rp-status"><span class="spin"></span>' + host.esc(this.panel.busy) + '</div>';
@@ -552,10 +616,10 @@
           an.causes.map(x => '<li>' + host.esc(x) + '</li>').join('') + '</ol></div>';
       }
       html += '<div class="group-title">本次请求' + (last ? ' · 请求编号 ' + reqNo(last.request_id) : '') + '</div><div class="group form kv-box">';
-      if (!last) html += '<div class="muted" style="padding:8px 0">还没有请求记录。发送一条消息后这里会显示 DeepSeek 返回的真实用量。</div>';
+      if (!last) html += '<div class="muted" style="padding:8px 0">还没有请求记录。发送一条消息后这里会显示服务商返回的真实用量。</div>';
       else {
         html += last.supported ? '<div class="hit-big ' + tone(last.hit_rate) + '">' + pct(last.hit_rate) + '<small>命中率</small></div>'
-          : '<div class="muted" style="padding:8px 0">该服务商没有返回缓存命中数据（不支持统计）。目前 DeepSeek、OpenAI、Claude 会返回缓存命中数据。</div>';
+          : '<div class="muted" style="padding:8px 0">该服务商没有返回缓存命中数据（不支持统计）。目前 DeepSeek、千问、OpenAI、Claude 会返回缓存命中数据。</div>';
         html += '<div class="diag">' + R.LAYERS.map(k => { const v = (last.diag || {})[k] || '—'; return '<div class="dg-row" title="' + R.LAYER_EN[k] + ' ' + v + '"><span>' + R.LAYER_TITLES[k] + '</span><b class="dg-' + v.toLowerCase() + '">' + R.diagLabel(v) + '</b></div>'; }).join('') + '</div>';
         html += '<div class="dg-reason"><span>原因：</span>' + (last.reasons || [last.reason]).map(r => host.esc(r)).join('；') + '</div>';
         html += kv('是否发生摘要', last.summary_happened ? (last.summary_merged ? '合并 · ' : '追加 · ') + R.slabel(last.summary_no) + (last.summary_cost ? '（估算额外 ' + costText(last.summary_cost) + '）' : '') : last.summary_error ? '失败：' + host.esc(last.summary_error.slice(0, 30)) : '否') +
@@ -575,11 +639,11 @@
         '<div class="miss-big"><span>平均每次请求未命中 Token</span><b>' + num(s.avgMiss) + '</b><small>比命中率更能反映实际花费</small></div>' +
         kv('请求次数', s.requests + (s.supported < s.requests ? '（有统计 ' + s.supported + '）' : '')) + kv('平均命中率', pct(s.avgRate)) + kv('总命中率（按 Token 计）', pct(s.total.rate)) +
         kv('最高 / 最低', pct(s.max) + ' / ' + pct(s.min)) + kv('连续命中次数', s.streak) + kv('章节摘要次数', s.summaries) +
-        kv('估算已节省', s.priced ? fmtUsd(s.saved) : '—（非 DeepSeek 模型）', 'ok') + '</div>';
+        kv('估算已节省', s.priced ? fmtUsd(s.saved) : '—（没有匹配的价格）', 'ok') + '</div>';
       html += '<div class="group-title">最近 ' + s.last20.length + ' 次</div><div class="group form kv-box">' +
         '<div class="mini-chart">' + (s.last20.length ? s.last20.map(r => '<i class="' + (r.supported ? tone(r.rate) : 'na') + '" style="height:' + (r.supported ? Math.max(4, Math.round(r.rate * 100)) : 4) + '%"></i>').join('') : '<span class="muted">暂无数据</span>') + '</div>' +
         '<div class="l20">' + s.last20.slice().reverse().map(r => '<div class="l20-row"><span class="l20-n">#' + r.n + '</span><b class="tone-t-' + (r.supported ? tone(r.rate) : 'info') + '">' + (r.supported ? pct(r.rate) : '—') + '</b><span class="l20-m">未命中 ' + fmtN(r.miss) + '</span><span class="l20-r">' + (r.summary ? '📚 ' : '') + host.esc(r.reason || '') + '</span></div>').join('') + '</div></div>';
-      html += '<div class="hint" style="margin-top:12px">DeepSeek 缓存由服务端尽力而为，插件只能让前缀更稳定，不能保证 100% 命中。上下文各层 Token 为本地估算；日志默认只保存统计、指纹、时间、模型和请求编号。</div>' +
+      html += '<div class="hint" style="margin-top:12px">DeepSeek / 千问隐式缓存由服务端尽力而为（千问显式缓存在 5 分钟内确定命中），插件只能让前缀更稳定，不能保证 100% 命中。上下文各层 Token 为本地估算；日志默认只保存统计、指纹、时间、模型和请求编号。</div>' +
         '<button class="ghost-btn danger" id="rp-clear-log">清空本会话统计</button>';
       body.innerHTML = html;
       body.querySelector('#rp-clear-log').onclick = async () => {
@@ -590,10 +654,25 @@
 
     // ----- 预算设置（每个会话独立） -----
     _opts(body, conv, host) {
-      const d = data(conv); const s = d.state.settings;
+      const d = data(conv); const s0 = d.state.settings;
+      const pa = planConvAuto(conv, host); const env = pa.env;
+      const s = pa.p.settings || s0; // 自动预算时显示推导出的数值
       const n = (id, label, v, step, hint) => '<label class="field"><span>' + label + (hint ? '<small>' + hint + '</small>' : '') + '</span><input id="' + id + '" type="number" min="0" step="' + (step || 1) + '" value="' + v + '" inputmode="numeric"></label>';
-      body.innerHTML = '<div class="hint">固定设定 + 长期记忆 + 章节摘要 + 对话历史 + 当前状态 + 本轮输入 + 输出预留 + 安全余量 ≤ 上下文上限。以下数值为工程起始值（不是 DeepSeek 官方阈值），每个对话单独设置。</div>' +
-        '<div class="group-title">Token 预算</div><div class="group form">' +
+      const srcCN = { meta: '模型列表接口', table: '内置窗口表', default: '未知模型（默认 64K）', 'deepseek-default': 'DeepSeek（沿用原有默认值）' };
+      const pr = env ? R.priceFor(env.cost.model, env.cost.prices) : null;
+      const autoBox = env ? '<div class="group-title">自动策略</div><div class="group form" id="rp-auto">' +
+        '<div class="kv"><span>缓存能力</span><b>' + host.esc(env.cap.label) + '</b></div>' +
+        '<div class="kv"><span>当前策略</span><b id="rp-strategy">' + ({ explicit: '显式缓存（自动断点）', implicit: '隐式缓存（自动前缀）', none: '无缓存' }[env.strategy] || env.strategy) + '</b></div>' +
+        '<div class="hint small" style="margin:0 0 6px">' + host.esc(env.strategyWhy) + '</div>' +
+        (env.cap.kind === 'explicit' && env.cap.vendor === 'qwen' ? '<label class="field"><span>千问缓存方式<small>自动：连续对话用显式缓存（命中 10%），间隔常超过 4 分钟改用隐式缓存（命中 20%，无创建费）</small></span><select id="rp-cache-mode"><option value="auto">自动</option><option value="explicit">总是显式缓存</option><option value="implicit">总是隐式缓存</option></select></label>' : '') +
+        '<div class="kv"><span>上下文窗口</span><b>' + num(env.budget.window) + (env.budget.tier ? '（价格第一档 ≤ ' + num(env.budget.tier) + '）' : '') + ' · 来源：' + (srcCN[env.budget.source] || env.budget.source) + '</b></div>' +
+        '<div class="kv"><span>价格</span><b>' + (pr ? (pr.builtin ? '内置价格表' : '你的价格规则') + '「' + host.esc(String(pr.match || '').split(',')[0]) + '」' : '未匹配（只按固定阈值）') + '</b></div>' +
+        '<div class="kv"><span>近期命中率 / 空闲</span><b>' + pct(env.hitRate) + ' / ' + (env.idleSec == null ? '—' : Math.round(env.idleSec / 60) + ' 分钟') + (env.cold ? '（缓存可能已过期）' : '') + '</b></div>' +
+        '<label class="field inline"><span>预算按模型自动推导<small>上限 = 窗口、价格第一档、200K 三者取最小 × 0.8，摘要阈值 30%，章节上限 12%；手动修改下面任一预算即关闭</small></span><input type="checkbox" class="switch" id="rp-auto-budget"' + (s0.auto_budget !== false ? ' checked' : '') + '></label>' +
+        '<label class="field inline"><span>自适应摘要时机<small>缓存过期时提前摘要（重建免费）；达到阈值 70% 后按「几轮回本」决定；关闭则只按固定阈值</small></span><input type="checkbox" class="switch" id="rp-auto-sum"' + (s0.auto_summary !== false ? ' checked' : '') + '></label>' +
+        (pa.p.auto ? '<div class="hint small" style="margin:0">自适应判断：' + host.esc(pa.p.auto.why || '—') + '</div>' : '') + '</div>' : '';
+      body.innerHTML = '<div class="hint">固定设定 + 长期记忆 + 章节摘要 + 对话历史 + 当前状态 + 本轮输入 + 输出预留 + 安全余量 ≤ 上下文上限。默认按模型自动推导（不是官方阈值），也可每个对话单独手动设置。</div>' + autoBox +
+        '<div class="group-title">Token 预算' + (env && s0.auto_budget !== false ? '（自动）' : '') + '</div><div class="group form">' +
         n('rp-maxctx', '上下文上限', s.max_context, 1000, '一次请求最多使用的 Token 数（含输出预留和安全余量）') +
         n('rp-reserve', '输出预留', s.output_reserve, 1000, '给模型回复留出的 Token，不会被历史占用') +
         n('rp-margin', '安全余量', s.safety_margin, 500, 'Token 为本地估算，留一点余量防止超出模型上限') + '</div>' +
@@ -613,17 +692,43 @@
         '<div class="group-title">调试</div><div class="group form">' +
         '<label class="field inline"><span>保存完整提示词<small>默认关闭：日志只保存 Token 统计、指纹、时间、模型和请求编号</small></span><input type="checkbox" class="switch" id="rp-saveprompt"' + (s.save_prompt ? ' checked' : '') + '></label></div>' +
         '<button class="ghost-btn" id="rp-reset-win">重置截断起点</button><div class="hint small">截断起点：摘要关闭且超出预算时，从哪条消息开始发送历史。重置后会重新计算。</div>';
-      const save = () => {
+      if (body.querySelector('#rp-cache-mode')) {
+        body.querySelector('#rp-cache-mode').value = s0.cache_mode || 'auto';
+        body.querySelector('#rp-cache-mode').onchange = e => { data(conv).state.settings.cache_mode = e.target.value; host.saveConv(conv); this._render(); };
+      }
+      if (body.querySelector('#rp-auto-budget')) body.querySelector('#rp-auto-budget').onchange = e => {
+        const st2 = data(conv).state.settings;
+        if (!e.target.checked && env) { // 关闭自动：把当前推导值写成手动初值
+          const b = env.budget; Object.assign(st2, { max_context: b.max_context, output_reserve: b.output_reserve, safety_margin: b.safety_margin });
+          st2.summary = Object.assign({}, st2.summary, { trigger_tokens: b.trigger_tokens, chapter_cap_tokens: b.chapter_cap_tokens });
+        }
+        if (e.target.checked) { // 重新开启自动：清除手动覆盖
+          const D = R.DEFAULT_SETTINGS; Object.assign(st2, { max_context: D.max_context, output_reserve: D.output_reserve, safety_margin: D.safety_margin });
+          st2.summary = Object.assign({}, st2.summary, { trigger_tokens: D.summary.trigger_tokens, chapter_cap_tokens: D.summary.chapter_cap_tokens });
+        }
+        st2.auto_budget = e.target.checked; host.saveConv(conv); host.refresh(); this._render();
+      };
+      if (body.querySelector('#rp-auto-sum')) body.querySelector('#rp-auto-sum').onchange = e => { data(conv).state.settings.auto_summary = e.target.checked; host.saveConv(conv); host.refresh(); this._render(); };
+      const BUDGET_IDS = ['#rp-maxctx', '#rp-reserve', '#rp-margin', '#rp-trigger', '#rp-cap'];
+      const save = ev => {
         const s = data(conv).state.settings;
+        const manualBudget = !!(ev && ev.target && BUDGET_IDS.some(id => ev.target.matches(id)));
+        if (manualBudget && s.auto_budget !== false && env) { // 手动改预算 → 关闭自动预算（以当前推导值为初值，再应用这次修改）
+          const b = env.budget; Object.assign(s, { max_context: b.max_context, output_reserve: b.output_reserve, safety_margin: b.safety_margin });
+          s.summary = Object.assign({}, s.summary, { trigger_tokens: b.trigger_tokens, chapter_cap_tokens: b.chapter_cap_tokens });
+        }
+        if (manualBudget) s.auto_budget = false;
         const g = (id, min, def) => { const v = parseInt(body.querySelector(id).value, 10); return isNaN(v) ? def : Math.max(min, v); };
-        s.max_context = g('#rp-maxctx', 4000, 100000); s.output_reserve = g('#rp-reserve', 0, 12000); s.safety_margin = g('#rp-margin', 0, 2000);
-        s.summary = { enabled: body.querySelector('#rp-sum-on').checked, trigger_tokens: g('#rp-trigger', 1000, 30000), min_new_turns: g('#rp-minnew', 1, 15), keep_recent_turns: g('#rp-keep', 1, 20),
-          min_interval_turns: g('#rp-mingap', 0, 10), chapter_cap_tokens: g('#rp-cap', 1000, 12000) };
+        const keepAuto = s.auto_budget !== false && !!env; // 自动预算时，改其他选项不把推导值写成手动值
+        const old = s.summary || {};
+        if (!keepAuto) { s.max_context = g('#rp-maxctx', 4000, 100000); s.output_reserve = g('#rp-reserve', 0, 12000); s.safety_margin = g('#rp-margin', 0, 2000); }
+        s.summary = { enabled: body.querySelector('#rp-sum-on').checked, trigger_tokens: keepAuto ? old.trigger_tokens : g('#rp-trigger', 1000, 30000), min_new_turns: g('#rp-minnew', 1, 15), keep_recent_turns: g('#rp-keep', 1, 20),
+          min_interval_turns: g('#rp-mingap', 0, 10), chapter_cap_tokens: keepAuto ? old.chapter_cap_tokens : g('#rp-cap', 1000, 12000) };
         s.refresh_on_regen = body.querySelector('#rp-refresh').checked;
         s.summary_model = body.querySelector('#rp-summodel').value.trim();
         host.saveConv(conv); host.refresh();
       };
-      body.querySelectorAll('input:not(#rp-saveprompt)').forEach(i => i.addEventListener('change', save));
+      body.querySelectorAll('input:not(#rp-saveprompt):not(#rp-auto-budget):not(#rp-auto-sum)').forEach(i => i.addEventListener('change', save));
       body.querySelector('#rp-saveprompt').onchange = async e => {
         if (e.target.checked) {
           const ok = await host.dialog({ title: '开启完整提示词日志？', body: '日志可能包含角色卡、私密剧情、API 请求内容，请谨慎使用。\n\n日志只保存在本机（不会上传），可随时在「缓存监控」中清空。', okText: '仍然开启', danger: true });
@@ -636,7 +741,7 @@
       body.querySelector('#rp-reset-win').onclick = () => { data(conv).state.window = { startId: null, startOrdinal: 0 }; host.saveConv(conv); host.refresh(); host.toast('已重置截断起点'); };
     },
   });
-  plugin._internals = { toItems, makeSummary, planConv, loadLogs, applicability, convItems };
+  plugin._internals = { toItems, makeSummary, planConv, planConvAuto, loadLogs, applicability, convItems, rpLike, autoActive, envFor, placeMarkers };
 
   // 第二个内置插件：Token 用量显示（演示通用钩子；对所有对话生效，可在对话中关闭）
   reg.register({

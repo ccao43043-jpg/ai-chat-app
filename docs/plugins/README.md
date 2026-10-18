@@ -1,4 +1,4 @@
-# 插件（v0.3.0）
+# 插件（v0.3.0 起；RP 缓存优化器 V3 见第 2.1 节）
 
 AI Chat 从 v0.3.0 起提供一个 **内置插件框架**：插件可以在请求发出前改写上下文，在回复结束后读取 usage，并在界面上显示徽章和面板。
 目前 **只支持随应用打包的内置插件**。应用不会下载或执行任何第三方代码。
@@ -41,7 +41,7 @@ Plugins.registry.register({
 | 插件类型 | 在某个对话中生效的条件 |
 |---|---|
 | `perConversation: false` | 全局开启即对所有对话生效。可在单个对话中关闭：`conv.plugins[id].enabled === false` |
-| `perConversation: true` | 全局开启，**并且** 对话中 `conv.plugins[id].enabled === true` |
+| `perConversation: true` | 全局开启，**并且** 对话中 `conv.plugins[id].enabled === true`；对话中**没有手动设置过**时，由插件的 `autoActive(conv, settings, host)` 自动判断（v0.5.0 起，手动开 / 关始终优先）。宿主用 `registry.setHost(host)` 提供服务商查询 |
 
 数据存放位置：
 
@@ -109,7 +109,101 @@ Plugins.registry.register({
 
 ---
 
-## 2. DeepSeek RP 缓存优化器 V2（v0.4.0 起，以本节为准）
+## 2.1 RP 缓存优化器 V3：千问与自动策略（v0.5.0 起，以本节为准）
+
+V3 不改变 V2 的分层结构，只回答三个问题：**对哪些对话启用**、**用哪种缓存**、**预算和摘要时机怎么定**。所有自动决定都可以手动覆盖。
+
+### 2.1.1 服务商缓存能力识别（`RPCache.capability`）
+
+| 识别条件 | 能力 | 默认启用 | 策略 |
+|---|---|---|---|
+| DeepSeek 预设 / 地址含 deepseek / 模型名含 deepseek | 隐式（自动前缀，硬盘缓存，通常数小时） | 是 | 与 v0.4.0 完全相同 |
+| DashScope 地址（中国 / 国际 / `*.maas.aliyuncs.com`）+ 支持显式缓存的模型 | 显式 + 隐式 | 是 | 自动 `cache_control` 断点 |
+| 其他千问：DashScope 上不支持显式的模型、OpenRouter / 硅基流动上模型名含 qwen / qwq | 隐式 | 是 | 只稳定前缀 |
+| Claude / OpenAI / Gemini | 有缓存 | **否**（可强制启用，同 V2） | — |
+| 其他 | 未知 / 无 | 否，请求逐字节不变 | — |
+
+支持显式缓存的千问模型（[显式缓存文档](https://help.aliyun.com/zh/model-studio/explicit-cache-guide)，2026-10）：qwen3.8-max、qwen3.7-max、qwen3.7/3.6/3.5-plus、qwen3.8/3.7/3.6/3.5-flash、qwen-plus、qwen-flash、qwen3-coder-flash、qwen3-vl-plus、qwen-plus-character（含带日期的快照）。
+
+### 2.1.2 千问显式缓存断点
+
+官方规则：`cache_control: {type: "ephemeral"}` 加在消息内容（需改成数组形式）上；≥ 1024 Token 才会建缓存；有效期 5 分钟，命中后重置；每个请求最多 4 个断点；从断点往前最多回溯 20 个内容块寻找已有缓存；创建按输入价 125%，命中按 10%；同一请求里显式与隐式缓存互斥；Qwen3.5 起只支持消息级断点。
+
+插件的放法（`placeMarkers`）：
+
+1. **system 末尾**：固定设定 + 长期记忆 + 全部章节。只在章节变化时才变，摘要那一轮也能命中这一段。
+2. **稳定历史末尾**（本轮输入之前最后一条历史）：下一轮时上一轮的断点就在新断点前 2 条消息处，在 20 块回溯范围内，所以每轮命中「上一轮为止的全部内容」，只新建两条消息的缓存。
+3. 本轮输入 + 记忆增量 + 状态在最后一条用户消息里，不加断点。
+
+前缀不足 1024 Token 时不加对应断点。总共最多 2 个，留出余量。
+
+**显式还是隐式？**（`chooseStrategy`）显式命中便宜一半（10% 对 20%）且确定命中，但每段新内容要多付 25% 创建费，5 分钟不用就过期。插件看最近 10 次请求间隔的中位数：不超过 4 分钟（连续对话）用显式；超过 4 分钟改用隐式（不付创建费）。也可以在「预算设置 → 自动策略」里固定为显式或隐式。
+
+### 2.1.3 自动启用（`autoActive`）
+
+只对「默认启用」的服务商（DeepSeek / 千问）生效。插件全局设置里的「自动启用」有三档：
+
+- **角色扮演类对话**（默认）：系统提示词含「扮演 / 角色扮演 / 人设 / 世界观 / 角色卡 / 跑团 / RP / NPC / 剧情…」，或模型名含 character，或本对话已经填过分层设定 / 有章节。
+- **支持缓存的服务商上所有对话**。
+- **关闭**（只手动）。
+
+对话里手动开 / 关过就以手动为准。面板显示「自动」标签。
+
+### 2.1.4 按模型自动推导预算（`autoBudget`）
+
+上下文窗口优先用「从接口获取模型列表」返回的元数据（OpenRouter `context_length`、Anthropic `max_input_tokens`、Gemini `inputTokenLimit`，保存在服务商的 `modelMeta`），否则查内置表。千问很多模型按输入长度分档计价（例如 qwen3.7-plus 超过 256K 涨价、qwen-plus 超过 128K 涨价、qwen3.7-flash 超过 32K 涨价），所以：
+
+- 上下文上限 = 窗口、价格第一档、200K 三者取最小，再 × 0.8（本地估算有误差，留余地）
+- 输出预留 10%（4K–16K），安全余量 2%（1K–4K）
+- 摘要阈值 30%，章节合计上限 12%（4K–24K）
+- **DeepSeek 固定沿用 v0.4.0 默认值**（100K / 12K / 2K / 30K / 12K），行为不变
+
+例如 qwen3.7-plus → 上限 160K、阈值 48K；qwen-plus → 102K；qwen-plus-character（32K 窗口）→ 26K。
+
+覆盖方式：「预算按模型自动推导」开关。手动修改任一预算数值时会关掉自动，以当前推导值为初值。旧会话里改过的数值视为手动；没改过的视为自动。
+
+### 2.1.5 自适应摘要时机（`adaptiveSummary`）
+
+固定阈值和「超预算立即摘要」仍然有效。另外两种情况会**提前**摘要（可关闭「自适应摘要时机」）：
+
+- **缓存已冷**：距上次请求超过缓存有效期（千问显式 5 分钟、隐式约 10 分钟、DeepSeek 按 3 小时估计）。本轮反正全部未命中，摘要后的重建不额外花钱。此时只要未摘要历史达到阈值 50% 就摘要（仍要求可摘要的旧对话 ≥ 3 轮、距上一章 ≥ 最小间隔的一半）。
+- **几轮回本**：未摘要历史达到阈值 70% 时，用价格表估算：
+  - 一次摘要的花费 = 摘要调用 + 缓存重建
+  - 之后每轮少发送的历史 = 被摘要的那批 − 摘要长度，按「近期命中率 × 命中价 + (1 − 命中率) × 未命中价」计价
+
+  前者除以后者 ≤ 12 轮就摘要。近期命中率低（缓存经常失效）时每轮多发历史更贵，会更早摘要，这就是命中率趋势的作用。
+
+**章节合并时机**：缓存已冷时，章节合计达到上限的 60% 就随摘要一起合并（反正要重建），不必等到 100%。
+
+### 2.1.6 价格
+
+价格规则仍以用户规则优先。没有匹配的模型自动使用内置价格表（`BUILTIN_PRICES`），其中包含千问各模型。千问价格取自 [模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)（中国站第一档，2026-10-15 更新），按 1 美元 ≈ 7.2 元换算，计价规则如下：
+
+- 隐式命中按输入价 20%，显式命中按 10%，显式创建按 125%
+- 千问不分高峰时段（`peak: false`）
+- 日志记录 `cache_mode` 与 `cache_write_tokens`，统计花费时按显式 / 隐式分别计价
+
+### 2.1.7 千问请求细节
+
+- 思考模式：服务商设置「思考模式」选择开 / 关后发送 `enable_thinking`（只对 DashScope 接口发送）。插件的摘要调用总是 `enable_thinking: false`。
+- 流式用量：默认开启 `stream_options.include_usage`，从 `usage.prompt_tokens_details.cached_tokens` / `cache_creation_input_tokens` 统计命中。
+- 看图：OpenAI 兼容的 `image_url` 消息（qwen3-vl-plus、qwen3.x-plus 等多模态模型）。
+- 文档来源：[OpenAI 兼容](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)、[地域与地址](https://www.alibabacloud.com/help/en/model-studio/regions)、[模型列表](https://www.alibabacloud.com/help/en/model-studio/models)、[上下文缓存](https://help.aliyun.com/zh/model-studio/context-cache)、[显式缓存](https://help.aliyun.com/zh/model-studio/explicit-cache-guide)、[模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)。
+
+### 2.1.8 测试
+
+`tests/qwen-auto.test.js` 覆盖以下内容：
+
+- 千问预设、enable_thinking、usage 解析、显式断点序列化、模型元数据
+- 能力识别、预算推导、策略选择、运行时冷却、内置价格与显式计价、预算覆盖
+- 自适应摘要、合并时机
+- 插件集成：自动启用边界、千问断点位置、间隔长时改隐式、DeepSeek 请求不变、OpenRouter 千问
+
+`tests/ui-e2e.js` 新增「千问预设 + 自动策略」界面流程。
+
+---
+
+## 2. DeepSeek RP 缓存优化器 V2（v0.4.0 起；v0.5.0 的自动策略见第 2.1 节）
 
 V2 在 V1 的基础上解决了几个「前缀被破坏 / 白花钱」的问题。下面先列 V2 的变化，V1 的完整实现说明保留在第 2V1 节（被 V2 改动的地方已标注）。
 
