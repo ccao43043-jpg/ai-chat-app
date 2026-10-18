@@ -64,7 +64,7 @@ test('六层顺序：L1 → L2 → L3 在 system；L4 原样；L5 + L6 在最后
   assert.deepStrictEqual(idx, idx.slice().sort((x, y) => x - y), 'system 内顺序固定');
   assert.ok(!system.includes('HP:'), '动态状态不在 system 中');
   const last = messages[messages.length - 1];
-  assert.strictEqual(last.content, '[CURRENT_STATE]\nHP: 82/100\nLocation: 王都西区\n\n[USER_INPUT]\n' + u(3).content);
+  assert.strictEqual(last.content, u(3).content + '\n\n[CURRENT_STATE]\nHP: 82/100\nLocation: 王都西区', 'V2：本轮输入在前，状态在后');
   assert.deepStrictEqual(messages.slice(0, -1).map(m => m.content), [u(1).content, a(1).content, u(2).content, a(2).content], 'L4 原样、原顺序');
   assert.ok(!/\d{4}-\d{2}-\d{2}|\d{13}/.test(system), '前缀中没有时间戳');
 });
@@ -92,7 +92,7 @@ test('逐字节稳定：状态每轮变化，第 N+1 轮请求的历史前缀 ==
       assert.ok(body.startsWith(prev.body.slice(0, cut)), '请求体（JSON 文本）逐字节前缀一致');
       const fp = R.fingerprints(p, '你是RP助手');
       const d = R.diagnose(prev.entry, fp, p.hist);
-      assert.deepStrictEqual(d, { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'CHANGED', input: 'CHANGED', history: 'APPEND' });
+      assert.deepStrictEqual(d, { static: 'SAME', memory: 'SAME', summary: 'SAME', delta: 'SAME', state: 'CHANGED', input: 'CHANGED', history: 'APPEND' });
     }
     const fp = R.fingerprints(p, '你是RP助手');
     prev = { parsed, body, entry: R.makeLogEntry({ fp, at: turn }) };
@@ -107,7 +107,7 @@ test('诊断：SAME / APPEND / CHANGED 与原因', () => {
   assert.deepStrictEqual(R.diagnose(null, f1, p1.hist).static, 'NEW');
   assert.strictEqual(e1.reason, '首次请求，缓存尚未建立');
   // 重新生成：历史、输入都一样
-  assert.deepStrictEqual(R.diagnose(e1, f1, p1.hist), { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'SAME', input: 'SAME', history: 'SAME' });
+  assert.deepStrictEqual(R.diagnose(e1, f1, p1.hist), { static: 'SAME', memory: 'SAME', summary: 'SAME', delta: 'SAME', state: 'SAME', input: 'SAME', history: 'SAME' });
   // 修改角色卡
   const st2 = R.setBlock(st, 'character', '曹含森，24岁', 2).state;
   const p2 = R.plan(st2, '', convo(3)); const f2 = R.fingerprints(p2, '');
@@ -148,47 +148,50 @@ test('Token 预算与自动摘要触发：遵守 min_new_turns / keep_recent_tur
   assert.ok(p.overBudget); assert.strictEqual(p.summaryReason, 'budget'); assert.strictEqual(p.batchRounds, 1);
 });
 
-test('章节摘要：冻结快照、合并上一版、编辑 / 回滚生成新版本，原始消息不删除', () => {
+test('章节（V2）：只追加、之前章节逐字不变；编辑 / 撤销；原始消息不删除', () => {
   let st = withBlocks();
-  st.settings.summary = { enabled: true, trigger_tokens: 100, min_new_turns: 2, keep_recent_turns: 2 };
+  st.settings.summary = Object.assign({}, st.settings.summary, { enabled: true, trigger_tokens: 100, min_new_turns: 2, keep_recent_turns: 2, min_interval_turns: 0 });
   const items = convo(6);
   let p = R.plan(st, '', items);
   assert.ok(p.needSummary);
-  const prompt = R.buildSummaryPrompt({ prevSummary: null, memory: R.getBlock(st, 'memory').content, batch: p.batch });
+  const prompt = R.buildSummaryPrompt({ chapters: [], memory: R.getBlock(st, 'memory').content, batch: p.batch });
   R.SUMMARY_SECTIONS.forEach(k => assert.ok(prompt.includes(k + ':'), '提示词包含 ' + k));
   assert.ok(prompt.includes('知识边界'));
   const out = '```\n[CHAPTER SUMMARY]\nFACTS:\n- 曹含森进入北境\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知道失踪案与商人有关\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 幕后组织未确认\n```';
   const ps = R.parseSummary(out);
   assert.ok(ps.ok); assert.ok(ps.text.startsWith('FACTS:')); assert.deepStrictEqual(ps.missing, ['RELATIONSHIPS', 'OBJECTS', 'LOCATION']);
   assert.ok(!R.parseSummary('他们聊了很多。').ok, '不合格式的输出不接受');
-  st = R.addSummary(st, { content: ps.text, coveredIds: p.batch.map(m => m.id), at: 10 });
+  st = R.addChapter(st, { content: ps.text, coveredIds: p.batch.map(m => m.id), at: 10, atRound: 6 });
   assert.strictEqual(R.activeSummary(st).no, 1);
   p = R.plan(st, '', items);
   assert.ok(!p.needSummary);
   assert.deepStrictEqual(p.hist.map(m => m.id), ['u4', 'a4', 'u5', 'a5'], '被摘要的消息不再发送');
   assert.strictEqual(items.length, 11, '原始消息仍在');
   assert.ok(p.system.includes('[CHAPTER_SUMMARY #001]\nFACTS:'));
-  // 继续对话后生成 #002：覆盖范围累积，只发送最新的一份
+  const sys1 = p.system;
+  // 继续对话后追加 #002：只覆盖新移出的消息；#001 逐字保留，system 以旧 system 为前缀
   const more = convo(10);
   p = R.plan(st, '', more);
   assert.ok(p.needSummary);
-  const prompt2 = R.buildSummaryPrompt({ prevSummary: R.activeSummary(st).content, batch: p.batch });
-  assert.ok(prompt2.includes('曹含森进入北境'), '新摘要合并上一版');
-  st = R.addSummary(st, { content: 'FACTS:\n- 第二章', coveredIds: R.activeSummary(st).coveredIds.concat(p.batch.map(m => m.id)), at: 20, basedOn: 1 });
+  assert.deepStrictEqual(p.batch.map(m => m.id), ['u4', 'a4', 'u5', 'a5', 'u6', 'a6', 'u7', 'a7'], '新章节只包含新移出的历史');
+  const prompt2 = R.buildSummaryPrompt({ chapters: R.chaptersOf(st), batch: p.batch });
+  assert.ok(prompt2.includes('曹含森进入北境') && prompt2.includes('不要复述'), '之前章节作为只读参考');
+  st = R.addChapter(st, { content: 'FACTS:\n- 第二章', coveredIds: p.batch.map(m => m.id), at: 20, atRound: 10 });
   p = R.plan(st, '', more);
-  assert.ok(p.system.includes('[CHAPTER_SUMMARY #002]') && !p.system.includes('#001'));
+  assert.ok(p.system.startsWith(sys1), 'V2：追加章节后旧 system 仍是前缀');
+  assert.ok(p.system.includes('[CHAPTER_SUMMARY #001]') && p.system.includes('[CHAPTER_SUMMARY #002]'));
   assert.deepStrictEqual(p.hist.map(m => m.id), ['u8', 'a8', 'u9', 'a9']);
-  // 编辑：只有内容真正变化才生成新版本
-  assert.strictEqual(R.editSummary(st, 'FACTS:\n- 第二章  \n', 30).changed, false);
-  st = R.editSummary(st, 'FACTS:\n- 第二章（修订）', 30).state;
-  assert.strictEqual(R.activeSummary(st).no, 3); assert.strictEqual(R.activeSummary(st).source, 'edit');
-  // 回滚到 #001：覆盖范围也回滚，之后的消息重新发送原文
-  st = R.rollbackSummary(st, 1, 40).state;
-  assert.strictEqual(R.activeSummary(st).no, 4); assert.strictEqual(R.activeSummary(st).basedOn, 1);
+  assert.strictEqual(R.coveredIds(st).length, 14);
+  // 编辑：只有内容真正变化才生效，旧内容进入章节历史
+  assert.strictEqual(R.editChapter(st, 2, 'FACTS:\n- 第二章  \n', 30).changed, false);
+  st = R.editChapter(st, 2, 'FACTS:\n- 第二章（修订）', 30).state;
+  assert.strictEqual(R.chaptersOf(st)[1].history.length, 1); assert.strictEqual(R.chaptersOf(st)[1].source, 'edit');
+  assert.ok(R.plan(st, '', more).system.startsWith(sys1), '编辑 #002 不影响 #001 之前的前缀');
+  // 撤销最后一章：覆盖的消息重新发送，存档保留
+  const r = R.removeLastChapter(st, 40); st = r.state;
+  assert.strictEqual(r.reopened, 8);
   p = R.plan(st, '', more);
-  assert.ok(p.system.includes('[CHAPTER_SUMMARY #004]\nFACTS:\n- 曹含森进入北境'));
-  assert.strictEqual(p.hist[0].id, 'u4');
-  assert.deepStrictEqual(st.summaries.map(s => s.no), [1, 2, 3, 4], '所有快照保留');
+  assert.strictEqual(p.hist[0].id, 'u4'); assert.strictEqual(st.archive.length, 1);
 });
 
 test('超预算且无法摘要：一次性截断，起点固定，之后前缀稳定', () => {
@@ -252,7 +255,7 @@ test('异常检测：命中率骤降 + 基于哈希的原因', () => {
 });
 
 test('界面中文标签（v0.3.3）：只改显示，不改保存的键名与发送给模型的文本', () => {
-  assert.deepStrictEqual(R.LAYERS.map(k => R.LAYER_TITLES[k]), ['固定设定', '长期记忆', '章节摘要', '对话历史', '当前状态', '本轮输入']);
+  assert.deepStrictEqual(R.LAYERS.map(k => R.LAYER_TITLES[k]), ['固定设定', '长期记忆', '章节摘要', '对话历史', '记忆增量', '当前状态', '本轮输入']);
   assert.deepStrictEqual(['SAME', 'APPEND', 'CHANGED', 'NEW'].map(R.diagLabel), ['未变', '追加', '已改动', '首次']);
   assert.strictEqual(R.verLabel('static', 1), '固定设定 第 1 版');
   assert.strictEqual(R.verLabel('state', 12), '当前状态 第 12 版');
@@ -263,10 +266,10 @@ test('界面中文标签（v0.3.3）：只改显示，不改保存的键名与�
   const p = R.plan(st, 'S', [{ id: 'u1', role: 'user', content: '你好' }]);
   const e = R.makeLogEntry({ fp: R.fingerprints(p, 'S'), at: 1 });
   const p2 = R.plan(st, 'S', [{ id: 'u1', role: 'user', content: '你好' }, { id: 'a1', role: 'assistant', content: '嗨' }, { id: 'u2', role: 'user', content: '继续' }]);
-  assert.deepStrictEqual(R.diagnose(e, R.fingerprints(p2, 'S'), p2.hist), { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'SAME', input: 'CHANGED', history: 'APPEND' });
+  assert.deepStrictEqual(R.diagnose(e, R.fingerprints(p2, 'S'), p2.hist), { static: 'SAME', memory: 'SAME', summary: 'SAME', delta: 'SAME', state: 'SAME', input: 'CHANGED', history: 'APPEND' });
   // 发送给模型的分段标记与摘要格式保持英文
   st = R.setBlock(st, 'state', 'HP: 80', 1).state;
-  assert.strictEqual(R.finalUserContent(st, '推门'), '[CURRENT_STATE]\nHP: 80\n\n[USER_INPUT]\n推门');
+  assert.strictEqual(R.finalUserContent(st, '推门'), '推门\n\n[CURRENT_STATE]\nHP: 80');
   const sp = R.buildSummaryPrompt({ prevSummary: null, memory: '', batch: [{ role: 'user', content: 'x' }] });
   R.SUMMARY_SECTIONS.forEach(k => assert.ok(JSON.stringify(sp).includes(k + ':'), k));
 });

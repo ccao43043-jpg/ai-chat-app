@@ -12,7 +12,7 @@ const ds = Object.assign({ apiKey: 'sk', id: 'p1' }, P.PRESETS.find(p => p.prese
 function mkHost(conv, settings, modelReply) {
   const store = {}; const calls = []; const toasts = [];
   return { calls, toasts, raw: store,
-    settings: () => settings, saveSettings() {}, conv: () => conv, saveConv() {}, refresh() {}, toast: t => toasts.push(t), esc: s => s,
+    settings: () => settings, saveSettings() {}, conv: () => conv, saveConv() {}, refresh() {}, toast: t => toasts.push(t), esc: s => s, provider: () => ds,
     store: { get: (k, d) => (k in store ? JSON.parse(store[k]) : d), set: (k, v) => { store[k] = JSON.stringify(v); } },
     openPanel() {},
     callModel: async (prompt, o) => { calls.push({ prompt, o }); if (o && o.setCancel) o.setCancel(() => {}); return typeof modelReply === 'function' ? modelReply(prompt) : modelReply; } };
@@ -47,15 +47,15 @@ test('开启后：状态后置、联网/文件内容冻结在用户消息里、�
   const d = reg.convData(conv, 'rpcache'); d.state = R.setBlock(R.normalizeState(null), 'state', 'HP: 80', 1).state;
   const host = mkHost(conv, settings, '');
   const r1 = await send(conv, settings, host, '【搜索结果…】推门');
-  assert.strictEqual(r1.body.messages[1].content, '[CURRENT_STATE]\nHP: 80\n\n[USER_INPUT]\n【搜索结果…】推门');
+  assert.strictEqual(r1.body.messages[1].content, '【搜索结果…】推门\n\n[CURRENT_STATE]\nHP: 80', 'V2：输入在前，状态在后');
   // 下一轮：宿主不再注入搜索结果，但历史里仍用首次发送的原文
   conv.messages[0].content = '推门';
   d.state = R.setBlock(d.state, 'state', 'HP: 75', 2).state;
   const r2 = await send(conv, settings, host, '拔剑');
-  assert.deepStrictEqual(r2.body.messages.map(m => m.content), ['你是RP助手', '【搜索结果…】推门', '回复：【搜索结果…】推门', '[CURRENT_STATE]\nHP: 75\n\n[USER_INPUT]\n拔剑']);
+  assert.deepStrictEqual(r2.body.messages.map(m => m.content), ['你是RP助手', '【搜索结果…】推门', '回复：【搜索结果…】推门', '拔剑\n\n[CURRENT_STATE]\nHP: 75']);
   const logs = JSON.parse(host.raw['rplog_c1.json']);
   assert.strictEqual(logs.length, 2);
-  assert.deepStrictEqual(logs[1].diag, { static: 'SAME', memory: 'SAME', summary: 'SAME', state: 'CHANGED', input: 'CHANGED', history: 'APPEND' });
+  assert.deepStrictEqual(logs[1].diag, { static: 'SAME', memory: 'SAME', summary: 'SAME', delta: 'SAME', state: 'CHANGED', input: 'CHANGED', history: 'APPEND' });
   assert.strictEqual(logs[1].reason, '正常动态更新');
   assert.strictEqual(logs[1].request_id, 'req_0002');
   assert.ok(!host.raw['rplog_c1.json'].includes('拔剑'), '日志默认不含 Prompt 文本');
