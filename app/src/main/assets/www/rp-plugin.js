@@ -13,7 +13,7 @@
   const fmtUsd = v => (v == null ? '—' : '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3)));
   const tone = r => (r == null ? 'info' : r >= 0.7 ? 'ok' : r >= 0.3 ? 'warn' : 'bad');
   const fmtTime = t => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
-  const SRC = { auto: '自动', manual: '手动生成', edit: '手动编辑', rollback: '回滚' };
+  const SRC = { auto: '自动', manual: '手动生成', edit: '手动编辑', rollback: '回滚', merge: '合并', migrated: '旧版迁移' };
 
   const normalized = new WeakSet();
   /** 会话数据；状态只在第一次读取时补齐字段，之后保持同一个对象（界面持有的引用不会失效） */
@@ -22,68 +22,103 @@
     if (!d.state || !normalized.has(d.state)) { d.state = R.normalizeState(d.state); normalized.add(d.state); }
     return d;
   }
-  function cfg(host) { const c = reg.config(host.settings(), ID); c.prices = Object.assign({}, R.DEFAULT_PRICES, c.prices || {}); c.priceMode = c.priceMode || 'auto'; return c; }
+  function cfg(host) {
+    const c = reg.config(host.settings(), ID);
+    c.prices = c.prices && Object.keys(c.prices).length ? Object.assign({}, c.prices) : Object.assign({}, R.DEFAULT_PRICES);
+    // 旧版本保存的价格没有 match 字段：补上默认匹配规则
+    Object.keys(R.DEFAULT_PRICES).forEach(k => { if (c.prices[k] && c.prices[k].match == null) c.prices[k] = Object.assign({}, c.prices[k], { match: R.DEFAULT_PRICES[k].match }); });
+    c.priceMode = c.priceMode || 'auto';
+    c.peak = Object.assign({}, R.DEFAULT_PEAK, c.peak || {});
+    return c;
+  }
   const logKey = conv => 'rplog_' + conv.id + '.json';
   const loadLogs = (host, conv) => host.store.get(logKey(conv), []) || [];
+  const providerOf = (host, conv) => (host.provider ? host.provider(conv) : null) || null;
+  /** V2：服务商适用性。DeepSeek → 适用；其他服务商默认「不适用」（请求不改写），可在面板中强制启用 */
+  function applicability(host, conv, provider, model) {
+    const p = provider || providerOf(host, conv);
+    const m = model != null ? model : conv.model;
+    const ok = R.isApplicable(p, m);
+    const forced = !ok && !!data(conv).state.settings.force_enable;
+    return { ok, forced, effective: ok || forced, provider: p, model: m, claude: !!(p && p.type === 'anthropic') };
+  }
+  const effectiveFor = (host, conv) => applicability(host, conv).effective;
 
-  /** 请求项：用户消息「冻结」首次发送的内容（含当时的联网搜索 / 文件内容），以后每轮逐字节一致；动态状态不写入历史 */
-  function toItems(ctx) {
-    return ctx.messages.map(m => {
+  /**
+   * 请求项：用户消息「冻结」首次发送的内容（含当时的联网搜索 / 文件内容），以后每轮逐字节一致；动态状态不写入历史。
+   * V2：重新生成最后一条回复时默认也沿用冻结的原文（不会因为重新搜索而改变）；开启「重新生成时刷新」才更新。
+   */
+  function toItems(ctx, refresh) {
+    const info = { reused: false };
+    const items = ctx.messages.map(m => {
       const src = m._src || {};
       let content = m.content || '';
       if (m.role === 'user') {
-        if (src === ctx.lastUser || src.rpSent == null) src.rpSent = content;
-        else content = src.rpSent;
+        if (src.rpSent == null || (src === ctx.lastUser && refresh)) src.rpSent = content;
+        else { if (src === ctx.lastUser && src.rpSent !== content) info.reused = true; content = src.rpSent; }
       }
       return { id: src.id, role: m.role, content, images: m.images, _src: src };
     });
+    return { items, info };
   }
-  /** 不发请求时，用对话里的消息估算（界面展示用） */
-  function convItems(conv) {
-    return conv.messages.filter(m => !m.error && !m.imageGen && !m.pending).map(m => ({ id: m.id, role: m.role, content: m.rpSent != null ? m.rpSent : m.content, images: m.images }));
+  /** 不发请求时，用与发送相同的消息展开（宿主 requestItems）估算，界面数字与实际发送对齐 */
+  function convItems(conv, host) {
+    const base = host && host.requestItems ? host.requestItems(conv)
+      : conv.messages.filter(m => !m.error && !m.imageGen && !m.pending).map(m => ({ role: m.role, content: m.content, images: m.images, _src: m }));
+    return base.map(m => { const src = m._src || m; return { id: src.id, role: m.role, content: m.role === 'user' && src.rpSent != null ? src.rpSent : m.content, images: m.images }; });
   }
-  function planConv(conv) { const d = data(conv); return R.plan(d.state, conv.systemPrompt, convItems(conv)); }
+  function planConv(conv, host) { const d = data(conv); return R.plan(d.state, conv.systemPrompt, convItems(conv, host)); }
+  function costOpts(host, conv) { const c = cfg(host); return { model: conv.model, prices: c.prices, mode: c.priceMode, peak: c.peak, at: Date.now() }; }
+  const costText = r => (r.usd != null ? '约 ' + fmtUsd(r.usd) : '≈' + fmtN(r.callIn + r.callOut + r.rebuild) + ' Token');
 
-  /** 生成下一版章节摘要（合并上一版 + 最旧一批历史），保存为新的冻结快照 */
-  async function makeSummary(host, conv, p, source, setCancel) {
-    const st = p.st; const prev = R.activeSummary(st);
-    if (!p.batch.length) throw new Error('没有可摘要的旧对话（最近 ' + st.settings.summary.keep_recent_turns + ' 轮始终保留原文）');
-    const prompt = R.buildSummaryPrompt({ prevSummary: prev && prev.content, memory: R.getBlock(st, 'memory').content, batch: p.batch });
+  /** 生成下一章（只总结本批新移出的旧对话）或合并全部章节；保存为冻结章节 */
+  async function makeSummary(host, conv, p, source, setCancel, forceMerge) {
+    const st = p.st;
+    if (!p.batch.length && !forceMerge) throw new Error('没有可摘要的旧对话（最近 ' + st.settings.summary.keep_recent_turns + ' 轮始终保留原文）');
+    const merge = forceMerge || p.needConsolidate;
+    const chapters = R.chaptersOf(st);
+    const memory = R.getBlock(st, 'memory').content;
+    const prompt = merge ? R.buildConsolidatePrompt({ chapters, memory, batch: p.batch }) : R.buildSummaryPrompt({ chapters, memory, batch: p.batch });
     const text = await host.callModel(prompt, { maxTokens: 4096, model: st.settings.summary_model || undefined, setCancel });
     const r = R.parseSummary(text);
     if (!r.ok) throw new Error('模型返回的摘要格式不完整（缺少 ' + r.missing.join(' / ') + '）');
     const ids = p.batch.map(m => m.id).filter(Boolean);
-    const state = R.addSummary(st, { content: r.text, coveredIds: (prev ? prev.coveredIds : []).concat(ids), at: Date.now(), source,
-      basedOn: prev ? prev.no : null, newMessages: ids.length, rounds: p.batchRounds });
-    return { state, no: R.activeSummary(state).no, count: ids.length, missing: r.missing };
+    const o = { content: r.text, coveredIds: ids, at: Date.now(), source: merge ? 'merge' : source, rounds: p.batchRounds, atRound: p.rounds };
+    const state = merge ? R.consolidate(st, o) : R.addChapter(st, o);
+    return { state, no: R.activeSummary(state).no, count: ids.length, missing: r.missing, merged: merge, mergedCount: merge ? chapters.length : 0 };
   }
 
   let coverMemo = { key: null, set: null };
   function coveredSet(st) {
-    const a = R.activeSummary(st); const key = a ? a.no + ':' + a.coveredIds.length : '-';
-    if (coverMemo.key !== key) coverMemo = { key, set: new Set(a ? a.coveredIds : []) };
+    const ch = R.chaptersOf(st); const key = ch.map(c => c.no + ':' + c.coveredIds.length).join(',') || '-';
+    if (coverMemo.key !== key) coverMemo = { key, set: new Set(R.coveredIds(st)) };
     return coverMemo.set;
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'DeepSeek RP 缓存优化器', version: '1.0.0', perConversation: true, defaultEnabled: true,
-    desc: '长篇角色扮演专用的上下文构建器：六层上下文（固定设定 → 长期记忆 → 章节摘要 → 对话历史 → 当前状态 → 本轮输入），超出预算时自动生成章节摘要，逐层指纹诊断与缓存命中监控。',
+    id: ID, icon: '🎭', name: 'DeepSeek RP 缓存优化器', version: '2.0.0', perConversation: true, defaultEnabled: true,
+    desc: '长篇角色扮演专用的上下文构建器（默认只对 DeepSeek 生效）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
+        const ap = applicability(host, ctx.conv, ctx.provider, ctx.model);
+        if (!ap.effective) { ctx.meta.rp = { skipped: true }; return ctx; } // 不适用：请求逐字节不变
         const d = data(ctx.conv);
         const base = ctx.systemPrompt;
         let st = R.syncBase(d.state, base);
-        const items = toItems(ctx);
+        const ti = toItems(ctx, st.settings.refresh_on_regen);
+        const items = ti.items;
+        if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
         let p = R.plan(st, base, items);
         const overBudget = p.overBudget;
-        let summaryNo = 0, summaryReason = null, summaryError = null;
+        let summaryNo = 0, summaryReason = null, summaryError = null, summaryMerged = false, summaryCost = null;
         if (p.needSummary) {
           summaryReason = p.summaryReason;
-          ctx.setStatus && ctx.setStatus('正在生成章节摘要…');
+          summaryCost = R.summaryCost(p, costOpts(host, ctx.conv));
+          ctx.setStatus && ctx.setStatus(p.needConsolidate ? '章节过长，正在合并章节…' : '正在生成章节摘要…');
           try {
             const r = await makeSummary(host, ctx.conv, p, 'auto', ctx.setCancel);
-            st = r.state; summaryNo = r.no;
-            host.toast('已生成章节摘要 ' + R.slabel(r.no) + '（' + r.count + ' 条旧消息已写入摘要，原文保留）');
+            st = r.state; summaryNo = r.no; summaryMerged = r.merged;
+            host.toast((r.merged ? '已把 ' + r.mergedCount + ' 个章节合并为 ' : '已追加章节 ') + R.slabel(r.no) + '（' + r.count + ' 条旧消息写入摘要，原文保留）· 额外花费' + costText(summaryCost));
           } catch (e) {
             summaryError = String(e && e.message || e);
             host.toast('章节摘要生成失败：' + summaryError);
@@ -94,36 +129,47 @@
         let trimmedNow = false;
         if (p.overBudget) { // 仍超预算（摘要关闭 / 失败）：一次性截掉一大块旧历史，起点固定
           st = R.fallbackTrim(st, p); p = R.plan(st, base, items); trimmedNow = true;
-          host.toast('上下文超出预算，本次只发送最近约 ' + R.estimateItems(p.hist) + ' Token 的历史（原文仍保存在本地）');
+          host.toast('上下文超出预算，本次只发送最近约 ' + fmtN(p.tokens.history) + ' Token 的历史（原文仍保存在本地）');
         }
-        d.state = st;
+        d.state = st; normalized.add(st);
         const a = R.assemble(p);
+        if (ap.claude && ap.forced) {
+          // Claude：system + 稳定历史末尾两个 cache_control 断点
+          ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true });
+          if (p.hist.length) a.messages[p.hist.length - 1]._cache = true;
+        }
         ctx.systemPrompt = a.system; ctx.messages = a.messages;
         const fp = R.fingerprints(p, base);
         const logs = loadLogs(host, ctx.conv);
         const prev = logs[logs.length - 1] || null;
         ctx.meta.rp = {
-          fp, diag: R.diagnose(prev, fp, p.hist), tokens: p.tokens, overBudget, staticCause: st.pendingStaticCause || null, historyCause: st.pendingHistoryCause || null, trimmed: p.trimmed, trimmedNow, summaryNo, summaryReason, summaryError,
+          fp, diag: R.diagnose(prev, fp, p.hist), tokens: p.tokens, overBudget, staticCause: st.pendingStaticCause || null, historyCause: st.pendingHistoryCause || null, trimmed: p.trimmed, trimmedNow,
+          summaryNo, summaryReason, summaryError, summaryMerged, summaryCost, forced: ap.forced,
           prompt: st.settings.save_prompt ? { system: a.system, messages: a.messages.map(m => ({ role: m.role, content: m.content })) } : null,
         };
         if (summaryNo || trimmedNow) host.saveConv(ctx.conv);
         return ctx;
       },
       onAfterResponse(result, ctx, host) {
-        if (!result.ok || !ctx.meta.rp) return;
+        if (!result.ok || !ctx.meta.rp || ctx.meta.rp.skipped) return;
         const info = ctx.meta.rp; const d = data(ctx.conv);
         const logs0 = loadLogs(host, ctx.conv);
         d.state.seq = (d.state.seq | 0) + 1;
         const entry = R.makeLogEntry({ request_id: 'req_' + String(d.state.seq).padStart(4, '0'), at: Date.now(), usage: result.usage, model: ctx.model,
           provider: ctx.provider.presetId || ctx.provider.id, fp: info.fp, diag: info.diag, tokens: info.tokens, summaryNo: info.summaryNo, summaryReason: info.summaryReason,
-          summaryError: info.summaryError, staticCause: info.diag.static === 'CHANGED' ? info.staticCause : null, historyCause: info.diag.history === 'CHANGED' ? info.historyCause : null, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
+          summaryError: info.summaryError, summaryMerged: info.summaryMerged, summaryCost: info.summaryCost,
+          staticCause: info.diag.static === 'CHANGED' ? info.staticCause : null, historyCause: info.diag.history === 'CHANGED' ? info.historyCause : null, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
           savePrompt: d.state.settings.save_prompt, prompt: info.prompt });
-        if (d.state.pendingStaticCause || d.state.pendingHistoryCause) d.state = Object.assign({}, d.state, { pendingStaticCause: null, pendingHistoryCause: null });
+        let st = d.state;
+        if (st.pendingStaticCause || st.pendingHistoryCause) st = Object.assign({}, st, { pendingStaticCause: null, pendingHistoryCause: null });
+        // V2：用真实输入 Token 校准本地估算
+        if (result.usage && result.usage.prompt) st = R.calibrate(st, info.tokens.raw_total, result.usage.prompt);
+        if (st !== d.state) { d.state = st; normalized.add(st); }
         const logs = R.appendLog(logs0, entry);
         host.store.set(logKey(ctx.conv), logs);
         const an = R.detectAnomaly(logs);
         if (result.bot) result.bot.rpCache = { rate: entry.hit_rate, hit: entry.cache_hit_tokens, miss: entry.cache_miss_tokens, prompt: entry.prompt_tokens,
-          supported: entry.supported, anomaly: an.anomaly, summaryNo: entry.summary_no, reason: entry.reason, req: entry.request_id };
+          supported: entry.supported, anomaly: an.anomaly, summaryNo: entry.summary_no, merged: entry.summary_merged, reason: entry.reason, req: entry.request_id };
         d.lastAnomaly = an.anomaly ? { at: entry.timestamp, avg: an.avg, current: an.current, causes: an.causes, changed: an.changed } : null;
         if (an.anomaly) host.toast('⚠ 缓存命中率骤降（' + pct(an.avg) + ' → ' + pct(an.current) + '），点消息上的徽章查看原因');
       },
@@ -133,27 +179,31 @@
         if (!c.supported) out.push({ text: '缓存 不支持统计', tone: 'info', title: '该服务商未返回缓存字段', action: () => host.openPanel(ID, 'monitor') });
         else out.push({ text: (c.anomaly ? '⚠ ' : '') + '缓存 ' + pct(c.rate), tone: c.anomaly ? 'bad' : tone(c.rate), title: '缓存命中 ' + c.hit + ' / 输入 ' + c.prompt + ' Token · ' + (c.reason || ''),
           action: () => host.openPanel(ID, 'monitor') });
-        if (c.summaryNo) out.push({ text: '📚 摘要 ' + R.slabel(c.summaryNo), tone: 'info', title: '本次请求前生成了章节摘要', action: () => host.openPanel(ID, 'summary') });
+        if (c.summaryNo) out.push({ text: (c.merged ? '📚 合并 ' : '📚 章节 ') + R.slabel(c.summaryNo), tone: 'info', title: c.merged ? '本次请求前合并了全部章节' : '本次请求前追加了新章节', action: () => host.openPanel(ID, 'summary') });
         return out;
       },
       headerBadges(conv, host) {
+        const ap = applicability(host, conv);
+        if (!ap.effective) return [{ text: '🎭 RP · 不适用', tone: 'info', title: '当前服务商 / 模型不是 DeepSeek，插件不改写请求（可在面板中强制启用）', action: () => host.openPanel(ID, 'blocks') }];
         const logs = loadLogs(host, conv); const last = logs[logs.length - 1];
-        const out = [{ text: '🎭 RP' + (last ? ' · 命中 ' + (last.supported ? pct(last.hit_rate) : '—') : ''), tone: last && last.supported ? tone(last.hit_rate) : 'info', action: () => host.openPanel(ID, last ? 'monitor' : 'blocks') }];
-        const p = planConv(conv); const act = R.activeSummary(p.st);
-        if (act) out.push({ text: '📚 摘要 ' + R.slabel(act.no), tone: 'info', action: () => host.openPanel(ID, 'summary') });
+        const out = [{ text: '🎭 RP' + (ap.forced ? '（强制）' : '') + (last ? ' · 命中 ' + (last.supported ? pct(last.hit_rate) : '—') : ''), tone: last && last.supported ? tone(last.hit_rate) : 'info', action: () => host.openPanel(ID, last ? 'monitor' : 'blocks') }];
+        const p = planConv(conv, host); const ch = R.chaptersOf(p.st);
+        if (ch.length) out.push({ text: '📚 ' + ch.length + ' 章', tone: 'info', action: () => host.openPanel(ID, 'summary') });
         const sum = p.st.settings.summary;
-        const unTok = R.estimateItems(p.unsummarized);
-        if (sum.enabled && !p.needSummary && unTok >= sum.trigger_tokens * 0.85) out.push({ text: '即将自动摘要', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
-        else if (p.needSummary) out.push({ text: '下次发送将自动摘要', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
+        const unTok = Math.round(R.estimateItems(p.unsummarized) * p.calib);
+        if (p.needSummary) out.push({ text: p.needConsolidate ? '下次发送将合并章节' : '下次发送将追加章节', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
+        else if (sum.enabled && unTok >= sum.trigger_tokens * 0.85) out.push({ text: p.summaryBlocked === 'interval' ? '摘要间隔未到' : '即将自动摘要', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
         return out;
       },
-      messageState(msg, conv) {
+      messageState(msg, conv, host) {
+        if (host && !effectiveFor(host, conv)) return null; // 不适用时完全不影响界面（不变灰、不冻结）
         const st = data(conv).state;
         const cov = coveredSet(st);
         if (cov.has(msg.id)) {
           const elig = conv.messages.filter(m => cov.has(m.id));
           const isLast = elig[elig.length - 1] === msg;
-          return { dim: true, label: isLast ? '↑ 以上 ' + elig.length + ' 条已写入章节摘要 ' + R.slabel(R.activeSummary(st).no) + '，不再发送（原文保留）' : '' };
+          const ch = R.chaptersOf(st);
+          return { dim: true, label: isLast ? '↑ 以上 ' + elig.length + ' 条已写入章节 ' + ch.map(c => R.slabel(c.no)).join('、') + '，不再发送（原文保留）' : '' };
         }
         if (!st.window.startId) return null;
         const elig = conv.messages.filter(m => !m.error && !m.imageGen && !m.pending && !cov.has(m.id));
@@ -164,24 +214,47 @@
       },
     },
 
-    // ---------------- 插件设置（全局：价格） ----------------
+    // ---------------- 插件设置（全局：价格 / 高峰时段，V2 可增删改） ----------------
     renderSettings(box, host) {
       const c = cfg(host);
-      const row = id => '<div class="price-row"><span>' + id + '</span>' +
-        ['hit', 'miss', 'out'].map(k => '<input type="number" step="0.001" min="0" data-m="' + id + '" data-k="' + k + '" value="' + c.prices[id][k] + '">').join('') + '</div>';
-      box.innerHTML = '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价），用于估算节省的费用</div>' +
-        '<div class="price-row head"><span>模型</span><span>缓存命中</span><span>未命中</span><span>输出</span></div>' +
-        row('deepseek-flash') + row('deepseek-v4-pro') +
-        '<label class="field" style="margin-top:10px"><span>时段</span><select id="rp-price-mode"><option value="auto">自动（按请求时间判断高峰/非高峰）</option><option value="peak">按高峰价</option><option value="offpeak">按非高峰价（半价）</option></select></label>' +
-        '<div class="hint small">默认价格来自 DeepSeek 官方定价页（2026-10 核对）。高峰：周一至周五北京时间 9:00–12:00、14:00–18:00，其余时段半价（节假日未计入）。</div>' +
-        '<button class="chip-btn" id="rp-price-reset" type="button">恢复默认价格</button>';
+      const names = Object.keys(c.prices);
+      const row = id => '<div class="price-row" data-row="' + host.esc(id) + '"><span><input type="text" class="pr-match" data-m="' + host.esc(id) + '" value="' + host.esc(c.prices[id].match != null ? c.prices[id].match : id) + '" title="模型名包含任一关键词即使用此价格（逗号分隔，越长越优先）"></span>' +
+        ['hit', 'miss', 'out'].map(k => '<input type="number" step="0.001" min="0" data-m="' + host.esc(id) + '" data-k="' + k + '" value="' + c.prices[id][k] + '">').join('') +
+        '<button class="chip-btn pr-del" data-m="' + host.esc(id) + '" type="button" title="删除">×</button></div>';
+      box.innerHTML = '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价），用于估算节省 / 额外花费</div>' +
+        '<div class="price-row head"><span>模型关键词</span><span>缓存命中</span><span>未命中</span><span>输出</span><span></span></div>' +
+        names.map(row).join('') +
+        '<button class="chip-btn" id="rp-price-add" type="button">＋ 添加价格规则</button>' +
+        '<label class="field" style="margin-top:10px"><span>时段</span><select id="rp-price-mode"><option value="auto">自动（按请求时间判断高峰/非高峰）</option><option value="peak">按高峰价</option><option value="offpeak">按非高峰价</option></select></label>' +
+        '<label class="field"><span>高峰时段<small>逗号分隔，例如 09:00-12:00,14:00-18:00</small></span><input type="text" id="rp-peak-win" value="' + host.esc(c.peak.windows) + '"></label>' +
+        '<label class="field"><span>时区偏移（小时）<small>北京时间为 8</small></span><input type="number" id="rp-peak-tz" step="0.5" value="' + c.peak.tz + '"></label>' +
+        '<label class="field"><span>非高峰价格倍数<small>例如 0.5 = 半价</small></span><input type="number" id="rp-peak-off" step="0.05" min="0" max="1" value="' + c.peak.off_factor + '"></label>' +
+        '<label class="field inline"><span>仅工作日有高峰<small>周六日全天按非高峰（节假日未计入）</small></span><input type="checkbox" class="switch" id="rp-peak-wd"' + (c.peak.weekdays ? ' checked' : '') + '></label>' +
+        '<div class="hint small">默认价格来自 DeepSeek 官方定价页（2026-10 核对），官方调价时可在这里修改。</div>' +
+        '<button class="chip-btn" id="rp-price-reset" type="button">恢复默认价格与时段</button>';
       box.querySelector('#rp-price-mode').value = c.priceMode;
-      box.querySelectorAll('input[data-m]').forEach(inp => inp.addEventListener('change', () => {
+      const save = () => host.saveSettings();
+      box.querySelectorAll('input[data-k]').forEach(inp => inp.addEventListener('change', () => {
         const v = parseFloat(inp.value); if (isNaN(v) || v < 0) { inp.value = c.prices[inp.dataset.m][inp.dataset.k]; return; }
-        c.prices[inp.dataset.m] = Object.assign({}, c.prices[inp.dataset.m], { [inp.dataset.k]: v }); host.saveSettings();
+        c.prices[inp.dataset.m] = Object.assign({}, c.prices[inp.dataset.m], { [inp.dataset.k]: v }); save();
       }));
-      box.querySelector('#rp-price-mode').onchange = e => { c.priceMode = e.target.value; host.saveSettings(); };
-      box.querySelector('#rp-price-reset').onclick = () => { c.prices = Object.assign({}, R.DEFAULT_PRICES); host.saveSettings(); this.renderSettings(box, host); host.toast('已恢复默认价格'); };
+      box.querySelectorAll('input.pr-match').forEach(inp => inp.addEventListener('change', () => {
+        c.prices[inp.dataset.m] = Object.assign({}, c.prices[inp.dataset.m], { match: inp.value.trim() }); save();
+      }));
+      box.querySelectorAll('.pr-del').forEach(b => b.onclick = () => { delete c.prices[b.dataset.m]; reg.config(host.settings(), ID).prices = c.prices; save(); this.renderSettings(box, host); });
+      box.querySelector('#rp-price-add').onclick = () => {
+        let n = 1; while (c.prices['custom-' + n]) n++;
+        c.prices['custom-' + n] = { hit: 0, miss: 0, out: 0, match: '' }; save(); this.renderSettings(box, host);
+      };
+      box.querySelector('#rp-price-mode').onchange = e => { c.priceMode = e.target.value; save(); };
+      box.querySelector('#rp-peak-win').onchange = e => {
+        if (!R.parseWindows(e.target.value).length && e.target.value.trim()) { host.toast('格式不对，例如 09:00-12:00,14:00-18:00'); e.target.value = c.peak.windows; return; }
+        c.peak.windows = e.target.value.trim(); save();
+      };
+      box.querySelector('#rp-peak-tz').onchange = e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { c.peak.tz = v; save(); } };
+      box.querySelector('#rp-peak-off').onchange = e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0 && v <= 1) { c.peak.off_factor = v; save(); } };
+      box.querySelector('#rp-peak-wd').onchange = e => { c.peak.weekdays = e.target.checked; save(); };
+      box.querySelector('#rp-price-reset').onclick = () => { c.prices = Object.assign({}, R.DEFAULT_PRICES); c.peak = Object.assign({}, R.DEFAULT_PEAK); save(); this.renderSettings(box, host); host.toast('已恢复默认价格与时段'); };
     },
 
     // ---------------- 对话面板 ----------------
@@ -207,10 +280,23 @@
       };
       if (!on) {
         const tip = document.createElement('div'); tip.className = 'hint'; tip.style.marginTop = '12px';
-        tip.innerHTML = '开启后，本对话的每次请求按固定的六层结构组织：<br><b>L1 固定设定</b>（世界观 / 角色卡 / 规则…）→ <b>L2 长期记忆</b> → <b>L3 章节摘要</b>（冻结）→ <b>L4 对话历史</b>（只追加）→ <b>L5 当前状态</b> → <b>L6 本轮输入</b>。<br>' +
-          '稳定内容在前、动态内容在后，让 DeepSeek 的上下文缓存尽可能命中。历史超出阈值时自动生成章节摘要，原始消息永远保留在本地。';
+        tip.innerHTML = '开启后，本对话的每次请求按固定的结构组织：<br><b>L1 固定设定</b>（世界观 / 角色卡 / 规则…）→ <b>L2 长期记忆</b> → <b>L3 章节</b>（冻结、只追加）→ <b>L4 对话历史</b>（只追加）→ 最后一条用户消息：<b>L6 本轮输入</b> + 记忆增量 + <b>L5 当前状态</b>。<br>' +
+          '稳定内容在前、动态内容在后，让 DeepSeek 的上下文缓存尽可能命中。历史超出阈值时自动追加章节，原始消息永远保留在本地。默认只对 DeepSeek 服务商生效。';
         box.appendChild(tip);
         return;
+      }
+      const ap = applicability(host, conv);
+      if (!ap.ok) {
+        const na = document.createElement('div'); na.className = 'group form'; na.id = 'rp-na';
+        na.innerHTML = '<div class="rp-suggest"><b>不适用</b>：当前服务商「' + host.esc((ap.provider && ap.provider.name) || '未知') + '」/ 模型「' + host.esc(ap.model || '') + '」不是 DeepSeek。' +
+          '默认情况下插件<b>不改写</b>这个对话的请求，设定 / 章节保留，切回 DeepSeek 后继续生效。</div>' +
+          '<label class="field inline"><span>仍然在此服务商上启用<small>OpenAI 等会自动按前缀缓存；Claude 会自动加 cache_control 断点（system + 稳定历史末尾）；其他服务商可能没有缓存</small></span><input type="checkbox" class="switch" id="rp-force"' + (ap.forced ? ' checked' : '') + '></label>';
+        box.appendChild(na);
+        na.querySelector('#rp-force').onchange = e => {
+          data(conv).state.settings.force_enable = e.target.checked; host.saveConv(conv); host.refresh();
+          host.toast(e.target.checked ? '已在当前服务商上强制启用 RP 缓存优化' : '已恢复默认：非 DeepSeek 不改写请求'); this._render();
+        };
+        if (!ap.forced) return;
       }
       if (this.panel.view) { this.panel.view(box); return; }
       const seg = document.createElement('div'); seg.className = 'seg in-body';
@@ -226,7 +312,7 @@
 
     // ----- 分层设定 -----
     _blocks(body, conv, host) {
-      const d = data(conv); const st = d.state; const p = planConv(conv);
+      const d = data(conv); const st = d.state; const p = planConv(conv, host);
       const base = R.canonicalize(conv.systemPrompt);
       const layer = (no, title, sub) => { const el = document.createElement('div'); el.className = 'layer-head'; el.innerHTML = '<span class="lh-no">' + no + '</span><span class="lh-t">' + title + '</span><span class="lh-sub">' + sub + '</span>'; body.appendChild(el); };
       const card = (title, meta, preview, fp, onClick, cls) => {
@@ -251,30 +337,49 @@
       R.STATIC_DEFS.forEach(def => blockCard(def.id));
       layer('L2', '长期记忆', R.verLabel('memory', R.getBlock(st, 'memory').version) + ' · ≈' + fmtN(p.tokens.memory) + ' Token');
       blockCard('memory');
-      const act = R.activeSummary(st);
-      layer('L3', '章节摘要（冻结）', act ? '摘要 ' + R.slabel(act.no) + ' · ≈' + fmtN(p.tokens.summary) + ' Token' : '尚未生成');
-      card(act ? '摘要 ' + R.slabel(act.no) : '章节摘要', '<span class="rb-tag t-memory">' + (act ? SRC[act.source] || act.source : '自动') + '</span>', act ? act.content : '', act ? act.hash : '', () => { this.panel.tab = 'summary'; this._render(); });
+      const chs = R.chaptersOf(st);
+      layer('L3', '章节摘要（只追加）', chs.length ? chs.length + ' 章 · ≈' + fmtN(p.tokens.summary) + ' / ' + fmtN(p.cap) + ' Token' : '尚未生成');
+      if (!chs.length) card('章节摘要', '<span class="rb-tag t-memory">自动</span>', '', '', () => { this.panel.tab = 'summary'; this._render(); });
+      chs.forEach(c => card('章节 ' + R.slabel(c.no), '<span class="rb-tag t-memory">' + (SRC[c.source] || c.source) + '</span>', c.content, c.hash, () => { this.panel.tab = 'summary'; this._render(); }));
       layer('L4', '对话历史', p.hist.filter(m => m.role === 'user').length + ' 轮 · ≈' + fmtN(p.tokens.history) + ' Token · 只追加');
-      layer('L5', '当前状态', R.verLabel('state', R.getBlock(st, 'state').version) + ' · 放在本轮输入之前');
+      layer('L4+', '记忆增量', R.verLabel('delta', R.getBlock(st, 'delta').version) + ' · ≈' + fmtN(p.tokens.delta) + ' Token · 在历史之后');
+      blockCard('delta');
+      if (R.getBlock(st, 'delta').content) {
+        const mb = document.createElement('button'); mb.className = 'ghost-btn'; mb.id = 'rp-merge-delta'; mb.textContent = '把记忆增量合并进长期记忆';
+        mb.onclick = () => this.mergeDelta(conv, host);
+        body.appendChild(mb);
+      }
+      layer('L5', '当前状态', R.verLabel('state', R.getBlock(st, 'state').version) + ' · 在本轮输入之后');
       blockCard('state');
-      layer('L6', '本轮输入', '永远在最后');
+      layer('L6', '本轮输入', '最后一条用户消息的开头');
       const prev = document.createElement('button'); prev.className = 'ghost-btn'; prev.id = 'rp-preview'; prev.textContent = '预览请求结构';
       prev.onclick = () => {
         const a = R.assemble(p); const n = a.messages.length;
         const ROLE = { user: '用户', assistant: 'AI', system: '系统' };
-        const txt = '── 系统消息 ──\n' + (a.system || '（空）') + '\n\n── 对话历史 ' + p.hist.length + ' 条（原样）──\n' +
+        const txt = '── 系统消息 ──\n' + (a.system || '（空）') + '\n\n── 对话历史 ' + p.hist.length + ' 条（原样，以下为最后 2 条）──\n' +
           p.hist.slice(-2).map(m => (ROLE[m.role] || m.role) + '：' + String(m.content).slice(0, 60)).join('\n') + '\n\n── 最后一条用户消息 ──\n' + R.finalUserContent(st, '（你的下一条输入）') +
           '\n\n共 ' + (n + 1) + ' 条消息 · 估算 ' + fmtN(p.tokens.total) + ' Token\n（方括号里的英文标记会原样发送给模型）';
         host.dialog({ title: '请求结构预览', body: txt, okText: '关闭', info: true });
       };
       body.appendChild(prev);
     },
+    async mergeDelta(conv, host) {
+      const d = data(conv); const p = planConv(conv, host);
+      const c = R.mergeDeltaCost(p, costOpts(host, conv));
+      const ok = await host.dialog({ title: '合并记忆增量？', body: '会把记忆增量追加到长期记忆末尾（长期记忆 +1 版），并清空增量。\n\n' +
+        '代价：长期记忆位于前缀靠前位置，之后的章节与对话历史（≈' + fmtN(c.rebuild) + ' Token）下一轮需要重新建立缓存' + (c.usd != null ? '，约多花 ' + fmtUsd(c.usd) : '') + '。\n建议等增量攒得比较多、或者开始新章节时再合并。', okText: '合并' });
+      if (!ok) return;
+      const r = R.mergeDelta(d.state, Date.now());
+      if (!r.changed) { host.toast('记忆增量为空'); return; }
+      d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh(); host.toast('已合并进长期记忆（' + R.verLabel('memory', R.getBlock(r.state, 'memory').version) + '）'); this._render();
+    },
 
     _editBlock(box, conv, host, id) {
       const d = data(conv); const b = R.getBlock(d.state, id); const def = R.BLOCK_DEFS.find(x => x.id === id);
       const warn = def.layer === 'L1' ? '修改固定设定会让全部缓存重建，建议攒到一起再改。保存后为' + R.verLabel('static', d.state.staticVersion + 1) + '。'
-        : def.layer === 'L2' ? '只在发生重大事件时更新长期记忆；修改会让摘要与历史的缓存重建。保存后为' + R.verLabel('memory', b.version + 1) + '。'
-        : '当前状态放在本轮输入之前，每轮修改都不影响历史缓存。旧的状态不会留在历史里。';
+        : def.layer === 'L2' ? '长期记忆只放稳定事实；修改会让章节与历史的缓存全部重建。新近的事实建议写进「记忆增量」（不破坏前缀），攒多了再合并。保存后为' + R.verLabel('memory', b.version + 1) + '。'
+        : def.type === 'delta' ? '记忆增量放在对话历史之后，每轮修改都不影响前面的缓存（只多发送这一小段）。增量超过约 1500 Token 时建议合并进长期记忆。'
+        : '当前状态放在最后一条用户消息末尾，每轮修改都不影响历史缓存。旧的状态不会留在历史里。';
       box.innerHTML = '';
       const wrap = document.createElement('div');
       wrap.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="rb-back">‹ 返回</button><span class="rb-title">' + def.layer + ' · ' + host.esc(def.title) + '</span><span class="rb-ver">' + ver(b.version) + '</span></div>' +
@@ -317,97 +422,127 @@
       });
     },
 
-    // ----- 章节摘要 -----
+    // ----- 章节摘要（V2：只追加的章节） -----
     _summary(body, conv, host) {
-      const d = data(conv); const st = d.state; const p = planConv(conv); const sum = st.settings.summary;
-      const act = R.activeSummary(st);
-      const unTok = R.estimateItems(p.unsummarized);
+      const d = data(conv); const st = d.state; const p = planConv(conv, host); const sum = st.settings.summary;
+      const chs = R.chaptersOf(st);
+      const unTok = Math.round(R.estimateItems(p.unsummarized) * p.calib);
       const kv = (k, v, cls) => '<div class="kv' + (cls ? ' ' + cls : '') + '"><span>' + k + '</span><b>' + v + '</b></div>';
-      let html = '<div class="hint">章节摘要是「阶段性冻结快照」：生成后就不再改动，直到下一次达到阈值才生成 ' + R.slabel((act ? act.no : 0) + 1) +
-        '（合并上一版，只发送最新的一份）。被摘要的旧消息仍在聊天里（变灰），只是不再发送。</div>';
+      const est = R.summaryCost(Object.assign({}, p, { batch: p.batch }), costOpts(host, conv));
+      let html = '<div class="hint">章节是「冻结快照」，<b>只追加</b>：每次只把最新移出的旧对话写成新的一章，接在前面的章节之后一起发送，' +
+        '之前的章节逐字不变，所以缓存从新章节处才重新建立。章节合计超过 ' + num(p.cap) + ' Token 时，下一次摘要会把全部章节合并成一章（缓存重建一次）。被摘要的旧消息仍在聊天里（变灰），只是不再发送。</div>';
       html += '<div class="group form kv-box">' +
         kv('自动摘要', sum.enabled ? '开启' : '关闭', sum.enabled ? 'ok' : '') +
         kv('未摘要的对话历史', '≈' + num(unTok) + ' / ' + num(sum.trigger_tokens) + ' Token') +
         kv('可摘要的旧轮数', p.batchRounds + ' 轮（需 ≥ ' + sum.min_new_turns + '，保留最近 ' + sum.keep_recent_turns + ' 轮原文）') +
+        kv('距上一章', chs.length ? p.sinceLast + ' 轮（最小间隔 ' + p.minGap + ' 轮）' : '—', p.summaryBlocked === 'interval' ? 'bad' : '') +
+        kv('章节合计', '≈' + num(p.chapterTokens) + ' / ' + num(p.cap) + ' Token', p.chapterTokens >= p.cap ? 'bad' : '') +
         kv('上下文预算', '≈' + num(p.tokens.total) + ' / ' + num(p.limit) + ' Token', p.overBudget ? 'bad' : '') +
-        kv('已摘要消息', (act ? act.coveredIds.length : 0) + ' 条') + '</div>';
-      if (p.needSummary) html += '<div class="rp-suggest">下次发送时会先自动生成章节摘要（' + (p.summaryReason === 'budget' ? '超出上下文预算' : '达到摘要阈值') + '）。</div>';
+        kv('已摘要消息', R.coveredIds(st).length + ' 条') + '</div>';
+      if (p.needSummary) html += '<div class="rp-suggest" id="rp-next-sum">下次发送时会先自动' + (p.needConsolidate ? '<b>合并全部 ' + chs.length + ' 个章节</b>' : '追加章节 ' + R.slabel(st.chapterSeq + 1)) +
+        '（' + (p.summaryReason === 'budget' ? '超出上下文预算' : '达到摘要阈值') + '）。预计额外花费' + costText(est) + '：摘要调用 ≈' + fmtN(est.callIn) + ' 输入 + ' + fmtN(est.callOut) + ' 输出，缓存重建 ≈' + fmtN(est.rebuild + (est.merge ? est.chapterTokens : 0)) + ' Token。</div>';
+      else if (p.summaryBlocked === 'interval') html += '<div class="rp-suggest">已达到摘要阈值，但距上一章只有 ' + p.sinceLast + ' 轮（最小间隔 ' + p.minGap + ' 轮），暂不摘要，避免频繁重建缓存。超出上下文预算时仍会立即摘要。</div>';
+      else if (chs.length > 1 && p.chapterTokens >= p.cap * 0.8) html += '<div class="rp-suggest">章节合计接近上限，下一次摘要可能会合并全部章节（缓存重建一次）。</div>';
       if (this.panel.busy) html += '<div class="rp-status"><span class="spin"></span>' + host.esc(this.panel.busy) + '</div>';
-      html += '<button class="pill-btn primary wide" id="rp-sum-now"' + (this.panel.busy ? ' disabled' : '') + '>立即生成章节摘要</button>';
-      html += '<div class="group-title">当前生效</div>';
-      if (!act) html += '<div class="group"><div class="conv-empty">还没有章节摘要</div></div>';
-      else html += '<button class="rp-block" id="rp-sum-cur"><div class="rb-top"><span class="rb-title">摘要 ' + R.slabel(act.no) + '</span><span class="rb-tag t-memory">' + (SRC[act.source] || act.source) + '</span>' +
-        '<span class="rb-ver">' + fmtN(R.estimateTokens(act.content)) + ' Token</span></div><div class="rb-prev">' + host.esc(act.content.slice(0, 120)) + '</div>' +
-        '<div class="rb-fp">' + fmtTime(act.at) + ' · 覆盖 ' + act.coveredIds.length + ' 条 · 指纹 ' + act.hash.slice(0, 12) + '… · 点击查看 / 编辑</div></button>';
-      if (st.summaries.length > 1) {
-        html += '<div class="group-title">历史版本</div><div class="group" id="rp-sum-hist"></div>';
-      }
+      html += '<div class="btn-row"><button class="pill-btn primary" id="rp-sum-now"' + (this.panel.busy ? ' disabled' : '') + '>立即追加章节</button>' +
+        (chs.length > 1 ? '<button class="pill-btn" id="rp-sum-merge"' + (this.panel.busy ? ' disabled' : '') + '>合并全部章节</button>' : '') + '</div>';
+      html += '<div class="group-title">当前发送的章节（按顺序）</div>';
+      if (!chs.length) html += '<div class="group"><div class="conv-empty">还没有章节</div></div>';
+      chs.forEach(c => {
+        html += '<button class="rp-block rp-chapter" data-no="' + c.no + '"><div class="rb-top"><span class="rb-title">章节 ' + R.slabel(c.no) + '</span><span class="rb-tag t-memory">' + (SRC[c.source] || c.source) + '</span>' +
+          '<span class="rb-ver">' + fmtN(R.estimateTokens(c.content)) + ' Token</span></div><div class="rb-prev">' + host.esc(c.content.slice(0, 120)) + '</div>' +
+          '<div class="rb-fp">' + fmtTime(c.editedAt || c.at) + ' · 覆盖 ' + c.coveredIds.length + ' 条' + (c.mergedFrom ? ' · 合并自 ' + c.mergedFrom.map(R.slabel).join('、') : '') + ' · 指纹 ' + c.hash.slice(0, 12) + '… · 点击查看 / 编辑</div></button>';
+      });
+      if (chs.length) html += '<button class="ghost-btn danger" id="rp-sum-undo">撤销最后一章</button>';
+      if ((st.archive || []).length) html += '<div class="group-title">存档（被合并 / 撤销的章节，只读）</div><div class="group" id="rp-sum-arch"></div>';
       body.innerHTML = html;
-      body.querySelector('#rp-sum-now').onclick = () => this.manualSummary(conv, host);
-      const cur = body.querySelector('#rp-sum-cur'); if (cur) cur.onclick = () => { this.panel.view = box => this._summaryView(box, conv, host); this._render(); };
-      const hl = body.querySelector('#rp-sum-hist');
-      if (hl) st.summaries.slice(0, -1).reverse().forEach(s => {
+      body.querySelector('#rp-sum-now').onclick = () => this.manualSummary(conv, host, false);
+      const mg = body.querySelector('#rp-sum-merge'); if (mg) mg.onclick = () => this.manualSummary(conv, host, true);
+      body.querySelectorAll('.rp-chapter').forEach(el => el.onclick = () => { const no = +el.dataset.no; this.panel.view = box => this._summaryView(box, conv, host, no); this._render(); });
+      const undo = body.querySelector('#rp-sum-undo');
+      if (undo) undo.onclick = async () => {
+        const last = chs[chs.length - 1];
+        const ok = await host.dialog({ title: '撤销章节 ' + R.slabel(last.no) + '？', body: (last.mergedFrom ? '会恢复被合并的原章节。' : '它覆盖的 ' + last.coveredIds.length + ' 条消息会重新以原文发送。') + '章节内容保存在存档里。', okText: '撤销', danger: true });
+        if (!ok) return;
+        const r = R.removeLastChapter(d.state, Date.now());
+        d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh(); host.toast('已撤销章节 ' + R.slabel(last.no)); this._render();
+      };
+      const ar = body.querySelector('#rp-sum-arch');
+      if (ar) st.archive.slice().reverse().forEach(a => {
         const el = document.createElement('div'); el.className = 'prov-item hist-row';
-        el.innerHTML = '<span class="rb-ver">' + R.slabel(s.no) + '</span><div class="pi-main"><div class="pi-name">' + host.esc(s.content.slice(0, 40)) + '</div><div class="pi-sub">' +
-          (SRC[s.source] || s.source) + ' · ' + fmtTime(s.at) + ' · 覆盖 ' + s.coveredIds.length + ' 条</div></div><button class="chip-btn accent">回滚</button>';
-        el.onclick = e => { if (e.target.tagName === 'BUTTON') return; host.dialog({ title: '摘要 ' + R.slabel(s.no), body: s.content, okText: '关闭', info: true }); };
-        el.querySelector('button').onclick = async () => {
-          const ok = await host.dialog({ title: '回滚到 ' + R.slabel(s.no) + '？', body: '会以 ' + R.slabel(s.no) + ' 的内容与覆盖范围生成新快照 ' + R.slabel(st.summaries.length + 1) + '。' +
-            (s.coveredIds.length < act.coveredIds.length ? '之后被摘要的 ' + (act.coveredIds.length - s.coveredIds.length) + ' 条消息会重新发送原文。' : ''), okText: '回滚' });
-          if (!ok) return;
-          const r = R.rollbackSummary(d.state, s.no, Date.now());
-          d.state = r.state; host.saveConv(conv); host.refresh(); host.toast('已回滚，当前为 ' + R.slabel(R.activeSummary(d.state).no)); this._render();
-        };
-        hl.appendChild(el);
+        el.innerHTML = '<span class="rb-ver">' + R.slabel(a.no) + '</span><div class="pi-main"><div class="pi-name">' + host.esc(a.content.slice(0, 40)) + '</div><div class="pi-sub">' +
+          (a.archivedWhy === 'merge' ? '已合并' : '已撤销') + ' · ' + fmtTime(a.archivedAt) + ' · 覆盖 ' + a.coveredIds.length + ' 条</div></div>';
+        el.onclick = () => host.dialog({ title: '章节 ' + R.slabel(a.no) + '（存档）', body: a.content, okText: '关闭', info: true });
+        ar.appendChild(el);
       });
     },
-    async manualSummary(conv, host) {
-      const p = planConv(conv);
-      if (!p.batch.length) { host.toast('最近不足 ' + p.st.settings.summary.keep_recent_turns + ' 轮，没有可摘要的旧对话（可在「预算设置」调小保留轮数）'); return; }
-      const ok = await host.dialog({ title: '生成章节摘要？', body: '将把 ' + p.batch.length + ' 条较早的消息（' + p.batchRounds + ' 轮）与上一版摘要交给 ' + (p.st.settings.summary_model || conv.model) +
-        ' 合并成新的章节摘要（一次额外的模型调用）。生成后可查看、编辑或回滚；原始消息不会删除。', okText: '生成' });
+    async manualSummary(conv, host, merge) {
+      const p = planConv(conv, host);
+      if (!merge && !p.batch.length) { host.toast('最近不足 ' + p.st.settings.summary.keep_recent_turns + ' 轮，没有可摘要的旧对话（可在「预算设置」调小保留轮数）'); return; }
+      const est = R.summaryCost(p, Object.assign(costOpts(host, conv), { merge: !!merge }));
+      const model = p.st.settings.summary_model || conv.model;
+      const ok = await host.dialog({ title: merge ? '合并全部章节？' : '追加新章节？',
+        body: (merge ? '将把 ' + R.chaptersOf(p.st).length + ' 个章节' + (p.batch.length ? '和 ' + p.batch.length + ' 条较早的消息' : '') + '交给 ' + model + ' 合并成一章。合并后章节之后的缓存会重建一次。'
+          : '将把 ' + p.batch.length + ' 条较早的消息（' + p.batchRounds + ' 轮）交给 ' + model + ' 写成新的一章，之前的章节保持不变。') +
+          '\n\n预计额外花费' + costText(est) + '（一次额外的模型调用 + 缓存重建）。原始消息不会删除。', okText: merge ? '合并' : '生成' });
       if (!ok) return;
-      this.panel.busy = '正在生成章节摘要…'; this.panel.tab = 'summary'; this.panel.view = null; this._render();
+      this.panel.busy = merge ? '正在合并章节…' : '正在生成章节…'; this.panel.tab = 'summary'; this.panel.view = null; this._render();
       try {
-        const r = await makeSummary(host, conv, p, 'manual');
-        data(conv).state = r.state; host.saveConv(conv); host.refresh();
-        host.toast('已生成章节摘要 ' + R.slabel(r.no) + (r.missing.length ? '（缺少 ' + r.missing.join('/') + '，可手动补充）' : ''));
+        const r = await makeSummary(host, conv, p, 'manual', null, !!merge);
+        const d = data(conv); d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh();
+        host.toast((r.merged ? '已合并为章节 ' : '已追加章节 ') + R.slabel(r.no) + (r.missing.length ? '（缺少 ' + r.missing.join('/') + '，可手动补充）' : ''));
         this.panel.busy = null;
-        this.panel.view = box => this._summaryView(box, conv, host);
+        this.panel.view = box => this._summaryView(box, conv, host, r.no);
       } catch (e) {
         this.panel.busy = null;
         host.dialog({ title: '摘要生成失败', body: String(e && e.message || e), okText: '知道了', info: true });
       }
       if (host.conv() === conv) this._render();
     },
-    _summaryView(box, conv, host) {
-      const d = data(conv); const act = R.activeSummary(d.state);
+    _summaryView(box, conv, host, no) {
+      const d = data(conv); const chs = R.chaptersOf(d.state);
+      const act = chs.find(c => c.no === no) || chs[chs.length - 1];
       if (!act) { this.panel.view = null; this._render(); return; }
-      box.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="sv-back">‹ 返回</button><span class="rb-title">L3 · 摘要 ' + R.slabel(act.no) + '</span><span class="rb-tag t-memory">' + (SRC[act.source] || act.source) + '</span></div>' +
-        '<div class="hint">按「知识边界」格式保存。请检查角色是否「知道了不该知道的事」。修改后保存为新快照 ' + R.slabel(d.state.summaries.length + 1) + '。</div>' +
+      const idx = chs.indexOf(act); const after = chs.length - idx - 1;
+      box.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="sv-back">‹ 返回</button><span class="rb-title">L3 · 章节 ' + R.slabel(act.no) + '</span><span class="rb-tag t-memory">' + (SRC[act.source] || act.source) + '</span></div>' +
+        '<div class="hint">按「知识边界」格式保存。请检查角色是否「知道了不该知道的事」。修改这一章会让它' + (after ? '及之后 ' + after + ' 章' : '') + '和对话历史的缓存重建一次。</div>' +
         '<div class="sum-legend" id="sv-legend"><div class="sl-t">段落标题对照（标题保持英文发送给模型，请勿翻译）</div>' + R.SUMMARY_SECTIONS.map(k => '<span class="sl-item"><code>' + k + '</code>' + R.SUMMARY_SECTION_CN[k] + '</span>').join('') + '</div>' +
         '<div class="group form"><textarea id="sv-text" rows="16"></textarea><div class="rb-meta" id="sv-meta"></div>' +
         '<div class="btn-row"><button class="pill-btn" id="sv-cancel">关闭</button><button class="pill-btn primary" id="sv-save">保存修改</button></div></div>' +
-        '<div class="hint small">覆盖 ' + act.coveredIds.length + ' 条消息 · ' + fmtTime(act.at) + (act.basedOn ? ' · 基于 ' + R.slabel(act.basedOn) : '') + '</div>';
+        '<div class="hint small">覆盖 ' + act.coveredIds.length + ' 条消息 · ' + fmtTime(act.at) + (act.mergedFrom ? ' · 合并自 ' + act.mergedFrom.map(R.slabel).join('、') : '') + '</div>' +
+        ((act.history || []).length ? '<div class="group-title">这一章的历史版本</div><div class="group" id="sv-hist"></div>' : '');
       const ta = box.querySelector('#sv-text'); ta.value = act.content;
       const meta = () => { const c = R.canonicalize(ta.value); box.querySelector('#sv-meta').textContent = c.length + ' 字 · 约 ' + R.estimateTokens(c) + ' Token' + (c === act.content ? ' · 未修改' : ' · 已修改'); };
       ta.addEventListener('input', meta); meta();
-      if (host.expandTextarea) host.expandTextarea(ta, 'L3 · 摘要 ' + R.slabel(act.no), '全屏编辑完成后回到这里，点「保存修改」生成新快照。段落标题：' + R.SUMMARY_SECTIONS.map(k => k + '=' + R.SUMMARY_SECTION_CN[k]).join('，') + '（标题保持英文）。');
+      if (host.expandTextarea) host.expandTextarea(ta, 'L3 · 章节 ' + R.slabel(act.no), '全屏编辑完成后回到这里，点「保存修改」。段落标题：' + R.SUMMARY_SECTIONS.map(k => k + '=' + R.SUMMARY_SECTION_CN[k]).join('，') + '（标题保持英文）。');
       const back = () => { this.panel.view = null; this._render(); };
       box.querySelector('#sv-back').onclick = back; box.querySelector('#sv-cancel').onclick = back;
-      box.querySelector('#sv-save').onclick = () => {
-        if (!R.canonicalize(ta.value)) { host.toast('摘要不能为空'); return; }
-        const r = R.editSummary(d.state, ta.value, Date.now());
-        if (!r.changed) { host.toast('内容没有变化'); back(); return; }
-        d.state = r.state; host.saveConv(conv); host.refresh(); host.toast('已保存为 ' + R.slabel(R.activeSummary(d.state).no)); back();
+      const saveText = text => {
+        const r = R.editChapter(d.state, act.no, text, Date.now());
+        if (!r.changed) { host.toast('内容没有变化'); return false; }
+        d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh(); host.toast('章节 ' + R.slabel(act.no) + ' 已保存'); return true;
       };
+      box.querySelector('#sv-save').onclick = () => {
+        if (!R.canonicalize(ta.value)) { host.toast('章节不能为空'); return; }
+        saveText(ta.value); back();
+      };
+      const hl = box.querySelector('#sv-hist');
+      if (hl) act.history.slice().reverse().forEach(h => {
+        const el = document.createElement('div'); el.className = 'prov-item hist-row';
+        el.innerHTML = '<div class="pi-main"><div class="pi-name">' + host.esc(h.content.slice(0, 40)) + '</div><div class="pi-sub">' + (SRC[h.source] || h.source || '') + ' · ' + fmtTime(h.at) + '</div></div><button class="chip-btn accent">恢复</button>';
+        el.querySelector('button').onclick = async () => {
+          const ok = await host.dialog({ title: '恢复这个版本？', body: '当前内容会保存在历史版本里。', okText: '恢复' });
+          if (ok && saveText(h.content)) back();
+        };
+        hl.appendChild(el);
+      });
     },
 
     // ----- 缓存监控（第 22 / 24 / 39 节） -----
     _monitor(body, conv, host) {
       const c = cfg(host);
       const logs = loadLogs(host, conv);
-      const s = R.stats(logs, c.prices, c.priceMode);
+      const s = R.stats(logs, c.prices, c.priceMode, undefined, c.peak);
       const an = R.detectAnomaly(logs);
       const last = s.last;
       const kv = (k, v, cls) => '<div class="kv' + (cls ? ' ' + cls : '') + '"><span>' + k + '</span><b>' + v + '</b></div>';
@@ -423,7 +558,7 @@
           : '<div class="muted" style="padding:8px 0">该服务商没有返回缓存命中数据（不支持统计）。目前 DeepSeek、OpenAI、Claude 会返回缓存命中数据。</div>';
         html += '<div class="diag">' + R.LAYERS.map(k => { const v = (last.diag || {})[k] || '—'; return '<div class="dg-row" title="' + R.LAYER_EN[k] + ' ' + v + '"><span>' + R.LAYER_TITLES[k] + '</span><b class="dg-' + v.toLowerCase() + '">' + R.diagLabel(v) + '</b></div>'; }).join('') + '</div>';
         html += '<div class="dg-reason"><span>原因：</span>' + (last.reasons || [last.reason]).map(r => host.esc(r)).join('；') + '</div>';
-        html += kv('是否发生摘要', last.summary_happened ? '是 · ' + R.slabel(last.summary_no) : last.summary_error ? '失败：' + host.esc(last.summary_error.slice(0, 30)) : '否') +
+        html += kv('是否发生摘要', last.summary_happened ? (last.summary_merged ? '合并 · ' : '追加 · ') + R.slabel(last.summary_no) + (last.summary_cost ? '（估算额外 ' + costText(last.summary_cost) + '）' : '') : last.summary_error ? '失败：' + host.esc(last.summary_error.slice(0, 30)) : '否') +
           kv('是否超预算', last.over_budget ? '是' : '否', last.over_budget ? 'bad' : '') +
           kv('输入 Token', num(last.prompt_tokens)) + (last.supported ? kv('缓存命中', num(last.cache_hit_tokens), 'ok') + kv('未命中', num(last.cache_miss_tokens), 'bad') : '') +
           kv('输出 Token', num(last.completion_tokens));
@@ -467,8 +602,14 @@
         n('rp-trigger', '触发摘要的历史长度', s.summary.trigger_tokens, 1000, '未摘要的对话历史超过这么多 Token 时，生成下一版章节摘要') +
         n('rp-minnew', '至少新增轮数', s.summary.min_new_turns, 1, '除保留的最近几轮外，至少还要有这么多轮旧对话才会摘要，避免频繁摘要') +
         n('rp-keep', '保留最近轮数', s.summary.keep_recent_turns, 1, '最近这几轮始终发送原文，不写进摘要') +
+        n('rp-mingap', '摘要最小间隔（轮）', s.summary.min_interval_turns, 1, '距上一章不足这么多轮时，即使达到阈值也先不摘要（超预算除外）') +
+        n('rp-cap', '章节合计上限', s.summary.chapter_cap_tokens, 1000, '全部章节超过这么多 Token 时，下一次摘要改为合并全部章节（缓存重建一次）') +
         '<label class="field"><span>摘要所用模型<small>留空 = 与对话相同；可以填更便宜的模型</small></span><input id="rp-summodel" type="text" placeholder="例如 deepseek-flash" value="' + host.esc(s.summary_model || '') + '"></label>' +
         '<div class="hint small" style="margin:0">超出上下文上限时会立即摘要，不受以上条件限制。</div></div>' +
+        '<div class="group-title">冻结与估算</div><div class="group form">' +
+        '<label class="field inline"><span>重新生成时刷新冻结的用户消息<small>默认关闭：重新生成最后一条回复时沿用首次发送的原文（含当时的联网 / 文件内容），保持缓存</small></span><input type="checkbox" class="switch" id="rp-refresh"' + (s.refresh_on_regen ? ' checked' : '') + '></label>' +
+        '<div class="kv"><span>Token 估算校准系数</span><b>× ' + (d.state.calib || 1).toFixed(2) + (d.state.calibN ? '（已按 ' + d.state.calibN + ' 次真实用量校准）' : '（尚未校准）') + '</b></div>' +
+        '<button class="chip-btn" id="rp-calib-reset" type="button">重置校准</button></div>' +
         '<div class="group-title">调试</div><div class="group form">' +
         '<label class="field inline"><span>保存完整提示词<small>默认关闭：日志只保存 Token 统计、指纹、时间、模型和请求编号</small></span><input type="checkbox" class="switch" id="rp-saveprompt"' + (s.save_prompt ? ' checked' : '') + '></label></div>' +
         '<button class="ghost-btn" id="rp-reset-win">重置截断起点</button><div class="hint small">截断起点：摘要关闭且超出预算时，从哪条消息开始发送历史。重置后会重新计算。</div>';
@@ -476,7 +617,9 @@
         const s = data(conv).state.settings;
         const g = (id, min, def) => { const v = parseInt(body.querySelector(id).value, 10); return isNaN(v) ? def : Math.max(min, v); };
         s.max_context = g('#rp-maxctx', 4000, 100000); s.output_reserve = g('#rp-reserve', 0, 12000); s.safety_margin = g('#rp-margin', 0, 2000);
-        s.summary = { enabled: body.querySelector('#rp-sum-on').checked, trigger_tokens: g('#rp-trigger', 1000, 30000), min_new_turns: g('#rp-minnew', 1, 15), keep_recent_turns: g('#rp-keep', 1, 20) };
+        s.summary = { enabled: body.querySelector('#rp-sum-on').checked, trigger_tokens: g('#rp-trigger', 1000, 30000), min_new_turns: g('#rp-minnew', 1, 15), keep_recent_turns: g('#rp-keep', 1, 20),
+          min_interval_turns: g('#rp-mingap', 0, 10), chapter_cap_tokens: g('#rp-cap', 1000, 12000) };
+        s.refresh_on_regen = body.querySelector('#rp-refresh').checked;
         s.summary_model = body.querySelector('#rp-summodel').value.trim();
         host.saveConv(conv); host.refresh();
       };
@@ -489,10 +632,11 @@
         data(conv).state.settings.save_prompt = e.target.checked; host.saveConv(conv);
         host.toast(e.target.checked ? '已开启完整提示词日志' : '已关闭完整提示词日志');
       };
+      body.querySelector('#rp-calib-reset').onclick = () => { const d2 = data(conv); d2.state = Object.assign({}, d2.state, { calib: 1, calibN: 0 }); normalized.add(d2.state); host.saveConv(conv); host.toast('已重置校准系数'); this._render(); };
       body.querySelector('#rp-reset-win').onclick = () => { data(conv).state.window = { startId: null, startOrdinal: 0 }; host.saveConv(conv); host.refresh(); host.toast('已重置截断起点'); };
     },
   });
-  plugin._internals = { toItems, makeSummary, planConv, loadLogs };
+  plugin._internals = { toItems, makeSummary, planConv, loadLogs, applicability, convItems };
 
   // 第二个内置插件：Token 用量显示（演示通用钩子；对所有对话生效，可在对话中关闭）
   reg.register({

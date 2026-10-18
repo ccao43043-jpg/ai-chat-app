@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.3.6';
+  const APP_VERSION = '0.4.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2059,6 +2059,10 @@
     refresh: () => { if (conv) { renderHeader(); renderMessages(); } },
     openPanel: (id, tab) => openPluginPanel(id, tab),
     expandTextarea: (ta, title, hint) => expandTextarea(ta, title, hint ? () => hint : null),
+    /** 对话所用的服务商（插件判断适用性） */
+    provider: c => getProvider((c || conv).providerId) || null,
+    /** 与发送时相同的消息展开（文件内容等；不含本轮联网搜索），供插件界面估算与实际发送对齐 */
+    requestItems: c => (c || conv).messages.filter(m => !m.error && !m.imageGen && !m.pending).map(m => Object.assign(toRequestMsg(m, false), { _src: m })),
     /** 用当前对话的模型做一次非流式调用，返回文本 */
     async callModel(prompt, o) {
       o = o || {};

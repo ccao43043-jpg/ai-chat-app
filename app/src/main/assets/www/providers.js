@@ -156,6 +156,17 @@
         }),
       };
       if (sys) body.system = sys;
+      // RP 缓存优化器（强制启用于 Claude 时）：system 与「稳定历史末尾」加 cache_control 断点（最多 2 个，Anthropic 上限 4 个）
+      if (opts.cacheControl) {
+        const cc = { type: 'ephemeral' };
+        if (sys) body.system = [{ type: 'text', text: sys, cache_control: cc }];
+        msgs.forEach((m, i) => {
+          if (!m._cache) return;
+          const bm = body.messages[i];
+          if (typeof bm.content === 'string') bm.content = [{ type: 'text', text: bm.content, cache_control: cc }];
+          else if (bm.content.length) bm.content[bm.content.length - 1] = Object.assign({}, bm.content[bm.content.length - 1], { cache_control: cc });
+        });
+      }
       if (temp !== undefined) body.temperature = temp;
       return {
         url: base + '/v1/messages', method: 'POST',

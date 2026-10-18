@@ -1,7 +1,10 @@
-/* DeepSeek RP 缓存优化器 V1 —— Context Builder 核心逻辑（纯函数，可在 Node 中测试）
- * 设计文档：docs/plugins/deepseek-rp-cache-design-v1.md；实现说明：docs/plugins/README.md
+/* DeepSeek RP 缓存优化器 V2 —— Context Builder 核心逻辑（纯函数，可在 Node 中测试）
+ * 设计文档：docs/plugins/deepseek-rp-cache-design-v1.md（V1）+ docs/plugins/README.md「V2 变更」；
  * 核心：能不动就不动，能追加就不重写，能摘要就不盲删，能把动态内容放后面就绝不放前面。
- * 六层顺序：L1 永久锚点 → L2 长期记忆 → L3 冻结章节摘要 → L4 最近完整对话 → L5 当前动态状态 → L6 当前用户输入
+ * 请求顺序：system = L1 永久锚点 → L2 长期记忆（稳定事实）→ L3 冻结章节 #001、#002…（只追加）
+ *           messages = L4 最近完整对话（原样追加）→ 最后一条用户消息 = L6 本轮输入 + 记忆增量 + L5 当前状态
+ * V2：章节只追加（超过上限才合并一次）、记忆增量放在尾部、摘要最小间隔、按实际用量校准 Token 估算、
+ *     服务商适用性判断（默认只对 DeepSeek 生效）、价格 / 高峰时段可配置。
  */
 (function (root) {
   'use strict';
@@ -19,37 +22,45 @@
   const BLOCK_DEFS = STATIC_DEFS.map(d => Object.assign({ layer: 'L1', type: 'static', cache_priority: 'high' }, d)).concat([
     { id: 'memory', tag: 'LONG_TERM_MEMORY', title: '长期记忆', layer: 'L2', type: 'memory', cache_priority: 'medium',
       hint: '已确认的重要事实、人物关系、重大事件、长期目标、关键道具、已揭开的秘密、未解决的剧情线。只在发生重要事件时手动更新。' },
+    { id: 'delta', tag: 'MEMORY_UPDATE', title: '记忆增量', layer: 'L4+', type: 'delta', cache_priority: 'low',
+      hint: '新近确认、还没合并进长期记忆的事实。放在对话历史之后（最后一条用户消息里），随时修改都不会破坏前面的缓存；攒多了再「合并进长期记忆」。' },
     { id: 'state', tag: 'CURRENT_STATE', title: '当前动态状态', layer: 'L5', type: 'dynamic', cache_priority: 'low',
-      hint: 'HP / MP / 金钱 / 时间 / 地点 / 好感度 / 天气 / 任务 / 装备 / 增益效果。放在本轮输入之前，随时修改都不会破坏历史缓存。' },
+      hint: 'HP / MP / 金钱 / 时间 / 地点 / 好感度 / 天气 / 任务 / 装备 / 增益效果。放在最后一条用户消息末尾，随时修改都不会破坏历史缓存。' },
   ]);
   const BLOCK_TITLES = Object.fromEntries(BLOCK_DEFS.map(d => [d.id, d.title]));
-  const LAYERS = ['static', 'memory', 'summary', 'history', 'state', 'input'];
+  const LAYERS = ['static', 'memory', 'summary', 'history', 'delta', 'state', 'input'];
   // 界面显示用（v0.3.3 起为中文）；日志 / 诊断里保存的仍是英文键名与 SAME / APPEND / CHANGED
-  const LAYER_TITLES = { static: '固定设定', memory: '长期记忆', summary: '章节摘要', history: '对话历史', state: '当前状态', input: '本轮输入' };
-  const LAYER_EN = { static: 'Static', memory: 'Memory', summary: 'Summary', history: 'History', state: 'State', input: 'Input' };
+  const LAYER_TITLES = { static: '固定设定', memory: '长期记忆', summary: '章节摘要', history: '对话历史', delta: '记忆增量', state: '当前状态', input: '本轮输入' };
+  const LAYER_EN = { static: 'Static', memory: 'Memory', summary: 'Summary', history: 'History', delta: 'Delta', state: 'State', input: 'Input' };
   const DIAG_LABELS = { SAME: '未变', APPEND: '追加', CHANGED: '已改动', NEW: '首次' };
   const diagLabel = v => DIAG_LABELS[v] || v || '—';
   // 章节摘要各段标题（发送给模型 / 保存的文本保持英文，界面显示中文释义）
   const SUMMARY_SECTION_CN = { FACTS: '已发生的事实', CHARACTER_KNOWLEDGE: '角色知道的', PLAYER_KNOWLEDGE: '玩家知道的', SECRET: '秘密（角色不知道）',
     UNRESOLVED: '未解决的线索', RELATIONSHIPS: '人物关系', OBJECTS: '关键物品', LOCATION: '地点' };
-  const LAYER_CN = { static: '永久锚点', memory: '长期记忆', summary: '章节摘要', history: '最近对话', state: '动态状态', input: '当前输入' };
+  const LAYER_CN = { static: '永久锚点', memory: '长期记忆', summary: '章节摘要', history: '最近对话', delta: '记忆增量', state: '动态状态', input: '当前输入' };
   // 默认工程参数（设计文档第 9、17、26 节）——不是 DeepSeek 官方阈值，可按会话修改
   const DEFAULT_SETTINGS = {
     max_context: 100000, output_reserve: 12000, safety_margin: 2000,
-    summary: { enabled: true, trigger_tokens: 30000, min_new_turns: 15, keep_recent_turns: 20 },
+    summary: { enabled: true, trigger_tokens: 30000, min_new_turns: 15, keep_recent_turns: 20,
+      min_interval_turns: 10,      // V2：距上一章至少这么多轮才会因「达到阈值」再摘要（超预算不受限）
+      chapter_cap_tokens: 12000 }, // V2：全部章节合计超过此值时，下一次摘要改为「合并全部章节」（一次性重建缓存）
     summary_model: '', save_prompt: false,
+    force_enable: false,      // V2：非 DeepSeek 服务商也强制启用（默认不适用，不改写请求）
+    refresh_on_regen: false,  // V2：重新生成最后一条回复时，是否用最新内容（联网搜索 / 文件）刷新冻结的用户消息
   };
+  const DEFAULT_PEAK = { windows: '09:00-12:00,14:00-18:00', tz: 8, weekdays: true, off_factor: 0.5 };
   // DeepSeek 官方价格（美元 / 百万 tokens，高峰时段；非高峰为一半）—— 2026-10 核对 api-docs.deepseek.com/quick_start/pricing
+  // match：模型名包含其中任意一个关键词即使用该价格（逗号分隔，越长越优先）；可在插件设置里修改 / 新增
   const DEFAULT_PRICES = {
-    'deepseek-flash': { hit: 0.006, miss: 0.3, out: 1.2 },
-    'deepseek-v4-pro': { hit: 0.044, miss: 1.32, out: 3.96 },
+    'deepseek-flash': { hit: 0.006, miss: 0.3, out: 1.2, match: 'deepseek' },
+    'deepseek-v4-pro': { hit: 0.044, miss: 1.32, out: 3.96, match: 'deepseek-v4-pro,deepseek-pro' },
   };
   const HISTORY_LIMIT = 30;
   const LOG_LIMIT = 500;
   const pad3 = n => String(n).padStart(3, '0');
   const vlabel = (prefix, n) => prefix + '_v' + pad3(n | 0);
   const slabel = n => '#' + pad3(n | 0);
-  const VER_KIND_CN = { static: '固定设定', memory: '长期记忆', state: '当前状态' };
+  const VER_KIND_CN = { static: '固定设定', memory: '长期记忆', delta: '记忆增量', state: '当前状态' };
   /** 中文版本标签：固定设定 第 2 版 */
   const verLabel = (kind, n) => (VER_KIND_CN[kind] || kind) + ' 第 ' + (n | 0) + ' 版';
 
@@ -109,11 +120,24 @@
     return {
       blocks: BLOCK_DEFS.map(d => ({ id: d.id, version: 0, content: '', history: [], updatedAt: 0 })),
       staticVersion: 0, baseHash: null,
-      summaries: [],                       // 冻结章节摘要快照（只追加），最后一个为当前生效
+      chapters: [],                        // V2：冻结章节（只追加），按顺序全部发送
+      chapterSeq: 0,                       // 章节编号计数（合并后也不复用旧编号）
+      archive: [],                         // 被合并 / 撤销的旧章节（只读存档）
+      lastSummaryRound: 0,                 // 上一次生成章节时的对话轮数（最小间隔用）
+      calib: 1,                            // Token 估算校准系数（按服务商返回的真实输入 Token 自动调整）
       window: { startId: null, startOrdinal: 0 }, // 仅在超预算且无法摘要时使用的「分块截断」起点
       settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
       seq: 0,
     };
+  }
+  /** v0.3.x 的单份合并摘要 → V2 章节 #001（覆盖范围不变，内容逐字保留） */
+  function migrateSummaries(summaries) {
+    if (!Array.isArray(summaries) || !summaries.length) return null;
+    const act = summaries[summaries.length - 1];
+    if (!act || !act.content) return null;
+    const content = canonicalize(act.content);
+    return [{ no: 1, content, hash: sha256(content), coveredIds: (act.coveredIds || []).slice(), at: act.at || 0, source: 'migrated', rounds: act.rounds | 0,
+      atRound: 0, history: [], migratedFrom: act.no | 0 }];
   }
   function normalizeState(st) {
     const base = newState();
@@ -125,8 +149,14 @@
     });
     const ss = st.settings || {};
     const settings = Object.assign({}, DEFAULT_SETTINGS, ss, { summary: Object.assign({}, DEFAULT_SETTINGS.summary, ss.summary || {}) });
+    let chapters = Array.isArray(st.chapters) ? st.chapters : null;
+    let chapterSeq = st.chapterSeq | 0;
+    if (!chapters) { chapters = migrateSummaries(st.summaries) || []; chapterSeq = Math.max(chapterSeq, chapters.length); }
+    const calib = typeof st.calib === 'number' && st.calib >= 0.5 && st.calib <= 2.5 ? st.calib : 1;
     return Object.assign({}, st, { blocks, settings, staticVersion: st.staticVersion | 0, baseHash: st.baseHash == null ? null : st.baseHash,
-      summaries: Array.isArray(st.summaries) ? st.summaries : [], window: Object.assign({ startId: null, startOrdinal: 0 }, st.window || {}), seq: st.seq | 0 });
+      summaries: Array.isArray(st.summaries) ? st.summaries : [], chapters, chapterSeq: Math.max(chapterSeq, chapters.reduce((n, c) => Math.max(n, c.no | 0), 0)),
+      archive: Array.isArray(st.archive) ? st.archive : [], lastSummaryRound: st.lastSummaryRound | 0, calib,
+      window: Object.assign({ startId: null, startOrdinal: 0 }, st.window || {}), seq: st.seq | 0 });
   }
   const getBlock = (st, id) => st.blocks.find(b => b.id === id);
   const defOf = id => BLOCK_DEFS.find(d => d.id === id);
@@ -184,25 +214,66 @@
   const STATIC_CAUSE = c => !c ? null : c.kind === 'template' ? '切换了提示词模板「' + c.name + '」，L1 固定前缀改变'
     : c.kind === 'clear' ? '清空了提示词模板，L1 固定前缀改变' : '手动修改了对话系统提示词，L1 固定前缀改变';
 
-  // ---------------- 章节摘要快照（冻结，只追加；编辑/回滚也生成新快照） ----------------
-  const activeSummary = st => { const s = st.summaries || []; return s.length ? s[s.length - 1] : null; };
+  // ---------------- 章节（V2：冻结、只追加；超过上限才合并一次） ----------------
+  const ARCHIVE_LIMIT = 50;
+  const chaptersOf = st => (st && st.chapters) || [];
+  /** 当前最后一章（兼容旧接口名） */
+  const activeSummary = st => { const c = chaptersOf(st); return c.length ? c[c.length - 1] : null; };
+  /** 已写入章节（不再发送原文）的全部消息 id */
+  function coveredIds(st) { const out = []; chaptersOf(st).forEach(c => (c.coveredIds || []).forEach(id => out.push(id))); return out; }
+  function mkChapter(st, o) {
+    const no = (st.chapterSeq | 0) + 1;
+    const content = canonicalize(o.content);
+    return { no, content, hash: sha256(content), coveredIds: (o.coveredIds || []).slice(), at: o.at || 0, source: o.source || 'auto', rounds: o.rounds | 0,
+      atRound: o.atRound | 0, history: [], mergedFrom: o.mergedFrom || null };
+  }
+  /** 追加新章节：只覆盖本批新移出的历史；之前的章节逐字不变 → 前缀保持 */
+  function addChapter(st, o) {
+    const ch = mkChapter(st, o);
+    return Object.assign({}, st, { chapters: chaptersOf(st).concat([ch]), chapterSeq: ch.no, lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0,
+      window: { startId: null, startOrdinal: 0 } });
+  }
+  const pushArchive = (st, list, why, at) => (st.archive || []).concat(list.map(c => Object.assign({}, c, { archivedAt: at || 0, archivedWhy: why }))).slice(-ARCHIVE_LIMIT);
+  /** 合并全部章节（+ 可选的新一批历史）为一章：只在章节总量超过上限时使用，会让 L3 之后的缓存重建一次 */
+  function consolidate(st, o) {
+    const old = chaptersOf(st);
+    const ch = mkChapter(st, Object.assign({}, o, { coveredIds: coveredIds(st).concat(o.coveredIds || []), mergedFrom: old.map(c => c.no), source: o.source || 'merge' }));
+    return Object.assign({}, st, { chapters: [ch], chapterSeq: ch.no, archive: pushArchive(st, old, 'merge', o.at),
+      lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0, window: { startId: null, startOrdinal: 0 } });
+  }
+  /** 编辑某一章（会让这一章及之后的缓存重建）；旧内容进入该章的版本历史 */
+  function editChapter(st, no, content, at) {
+    const list = chaptersOf(st); const i = list.findIndex(c => c.no === no);
+    if (i < 0) throw new Error('找不到章节 ' + slabel(no));
+    const c = canonicalize(content);
+    if (!c) throw new Error('章节内容不能为空');
+    if (c === list[i].content) return { state: st, changed: false };
+    const old = list[i];
+    const history = (old.history || []).concat([{ content: old.content, hash: old.hash, at: old.editedAt || old.at || 0, source: old.source }]).slice(-HISTORY_LIMIT);
+    const nc = Object.assign({}, old, { content: c, hash: sha256(c), history, editedAt: at || 0, source: 'edit' });
+    const chapters = list.slice(); chapters[i] = nc;
+    return { state: Object.assign({}, st, { chapters }), changed: true, tailFrom: i };
+  }
+  /** 撤销最后一章：它覆盖的消息重新以原文发送（存档保留） */
+  function removeLastChapter(st, at) {
+    const list = chaptersOf(st); if (!list.length) throw new Error('还没有章节');
+    const last = list[list.length - 1];
+    if (last.mergedFrom && last.mergedFrom.length) {
+      // 合并章：恢复被合并的原章节
+      const restored = (st.archive || []).filter(a => a.archivedWhy === 'merge' && last.mergedFrom.indexOf(a.no) >= 0)
+        .map(a => { const c = Object.assign({}, a); delete c.archivedAt; delete c.archivedWhy; return c; });
+      if (restored.length === last.mergedFrom.length) {
+        const extra = (last.coveredIds || []).filter(id => !restored.some(c => c.coveredIds.indexOf(id) >= 0));
+        return { state: Object.assign({}, st, { chapters: restored, archive: pushArchive(st, [last], 'undo', at), window: { startId: null, startOrdinal: 0 } }), changed: true, reopened: extra.length };
+      }
+    }
+    return { state: Object.assign({}, st, { chapters: list.slice(0, -1), archive: pushArchive(st, [last], 'undo', at), window: { startId: null, startOrdinal: 0 } }),
+      changed: true, reopened: (last.coveredIds || []).length };
+  }
+  // 兼容 v0.3.x 测试 / 调用：addSummary = 追加章节（coveredIds 若包含已覆盖的 id 会自动去重）
   function addSummary(st, o) {
-    const no = (st.summaries || []).length + 1;
-    const snap = { no, content: canonicalize(o.content), coveredIds: (o.coveredIds || []).slice(), at: o.at || 0, source: o.source || 'auto',
-      basedOn: o.basedOn == null ? null : o.basedOn, newMessages: o.newMessages | 0, rounds: o.rounds | 0 };
-    snap.hash = sha256(snap.content);
-    return Object.assign({}, st, { summaries: (st.summaries || []).concat([snap]), window: { startId: null, startOrdinal: 0 } });
-  }
-  function editSummary(st, content, at) {
-    const cur = activeSummary(st); if (!cur) throw new Error('还没有章节摘要');
-    if (canonicalize(content) === cur.content) return { state: st, changed: false };
-    return { state: addSummary(st, { content, coveredIds: cur.coveredIds, at, source: 'edit', basedOn: cur.no }), changed: true };
-  }
-  function rollbackSummary(st, no, at) {
-    const old = (st.summaries || []).find(s => s.no === no); if (!old) throw new Error('找不到摘要 ' + slabel(no));
-    const cur = activeSummary(st);
-    if (cur && cur.no === no) return { state: st, changed: false };
-    return { state: addSummary(st, { content: old.content, coveredIds: old.coveredIds, at, source: 'rollback', basedOn: no }), changed: true };
+    const had = new Set(coveredIds(st));
+    return addChapter(st, Object.assign({}, o, { coveredIds: (o.coveredIds || []).filter(id => !had.has(id)) }));
   }
 
   // ---------------- 序列化（逐字节稳定：同样的内容 → 同样的文本） ----------------
@@ -213,11 +284,22 @@
     return parts.join('\n\n');
   }
   function memoryText(st) { const c = getBlock(st, 'memory').content; return c ? '[LONG_TERM_MEMORY]\n' + c : ''; }
-  function summaryText(st) { const s = activeSummary(st); return s && s.content ? '[CHAPTER_SUMMARY ' + slabel(s.no) + ']\n' + s.content : ''; }
+  const chapterText = c => '[CHAPTER_SUMMARY ' + slabel(c.no) + ']\n' + c.content;
+  /** L3：全部章节按顺序拼接；新章节只在末尾追加，前面的章节逐字不变 */
+  function summaryText(st) { return chaptersOf(st).filter(c => c.content).map(chapterText).join('\n\n'); }
   function stateText(st) { const c = getBlock(st, 'state').content; return c ? '[CURRENT_STATE]\n' + c : ''; }
+  function deltaText(st) { const c = getBlock(st, 'delta').content; return c ? '[MEMORY_UPDATE]\n' + c : ''; }
   function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), memoryText(st), summaryText(st)].filter(Boolean).join('\n\n'); }
-  /** L5 + L6：状态只出现在最后一条用户消息中，不进入历史 */
-  function finalUserContent(st, input) { const s = stateText(st); return s ? s + '\n\n[USER_INPUT]\n' + input : input; }
+  /**
+   * 最后一条用户消息 = 本轮输入 + 记忆增量 + 当前状态（V2：输入在前）。
+   * 这条消息进入历史后只保留输入原文；因为输入在开头，上一轮请求与本轮请求的公共前缀一直延伸到上一轮输入的末尾，
+   * 比 V1（状态在前）多命中「上一轮输入」这一段，而旧的状态 / 增量不会残留在历史里误导模型。
+   */
+  function finalUserContent(st, input) {
+    const tail = [deltaText(st), stateText(st)].filter(Boolean);
+    if (!tail.length) return input;
+    return [input].filter(x => x).concat(tail).join('\n\n');
+  }
   const imgSig = imgs => (imgs || []).map(x => String(x).length + ':' + String(x).slice(-48));
   function serializeHistory(msgs, n) {
     const arr = (n == null ? msgs : msgs.slice(0, n)).map(m => [m.role, m.content || '', imgSig(m.images)]);
@@ -225,10 +307,32 @@
   }
 
   // ---------------- Token 估算 ----------------
+  /**
+   * 本地估算（DeepSeek 官方换算：1 个中文字符 ≈ 0.6 Token，1 个英文字符 ≈ 0.3 Token），V2 细分：
+   * 汉字 / 假名 / 谚文 / 全角 0.6；英文字母 0.3；数字 0.5；ASCII 标点 0.6；空白 0.1；其他（emoji 等）每个码点 1.5。
+   * 再乘以按真实用量自动校准的系数（plan 内部处理）。
+   */
   function estimateTokens(text) {
-    const s = String(text || ''); let cjk = 0;
-    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef)) cjk++; }
-    return Math.ceil(cjk * 0.6 + (s.length - cjk) * 0.3);
+    const s = String(text || ''); let n = 0;
+    for (const ch of s) {
+      const c = ch.codePointAt(0);
+      if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0x20000 && c <= 0x2fa1f)) n += 0.6;
+      else if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) n += 0.3;
+      else if (c >= 48 && c <= 57) n += 0.5;
+      else if (c === 32 || c === 9 || c === 10 || c === 13) n += 0.1;
+      else if (c < 128) n += 0.6;
+      else if (c < 0x3000) n += 0.6; // 拉丁扩展 / 西里尔 / 中文标点前的符号
+      else n += 1.5;
+    }
+    return Math.ceil(n);
+  }
+  /** 用服务商返回的真实输入 Token 校准估算（指数平均，系数限制在 0.5–2.5） */
+  function calibrate(st, rawEstimate, actualPrompt) {
+    if (!(rawEstimate > 200) || !(actualPrompt > 0)) return st;
+    const ratio = Math.min(2.5, Math.max(0.5, actualPrompt / rawEstimate));
+    const prev = typeof st.calib === 'number' ? st.calib : 1;
+    const calib = Math.round((prev * 0.7 + ratio * 0.3) * 1000) / 1000;
+    return Object.assign({}, st, { calib, calibN: (st.calibN | 0) + 1 });
   }
   const estimateItems = items => items.reduce((n, m) => n + estimateTokens(m.content) + 4 + (m.images ? m.images.length * 1000 : 0), 0);
   const roundsOf = items => items.filter(m => m.role === 'user').length;
@@ -242,13 +346,13 @@
 
   /**
    * Context Builder（规划，不调用模型）。items：对话中可发送的消息（按原顺序），最后一条为本轮用户输入。
-   * 返回各层内容、Token 预算、是否需要生成章节摘要。
+   * 返回各层内容、Token 预算（已乘校准系数）、是否需要生成章节 / 合并章节。
    */
   function plan(state, baseSystem, items) {
     const st = normalizeState(state);
     const s = st.settings, sum = s.summary;
-    const act = activeSummary(st);
-    const covered = new Set(act ? act.coveredIds : []);
+    const k = st.calib || 1; const cal = n => Math.round(n * k);
+    const covered = new Set(coveredIds(st));
     const elig = items.filter(m => !covered.has(m.id));
     const last = elig[elig.length - 1];
     const input = last && last.role === 'user' ? last : null;
@@ -261,36 +365,47 @@
     }
     const hist = unsummarized.slice(start);
     const system = buildSystem(st, baseSystem);
-    const tokens = {
+    const raw = {
       static: estimateTokens(staticText(st, baseSystem)), memory: estimateTokens(memoryText(st)), summary: estimateTokens(summaryText(st)),
-      history: estimateItems(hist), state: estimateTokens(stateText(st)), input: input ? estimateItems([input]) + 6 : 0,
+      history: estimateItems(hist), delta: estimateTokens(deltaText(st)), state: estimateTokens(stateText(st)), input: input ? estimateItems([input]) + 6 : 0,
     };
-    tokens.total = LAYERS.reduce((n, k) => n + tokens[k], 0);
+    const tokens = {}; LAYERS.forEach(x => { tokens[x] = cal(raw[x]); });
+    tokens.total = LAYERS.reduce((n, x) => n + tokens[x], 0);
+    tokens.raw_total = LAYERS.reduce((n, x) => n + raw[x], 0);
     const limit = Math.max(1000, s.max_context - s.output_reserve - s.safety_margin);
     const overBudget = tokens.total > limit;
     const batch = oldestBatch(unsummarized, sum.keep_recent_turns);
     const batchRounds = roundsOf(batch);
-    let summaryReason = null;
+    const rounds = roundsOf(items);
+    const sinceLast = st.chapters.length ? rounds - (st.lastSummaryRound | 0) : Infinity;
+    const minGap = Math.max(0, sum.min_interval_turns | 0);
+    let summaryReason = null, summaryBlocked = null;
     if (sum.enabled && batch.length) {
       if (overBudget) summaryReason = 'budget';
-      else if (estimateItems(unsummarized) >= sum.trigger_tokens && batchRounds >= Math.max(1, sum.min_new_turns | 0)) summaryReason = 'trigger';
+      else if (cal(estimateItems(unsummarized)) >= sum.trigger_tokens && batchRounds >= Math.max(1, sum.min_new_turns | 0)) {
+        if (sinceLast < minGap) summaryBlocked = 'interval'; else summaryReason = 'trigger';
+      }
     }
+    const chapterTokens = tokens.summary;
+    const cap = Math.max(1000, sum.chapter_cap_tokens | 0 || DEFAULT_SETTINGS.summary.chapter_cap_tokens);
+    const needConsolidate = !!summaryReason && st.chapters.length > 1 && chapterTokens >= cap;
     return { st, system, hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
-      trimmed: start > 0, dropped: start };
+      summaryBlocked, sinceLast, minGap, rounds, chapterTokens, cap, needConsolidate, calib: k, trimmed: start > 0, dropped: start };
   }
   /** 无法摘要（关闭 / 失败 / 无可摘要历史）而仍超预算时：一次性截掉一大块旧历史，起点固定到下次超预算为止 */
   function fallbackTrim(st, p) {
     const keep = Math.max(1, st.settings.summary.keep_recent_turns | 0);
+    const k = p.calib || 1;
     const un = p.unsummarized;
     const users = []; un.forEach((m, i) => { if (m.role === 'user') users.push(i); });
-    let k = Math.max(0, users.length - keep);
+    let j = Math.max(0, users.length - keep);
     const fixed = p.tokens.total - p.tokens.history;
-    while (k < users.length - 1 && fixed + estimateItems(un.slice(users[k])) > p.limit) k++;
-    const startIdx = users.length ? users[k] : 0;
+    while (j < users.length - 1 && fixed + estimateItems(un.slice(users[j])) * k > p.limit) j++;
+    const startIdx = users.length ? users[j] : 0;
     if (!un[startIdx]) return st;
     return Object.assign({}, st, { window: { startId: un[startIdx].id, startOrdinal: startIdx } });
   }
-  /** 组装最终消息：L4 原样追加，L5+L6 合并为最后一条用户消息 */
+  /** 组装最终消息：L4 原样追加，L6 + 增量 + L5 合并为最后一条用户消息 */
   function assemble(p) {
     const messages = p.hist.map(m => { const o = { role: m.role, content: m.content || '' }; if (m.images && m.images.length) o.images = m.images; if (m._src) o._src = m._src; o.id = m.id; return o; });
     if (p.input) {
@@ -302,22 +417,38 @@
     return { system: p.system, messages };
   }
 
+  // ---------------- 服务商适用性（V2） ----------------
+  /** DeepSeek 预设 / DeepSeek 接口地址 / 模型名含 deepseek → 适用 */
+  function isApplicable(provider, model) {
+    const p = provider || {};
+    if (p.presetId === 'deepseek') return true;
+    if (/deepseek/i.test(String(p.baseUrl || ''))) return true;
+    return /deepseek/i.test(String(model || ''));
+  }
+
   // ---------------- 指纹与诊断 ----------------
   function fingerprints(p, baseSystem) {
     const histSer = serializeHistory(p.hist);
     const act = activeSummary(p.st);
     return {
       static_hash: sha256(staticText(p.st, baseSystem)), memory_hash: sha256(memoryText(p.st)), summary_hash: sha256(summaryText(p.st)),
-      history_hash: sha256(histSer), state_hash: sha256(stateText(p.st)), input_hash: sha256(p.input ? JSON.stringify([p.input.content || '', imgSig(p.input.images)]) : ''),
+      history_hash: sha256(histSer), delta_hash: sha256(deltaText(p.st)), state_hash: sha256(stateText(p.st)), input_hash: sha256(p.input ? JSON.stringify([p.input.content || '', imgSig(p.input.images)]) : ''),
       full_prefix_hash: sha256(p.system + '\u0000' + histSer), history_count: p.hist.length,
-      versions: { static: p.st.staticVersion | 0, memory: getBlock(p.st, 'memory').version, summary: act ? act.no : 0, state: getBlock(p.st, 'state').version },
+      chapters: chaptersOf(p.st).map(c => c.no + ':' + c.hash.slice(0, 12)),
+      versions: { static: p.st.staticVersion | 0, memory: getBlock(p.st, 'memory').version, summary: act ? act.no : 0, delta: getBlock(p.st, 'delta').version, state: getBlock(p.st, 'state').version },
     };
   }
   /** 各层与上一次请求相比：SAME / APPEND（仅 history）/ CHANGED；首次为 NEW */
   function diagnose(prev, fp, hist) {
     const out = {};
     if (!prev || !prev.static_hash) { LAYERS.forEach(k => { out[k] = 'NEW'; }); return out; }
-    ['static', 'memory', 'summary', 'state', 'input'].forEach(k => { out[k] = prev[k + '_hash'] === fp[k + '_hash'] ? 'SAME' : 'CHANGED'; });
+    ['static', 'memory', 'summary', 'delta', 'state', 'input'].forEach(k => {
+      const a = prev[k + '_hash'], b = fp[k + '_hash'];
+      out[k] = a === b || (a === undefined && k === 'delta' && b === sha256('')) ? 'SAME' : 'CHANGED';
+    });
+    // V2：章节只追加 → 之前的章节全部不变时为 APPEND
+    if (out.summary === 'CHANGED' && Array.isArray(prev.chapters) && Array.isArray(fp.chapters) && prev.chapters.length && fp.chapters.length > prev.chapters.length &&
+      prev.chapters.every((c, i) => fp.chapters[i] === c)) out.summary = 'APPEND';
     if (prev.history_hash === fp.history_hash) out.history = 'SAME';
     else if (fp.history_count > (prev.history_count | 0) && sha256(serializeHistory(hist, prev.history_count | 0)) === prev.history_hash) out.history = 'APPEND';
     else out.history = 'CHANGED';
@@ -327,11 +458,12 @@
   function reasons(entry, prev) {
     const d = entry.diag || {}; const out = [];
     if (!prev) return ['首次请求，缓存尚未建立'];
-    if (entry.summary_happened) out.push(entry.summary_reason === 'budget' ? '超出预算触发摘要（' + slabel(entry.summary_no) + '），前缀从摘要处重新建立'
-      : '历史达到摘要阈值，已生成章节摘要 ' + slabel(entry.summary_no) + '，前缀从摘要处重新建立');
+    if (entry.summary_happened) out.push(entry.summary_merged ? '章节总量超过上限，已合并为 ' + slabel(entry.summary_no) + '，章节及之后的缓存重建一次'
+      : (entry.summary_reason === 'budget' ? '超出预算，追加了章节 ' : '历史达到摘要阈值，追加了章节 ') + slabel(entry.summary_no) + '：之前的章节保持命中，从新章节处重新建立');
     if (d.static === 'CHANGED') out.push(STATIC_CAUSE(entry.static_cause) || '角色卡 / 世界观等永久锚点被修改');
-    if (d.memory === 'CHANGED') out.push('长期记忆已更新');
-    if (d.summary === 'CHANGED' && !entry.summary_happened) out.push('章节摘要刚更新（手动生成、编辑或回滚）');
+    if (d.memory === 'CHANGED') out.push('长期记忆已更新（建议改用「记忆增量」，不破坏前缀）');
+    if (d.summary === 'CHANGED' && !entry.summary_happened) out.push('章节摘要刚更新（编辑、撤销或合并）');
+    if (d.summary === 'APPEND' && !entry.summary_happened) out.push('手动追加了新章节，之前的章节保持命中');
     if (d.history === 'CHANGED' && !entry.summary_happened) out.push(entry.trimmed ? '超出预算，较早历史被一次性截断' : HISTORY_CAUSE(entry.history_cause) || '历史被修改（编辑、删除或重新生成了较早的消息）');
     if (prev && entry.timestamp - prev.timestamp > 3 * 3600e3) out.push('距上次请求超过 ' + Math.floor((entry.timestamp - prev.timestamp) / 3600e3) + ' 小时，服务端缓存可能已清除');
     if (prev && prev.model !== entry.model) out.push('切换了模型（缓存按模型分开）');
@@ -344,21 +476,39 @@
 
   // ---------------- 章节摘要提示词（第 10 节：知识边界） ----------------
   const SUMMARY_SECTIONS = ['FACTS', 'CHARACTER_KNOWLEDGE', 'PLAYER_KNOWLEDGE', 'SECRET', 'UNRESOLVED', 'RELATIONSHIPS', 'OBJECTS', 'LOCATION'];
+  const FORMAT_RULES = '严格按以下格式输出，标题保持英文原样，每项用「- 」开头；某项没有内容写「- 无」：\n\n' +
+    'FACTS:\n- 已确认的事实\n\nCHARACTER_KNOWLEDGE:\n- 角色名：该角色知道什么（每个重要角色一行）\n\nPLAYER_KNOWLEDGE:\n- 玩家知道什么\n\n' +
+    'SECRET:\n- 尚未公开的秘密（注明对谁保密）\n\nUNRESOLVED:\n- 未解决事件\n\nRELATIONSHIPS:\n- 人物关系\n\nOBJECTS:\n- 关键物品及归属\n\nLOCATION:\n- 地点状态\n\n' +
+    '只输出摘要正文，不要任何解释。\n\n';
+  const transcriptOf = batch => (batch || []).map(m => (m.role === 'user' ? '【玩家】' : '【角色】') + String(m.content || '').trim()).join('\n\n');
+  /**
+   * V2 新章节提示词：只总结「本批新移出的旧对话」，前面的章节只读参考、不复述（它们会原样保留并继续发送）。
+   * 兼容 V1 调用：传 prevSummary 时作为只读参考。
+   */
   function buildSummaryPrompt(o) {
-    const transcript = (o.batch || []).map(m => (m.role === 'user' ? '【玩家】' : '【角色】') + String(m.content || '').trim()).join('\n\n');
-    return '你是长篇角色扮演（RP）的「章节摘要记录员」。请把「上一版章节摘要」与「本批旧对话」合并成一份新的章节摘要（它将完整替代上一版），供后续剧情使用。\n\n' +
+    const prev = o.chapters && o.chapters.length ? o.chapters.map(c => '[' + slabel(c.no) + ']\n' + c.content).join('\n\n') : (o.prevSummary || '');
+    return '你是长篇角色扮演（RP）的「章节摘要记录员」。请把「本批旧对话」写成新的一章摘要。之前的章节会原样保留并继续提供给模型，新章节将接在它们之后。\n\n' +
       '硬性要求：\n' +
-      '1. 只记录对话里真实发生、已经确认的内容，不要编造、不要推测剧情走向、不要改写人设。\n' +
+      '1. 只记录本批对话里真实发生、已经确认的内容，不要编造、不要推测剧情走向、不要改写人设。\n' +
       '2. 必须区分「知识边界」：每个角色只知道自己亲眼所见或被告知的事；玩家知道的不等于 NPC 知道的。\n' +
-      '3. 上一版摘要中的信息要完整继承，除非被新剧情明确更新。\n' +
+      '3. 之前章节已经写过的内容不要重复；只有被新剧情改变时才写出新的状态（例如「关系：A 与 B 由敌对转为合作」）。\n' +
       '4. 不要写“他们聊了很多”这类空泛总结，写具体的人、事、物、地点、数字。\n' +
-      '5. 严格按以下格式输出，标题保持英文原样，每项用「- 」开头；某项没有内容写「- 无」：\n\n' +
-      'FACTS:\n- 已确认的事实\n\nCHARACTER_KNOWLEDGE:\n- 角色名：该角色知道什么（每个重要角色一行）\n\nPLAYER_KNOWLEDGE:\n- 玩家知道什么\n\n' +
-      'SECRET:\n- 尚未公开的秘密（注明对谁保密）\n\nUNRESOLVED:\n- 未解决事件\n\nRELATIONSHIPS:\n- 人物关系\n\nOBJECTS:\n- 关键物品及归属\n\nLOCATION:\n- 地点状态\n\n' +
-      '只输出摘要正文，不要任何解释。\n\n' +
+      '5. ' + FORMAT_RULES +
       (o.memory ? '===== 长期记忆（只读参考，不要复述） =====\n' + o.memory + '\n\n' : '') +
-      '===== 上一版章节摘要 =====\n' + (o.prevSummary || '（无）') + '\n\n' +
-      '===== 本批旧对话（按原顺序） =====\n' + transcript;
+      '===== 之前的章节（只读参考，不要复述） =====\n' + (prev || '（无）') + '\n\n' +
+      '===== 本批旧对话（按原顺序） =====\n' + transcriptOf(o.batch);
+  }
+  /** 合并提示词：把全部章节（+ 可选的本批旧对话）压缩成一章，用于章节总量超过上限时 */
+  function buildConsolidatePrompt(o) {
+    const prev = (o.chapters || []).map(c => '[' + slabel(c.no) + ']\n' + c.content).join('\n\n');
+    return '你是长篇角色扮演（RP）的「章节摘要记录员」。之前的章节摘要太长了，请把它们' + (o.batch && o.batch.length ? '和「本批旧对话」' : '') +
+      '合并压缩成一份完整的章节摘要（它将替代全部旧章节）。\n\n' +
+      '硬性要求：\n1. 完整保留仍然有效的事实、知识边界、秘密、未解决线索和关键物品；删除已被后续剧情推翻或已经无关紧要的细节。\n' +
+      '2. 区分「知识边界」：每个角色只知道自己亲眼所见或被告知的事。\n3. 不要编造，不要推测。\n' +
+      '4. ' + FORMAT_RULES +
+      (o.memory ? '===== 长期记忆（只读参考，不要复述） =====\n' + o.memory + '\n\n' : '') +
+      '===== 需要合并的章节（按顺序） =====\n' + (prev || '（无）') +
+      (o.batch && o.batch.length ? '\n\n===== 本批旧对话（按原顺序） =====\n' + transcriptOf(o.batch) : '');
   }
   function parseSummary(text) {
     let t = String(text || '').trim();
@@ -369,21 +519,86 @@
     return { ok: !!t && missing.indexOf('FACTS') < 0 && missing.length <= 4, text: t, missing };
   }
 
-  // ---------------- 价格 ----------------
+  // ---------------- 价格（V2：可配置的匹配规则与高峰时段） ----------------
   function priceFor(model, prices) {
     prices = prices || DEFAULT_PRICES; const m = String(model || '').toLowerCase();
+    let best = null, bestLen = -1;
+    Object.keys(prices).forEach(name => {
+      const p = prices[name]; if (!p) return;
+      const keys = String(p.match != null ? p.match : name).toLowerCase().split(/[,，\s]+/).filter(Boolean);
+      keys.forEach(k => { if (m.includes(k) && k.length > bestLen) { best = p; bestLen = k.length; } });
+    });
+    if (best) return best;
+    // 旧配置（没有 match 字段）：沿用 V1 规则
     if (!m.includes('deepseek')) return null;
-    return m.includes('pro') ? prices['deepseek-v4-pro'] : prices['deepseek-flash'];
+    return m.includes('pro') ? prices['deepseek-v4-pro'] || null : prices['deepseek-flash'] || null;
   }
-  /** 高峰：周一至周五 UTC 01:00–04:00、06:00–10:00（北京 9–12、14–18） */
-  function isPeak(at) { const d = new Date(at); const day = d.getUTCDay(), h = d.getUTCHours(); return day >= 1 && day <= 5 && ((h >= 1 && h < 4) || (h >= 6 && h < 10)); }
-  function costOf(e, prices, mode) {
+  function parseWindows(str) {
+    return String(str || '').split(/[,，;\s]+/).map(x => x.match(/^(\d{1,2}):?(\d{2})?-(\d{1,2}):?(\d{2})?$/)).filter(Boolean)
+      .map(r => [(+r[1]) * 60 + (+(r[2] || 0)), (+r[3]) * 60 + (+(r[4] || 0))]).filter(w => w[0] >= 0 && w[1] <= 1440 && w[0] < w[1]);
+  }
+  /** 高峰：默认周一至周五北京时间 9:00–12:00、14:00–18:00（可配置：时段、时区偏移、是否仅工作日） */
+  function isPeak(at, peak) {
+    const pk = Object.assign({}, DEFAULT_PEAK, peak || {});
+    const d = new Date(at + (Number(pk.tz) || 0) * 3600e3);
+    const day = d.getUTCDay(); const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+    if (pk.weekdays && (day === 0 || day === 6)) return false;
+    return parseWindows(pk.windows).some(w => mins >= w[0] && mins < w[1]);
+  }
+  function peakFactor(at, mode, peak) {
+    const off = Object.assign({}, DEFAULT_PEAK, peak || {}).off_factor;
+    const f = Number(off); const offF = isNaN(f) ? 0.5 : f;
+    return mode === 'peak' ? 1 : mode === 'offpeak' ? offF : (isPeak(at, peak) ? 1 : offF);
+  }
+  function costOf(e, prices, mode, peak) {
     const p = priceFor(e.model, prices);
     if (!p || !e.supported) return null;
-    const f = mode === 'peak' ? 1 : mode === 'offpeak' ? 0.5 : (isPeak(e.timestamp) ? 1 : 0.5);
+    const f = peakFactor(e.timestamp, mode, peak);
     const actual = (e.cache_hit_tokens * p.hit + e.cache_miss_tokens * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
     const noCache = (e.prompt_tokens * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
     return { actual, noCache, saved: noCache - actual };
+  }
+  /**
+   * V2：估算一次自动摘要 / 合并的额外开销（本地估算）。
+   * call：摘要调用本身（输入全部未命中 + 输出）；rebuild：本轮因前缀变化额外未命中的 Token（新章节 + 剩余历史，合并时还包括全部章节）。
+   */
+  function summaryCost(p, o) {
+    o = o || {};
+    const k = p.calib || 1;
+    const batchTok = Math.round(estimateItems(p.batch || []) * k);
+    const out = Math.max(300, Math.min(2000, Math.round(batchTok * 0.15)));
+    const merge = !!(o.merge != null ? o.merge : p.needConsolidate);
+    const memTok = p.tokens ? p.tokens.memory : 0;
+    const callIn = batchTok + memTok + (p.chapterTokens || 0) + 700;
+    const remain = Math.max(0, (p.tokens ? p.tokens.history : 0) - batchTok);
+    const rebuild = out + remain;
+    const r = { merge, callIn, callOut: out, rebuild, chapterTokens: p.chapterTokens || 0, usd: null };
+    const pr = o.model ? priceFor(o.model, o.prices) : null;
+    if (pr) {
+      const f = peakFactor(o.at || Date.now(), o.mode, o.peak);
+      const missOverHit = Math.max(0, pr.miss - pr.hit);
+      // 合并：新章节之后的全部内容都要重建，且原来命中的章节变成未命中
+      const rebuildCost = (rebuild + (merge ? p.chapterTokens || 0 : 0)) * missOverHit;
+      r.usd = (callIn * pr.miss + out * pr.out + rebuildCost) / 1e6 * f;
+    }
+    return r;
+  }
+  /** V2：把记忆增量合并进长期记忆的一次性代价：L2 之后的章节 + 历史全部重建 */
+  function mergeDeltaCost(p, o) {
+    o = o || {};
+    const rebuild = (p.tokens.summary || 0) + (p.tokens.history || 0);
+    const r = { rebuild, usd: null };
+    const pr = o.model ? priceFor(o.model, o.prices) : null;
+    if (pr) r.usd = rebuild * Math.max(0, pr.miss - pr.hit) / 1e6 * peakFactor(o.at || Date.now(), o.mode, o.peak);
+    return r;
+  }
+  /** 合并记忆增量：追加到长期记忆末尾（L2 版本 +1），清空增量 */
+  function mergeDelta(st, at) {
+    const delta = getBlock(st, 'delta').content; if (!delta) return { state: st, changed: false };
+    const mem = getBlock(st, 'memory').content;
+    let r = setBlock(st, 'memory', mem ? mem + '\n' + delta : delta, at);
+    r = setBlock(r.state, 'delta', '', at);
+    return { state: r.state, changed: true };
   }
 
   // ---------------- 指标日志（第 20 节；默认不保存完整 Prompt） ----------------
@@ -393,9 +608,10 @@
     const fp = o.fp || {};
     const e = {
       request_id: o.request_id || '', timestamp: o.at || 0, model: o.model || '', provider: o.provider || '', supported,
-      prompt_tokens: u.prompt || 0, cache_hit_tokens: supported ? u.hit || 0 : 0, cache_miss_tokens: supported ? u.miss || 0 : 0, completion_tokens: u.completion || 0,
+      prompt_tokens: u.prompt || 0, est_tokens: (o.tokens && o.tokens.raw_total) || 0, cache_hit_tokens: supported ? u.hit || 0 : 0, cache_miss_tokens: supported ? u.miss || 0 : 0, completion_tokens: u.completion || 0,
       hit_rate: supported ? (u.hit || 0) / ((u.hit || 0) + (u.miss || 0) || u.prompt) : null,
-      static_hash: fp.static_hash, memory_hash: fp.memory_hash, summary_hash: fp.summary_hash, history_hash: fp.history_hash, state_hash: fp.state_hash,
+      static_hash: fp.static_hash, memory_hash: fp.memory_hash, summary_hash: fp.summary_hash, history_hash: fp.history_hash, delta_hash: fp.delta_hash, state_hash: fp.state_hash,
+      chapters: fp.chapters || [], summary_merged: !!o.summaryMerged, summary_cost: o.summaryCost || null,
       input_hash: fp.input_hash, full_prefix_hash: fp.full_prefix_hash, history_count: fp.history_count | 0, versions: fp.versions || {},
       layer_tokens: o.tokens || {}, diag: o.diag || {}, summary_happened: !!o.summaryNo, summary_no: o.summaryNo || 0, summary_reason: o.summaryReason || null,
       summary_error: o.summaryError || null, static_cause: o.staticCause || null, history_cause: o.historyCause || null, over_budget: !!o.overBudget, trimmed: !!o.trimmed, msg_id: o.msgId || '',
@@ -407,7 +623,7 @@
   }
   function appendLog(logs, e) { const out = (logs || []).concat([e]); while (out.length > LOG_LIMIT) out.shift(); return out; }
   const sameDay = (a, b) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
-  function stats(logs, prices, mode, now) {
+  function stats(logs, prices, mode, now, peak) {
     const all = logs || [];
     const sup = all.filter(e => e.supported);
     const agg = list => {
@@ -418,7 +634,7 @@
     const rates = sup.map(e => e.hit_rate);
     let streak = 0; for (let i = sup.length - 1; i >= 0 && sup[i].cache_hit_tokens > 0; i--) streak++;
     let saved = 0, actual = 0, priced = 0;
-    sup.forEach(e => { const c = costOf(e, prices, mode); if (c) { saved += c.saved; actual += c.actual; priced++; } });
+    sup.forEach(e => { const c = costOf(e, prices, mode, peak); if (c) { saved += c.saved; actual += c.actual; priced++; } });
     const last20 = all.slice(-20).map((e, i, arr) => ({ n: all.length - arr.length + i + 1, rate: e.hit_rate, supported: e.supported, miss: e.cache_miss_tokens, summary: e.summary_happened, reason: e.reason }));
     return {
       requests: all.length, supported: sup.length, today: Object.assign(agg(today.filter(e => e.supported)), { requests: today.length }), total: agg(sup),
@@ -443,20 +659,23 @@
     res.anomaly = avg >= 0.5 && cur.hit_rate < avg - 0.3 && cur.hit_rate < avg * 0.6;
     if (res.anomaly) {
       const map = { static: '固定设定指纹变化：角色卡 / 世界观等永久设定被修改', memory: '长期记忆指纹变化：长期记忆被更新',
-        summary: '章节摘要指纹变化：章节摘要被重新生成 / 修改，导致稳定前缀发生变化', history: '对话历史指纹变化：较早的历史被编辑、删除、截断或摘要',
+        summary: '章节摘要指纹变化：章节被编辑 / 撤销 / 合并，导致稳定前缀发生变化', history: '对话历史指纹变化：较早的历史被编辑、删除、截断或摘要',
+        delta: '记忆增量变化：位于末尾，正常情况下只影响最后一小段',
         state: '当前状态指纹变化：当前状态位于末尾，正常情况下只影响最后一小段' };
-      res.causes = res.changed.filter(k => k !== 'state').map(k => map[k]);
+      res.causes = res.changed.filter(k => k !== 'state' && k !== 'delta').map(k => map[k]);
       (cur.reasons || []).forEach(r => { if (r !== '正常动态更新' && !res.causes.some(c => c.indexOf(r) >= 0)) res.causes.push(r); });
       if (!res.causes.length) res.causes.push('本地上下文没有变化：可能是服务端缓存过期或尚未建立（DeepSeek 缓存为尽力而为，通常数小时到数天清除）');
     }
     return res;
   }
 
-  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, SUMMARY_SECTIONS,
-    canonicalize, sha256, vlabel, slabel, newState, normalizeState, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
-    activeSummary, addSummary, editSummary, rollbackSummary, staticText, memoryText, summaryText, stateText, buildSystem, finalUserContent, serializeHistory,
-    estimateTokens, estimateItems, oldestBatch, plan, fallbackTrim, assemble, fingerprints, diagnose, reasons,
-    buildSummaryPrompt, parseSummary, priceFor, isPeak, costOf, makeLogEntry, appendLog, stats, detectAnomaly };
+  const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS,
+    canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
+    activeSummary, chaptersOf, coveredIds, addChapter, addSummary, consolidate, editChapter, removeLastChapter,
+    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
+    estimateTokens, estimateItems, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
+    buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
+    makeLogEntry, appendLog, stats, detectAnomaly };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);
