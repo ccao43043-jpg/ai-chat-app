@@ -85,7 +85,8 @@
 
   // ---------------- 状态 ----------------
   const presetToProvider = p => ({ id: p.presetId, presetId: p.presetId, name: p.name, type: p.type, baseUrl: p.baseUrl,
-    apiKey: '', models: p.models.slice(), imageModel: p.imageModel || '' });
+    apiKey: '', models: p.models.slice(), imageModel: p.imageModel || '', videoModel: p.videoModel || '',
+    embeddingModel: p.embeddingModel || '', speechModel: p.speechModel || '', transcriptionModel: p.transcriptionModel || '' });
   const defaultSettings = () => ({
     providers: Providers.PRESETS.map(presetToProvider),
     systemPrompt: '', stream: true, temperature: '', maxTokens: '', imageSize: '1024x1024',
@@ -139,6 +140,7 @@
 
   // ---------------- 升级迁移（不改 API Key） ----------------
   (function migrate() {
+    (settings.providers || []).forEach(Providers.normalizeModelFields); // 0.6.3：补齐模型分类字段（缺失 = ''）
     const r = Providers.migrateSettings(settings);
     if (!r.changed) return;
     settings = r.settings;
@@ -1466,7 +1468,7 @@
     });
   }
   $('#btn-add-provider').onclick = () => {
-    openProviderEdit(null, { id: uid(), presetId: 'custom', name: '自定义服务', type: 'openai', baseUrl: 'https://', apiKey: '', models: [], imageModel: '' });
+    openProviderEdit(null, { id: uid(), presetId: 'custom', name: '自定义服务', type: 'openai', baseUrl: 'https://', apiKey: '', models: [], imageModel: '', videoModel: '', embeddingModel: '', speechModel: '', transcriptionModel: '' });
   };
   $('#btn-clear-all').onclick = async () => {
     const ok = await dialog({ title: '删除全部对话？', body: '将删除所有本地对话记录（服务商与 API Key 设置会保留）。', okText: '全部删除', danger: true });
@@ -1735,6 +1737,9 @@
     siliconflow: '余额查询：GET /user/info',
     openrouter: '额度查询：GET /key（账户总余额需管理密钥）',
   };
+  const PE_FIELDS = { imageModel: '#pe-imgmodel', videoModel: '#pe-videomodel', embeddingModel: '#pe-embedmodel',
+    speechModel: '#pe-speechmodel', transcriptionModel: '#pe-sttmodel' };
+  const CAT_FIELD = { image: 'imageModel', video: 'videoModel', embedding: 'embeddingModel', speech: 'speechModel', transcription: 'transcriptionModel' };
   function openProviderEdit(id, fresh) {
     editing = fresh || Object.assign({}, getProvider(id));
     editModels = (editing.models || []).filter(Boolean).slice();
@@ -1743,7 +1748,8 @@
     $('#pe-type').value = editing.type;
     $('#pe-base').value = editing.baseUrl;
     $('#pe-key').value = editing.apiKey || ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
-    $('#pe-imgmodel').value = editing.imageModel || '';
+    Providers.normalizeModelFields(editing);
+    Object.keys(PE_FIELDS).forEach(f => { $(PE_FIELDS[f]).value = editing[f] || ''; });
     $('#pe-streamusage').checked = Providers.streamUsageEnabled(Object.assign({}, editing, { type: 'openai' }));
     $('#pe-su-row').style.display = editing.type === 'openai' ? '' : 'none';
     $('#pe-thinking').value = editing.thinking || '';
@@ -1795,7 +1801,8 @@
     if ($('#pe-model-add').value.trim()) addModels($('#pe-model-add').value.split(/[\n,，]/));
     if (!editModels.length) { toast('请至少添加一个模型'); return; }
     const p = { id: editing.id, presetId: editing.presetId, name: $('#pe-name').value.trim() || '未命名', type: $('#pe-type').value,
-      baseUrl: base, apiKey: $('#pe-key').value.trim(), models: editModels.slice(), imageModel: $('#pe-imgmodel').value.trim() };
+      baseUrl: base, apiKey: $('#pe-key').value.trim(), models: editModels.slice() };
+    Object.keys(PE_FIELDS).forEach(f => { p[f] = $(PE_FIELDS[f]).value.trim(); });
     const th = $('#pe-thinking').value;
     if (th && Providers.isQwenEndpoint(p)) p.thinking = th;
     const meta = {}; p.models.forEach(m => { if (editMeta[m]) meta[m] = editMeta[m]; });
@@ -1817,7 +1824,9 @@
   };
 
   // 从接口获取模型列表
-  let fetched = [], fetchSel = new Set();
+  let fetched = [], fetchSel = new Set(), fetchCat = 'all';
+  const FETCH_CATS = [['all', '全部'], ['text', '文本'], ['image', '图片'], ['video', '视频'], ['embedding', '嵌入'], ['audio', '音频']];
+  const catOf = m => { const c = Providers.classifyModel(m, editMeta[m]); return c === 'speech' || c === 'transcription' ? 'audio' : c; };
   $('#pe-fetch').onclick = async () => {
     const prov = { type: $('#pe-type').value, baseUrl: $('#pe-base').value.trim(), apiKey: $('#pe-key').value.trim() };
     if (!/^https?:\/\/.+/.test(prov.baseUrl)) { toast('请先填写正确的 Base URL'); return; }
@@ -1829,7 +1838,7 @@
       fetched = Providers.parseModelsResponse(prov.type, r.text);
       Object.assign(editMeta, Providers.parseModelsMeta(prov.type, r.text));
       if (!fetched.length) throw new Error('接口没有返回任何模型');
-      fetchSel = new Set();
+      fetchSel = new Set(); fetchCat = 'all';
       $('#fetch-search').value = '';
       renderFetchList();
       $('#fetch-sheet').classList.add('show'); $('#fetch-mask').classList.add('show');
@@ -1840,7 +1849,26 @@
   function renderFetchList() {
     const q = $('#fetch-search').value.trim().toLowerCase();
     const box = $('#fetch-list'); box.innerHTML = '';
-    fetched.filter(m => !q || m.toLowerCase().includes(q)).forEach(m => {
+    const cb = $('#fetch-cats'); cb.innerHTML = '';
+    FETCH_CATS.forEach(([k, label]) => {
+      const n = k === 'all' ? fetched.length : fetched.filter(m => catOf(m) === k).length;
+      if (k !== 'all' && !n) return;
+      const c = document.createElement('span'); c.className = 'mchip' + (fetchCat === k ? ' default' : '');
+      c.innerHTML = '<span class="mc-name">' + label + ' ' + n + '</span>';
+      c.onclick = () => { fetchCat = k; renderFetchList(); };
+      cb.appendChild(c);
+    });
+    $('#fetch-cat-hint').textContent = fetchCat === 'all' || fetchCat === 'text' ? '勾选后添加到文本模型' : '点模型名直接设为对应分类的模型（图片/视频/嵌入/语音）';
+    fetched.filter(m => (!q || m.toLowerCase().includes(q)) && (fetchCat === 'all' || catOf(m) === fetchCat)).forEach(m => {
+      if (fetchCat !== 'all' && fetchCat !== 'text') {
+        let c = Providers.classifyModel(m, editMeta[m]); if (c === 'audio' || c === 'text') c = 'speech';
+        const f = CAT_FIELD[c], cur = $(PE_FIELDS[f]).value.trim() === m;
+        const el = document.createElement('div'); el.className = 'check-item' + (cur ? ' on' : '');
+        el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + '</span><span class="cl-tag">' +
+          esc(Providers.MODEL_CATEGORIES.find(x => x.key === c).label) + '</span>';
+        el.onclick = () => { $(PE_FIELDS[f]).value = m; toast('已设为' + Providers.MODEL_CATEGORIES.find(x => x.key === c).label + '模型，记得保存'); renderFetchList(); };
+        box.appendChild(el); return;
+      }
       const had = editModels.includes(m);
       const el = document.createElement('div'); el.className = 'check-item' + (fetchSel.has(m) || had ? ' on' : '');
       el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + '</span>' + (had ? '<span class="cl-tag">已添加</span>' : '');
@@ -1853,7 +1881,8 @@
   $('#fetch-search').addEventListener('input', renderFetchList);
   $('#fetch-all').onclick = () => {
     const q = $('#fetch-search').value.trim().toLowerCase();
-    fetched.filter(m => (!q || m.toLowerCase().includes(q)) && !editModels.includes(m)).forEach(m => fetchSel.add(m));
+    if (fetchCat !== 'all' && fetchCat !== 'text') return;
+    fetched.filter(m => (!q || m.toLowerCase().includes(q)) && (fetchCat === 'all' || catOf(m) === fetchCat) && !editModels.includes(m)).forEach(m => fetchSel.add(m));
     renderFetchList();
   };
   $('#fetch-cancel').onclick = closeFetch;
