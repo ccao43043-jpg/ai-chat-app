@@ -516,7 +516,7 @@
     return 'HTTP ' + status + (hint ? '（' + hint + '）' : '') + (msg ? '：' + msg : '');
   }
 
-  /** OpenAI 兼容 /images/generations */
+  /** OpenAI 兼容 /images/generations；opts.images 为 data-URL 数组时写入 image 字段做图生图 */
   function buildImageRequest(provider, model, prompt, opts) {
     opts = opts || {};
     const body = { model, prompt, n: 1 };
@@ -525,6 +525,8 @@
       body.image_size = opts.size || '1024x1024'; delete body.size; delete body.n;
       if (/kolors/i.test(model)) body.batch_size = 1;
     }
+    const images = Array.isArray(opts.images) ? opts.images.filter(Boolean) : [];
+    if (images.length) body.image = images[0];
     return {
       url: trimSlash(provider.baseUrl) + '/images/generations', method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (provider.apiKey || '').trim() },

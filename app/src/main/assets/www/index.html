@@ -59,6 +59,7 @@
       </div>
     </div>
     <input type="file" id="file-input" multiple hidden>
+    <input type="file" id="file-input-image" accept="image/*" multiple hidden>
   </footer>
 </div>
 
@@ -137,6 +138,10 @@
       <div id="ig-provider-status" class="ig-provider muted" style="margin-top:-4px">—</div>
       <label class="field"><span>提示词</span>
         <textarea id="ig-prompt" rows="6" placeholder="描述你想生成的图片，例如：赛博朋克风格的城市夜景，霓虹灯倒映在湿润路面上"></textarea></label>
+      <label class="field"><span>参考图（可选）<small>有参考图时走图生图（需服务商支持 image 字段）；不支持时会报错可清掉参考图重试</small></span>
+        <button type="button" class="pill-btn" id="ig-pick-refs" style="margin-top:8px">从相册选择</button>
+        <div id="ig-refs" class="ig-refs"></div>
+        <input type="file" id="ig-file" accept="image/*" multiple hidden></label>
       <label class="field"><span>尺寸<small>默认取自设置里的「生成图片尺寸」</small></span>
         <select id="ig-size"></select></label>
       <button class="pill-btn primary wide" id="ig-generate" type="button">生成图片</button>

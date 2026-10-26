@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -53,12 +54,49 @@ public class MainActivity extends Activity {
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*"); // 图片、PDF、文档、代码等都可以选
-                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                boolean multiple = params != null
+                        && params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE;
+                String[] acceptTypes = params != null ? params.getAcceptTypes() : null;
+                boolean imageOnly = isImageOnlyAccept(acceptTypes);
+
+                Intent intent;
+                String chooserTitle;
+                if (imageOnly) {
+                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("image/*");
+                    if (multiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    chooserTitle = "选择图片";
+                    Intent pick = new Intent(Intent.ACTION_PICK,
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                    pick.setType("image/*");
+                    Intent chooser = Intent.createChooser(intent, chooserTitle);
+                    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{pick});
+                    try {
+                        startActivityForResult(chooser, REQ_FILE);
+                    } catch (Exception e) {
+                        fileCallback = null;
+                        return false;
+                    }
+                    return true;
+                }
+
+                Intent created = null;
+                if (params != null) {
+                    try { created = params.createIntent(); } catch (Exception ignored) {}
+                }
+                if (created != null) {
+                    intent = created;
+                    if (multiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                } else {
+                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                    if (multiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                chooserTitle = "选择文件";
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "选择文件"), REQ_FILE);
+                    startActivityForResult(Intent.createChooser(intent, chooserTitle), REQ_FILE);
                 } catch (Exception e) {
                     fileCallback = null;
                     return false;
@@ -67,6 +105,20 @@ public class MainActivity extends Activity {
             }
         });
         webView.loadUrl("file:///android_asset/www/index.html");
+    }
+
+    /** HTML accept 仅含 image/*（或 image/jpeg 等）时走相册友好选择器 */
+    private static boolean isImageOnlyAccept(String[] acceptTypes) {
+        if (acceptTypes == null || acceptTypes.length == 0) return false;
+        boolean any = false;
+        for (String t : acceptTypes) {
+            if (t == null) continue;
+            String lower = t.trim().toLowerCase();
+            if (lower.isEmpty()) continue;
+            any = true;
+            if (!(lower.equals("image") || lower.startsWith("image/"))) return false;
+        }
+        return any;
     }
 
     @Override

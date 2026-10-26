@@ -51,12 +51,15 @@
     return '根据以下对话内容，生成一张配图：\n' + lines.join('\n');
   }
 
-  function buildRequest(provider, prompt, size, modelOverride) {
+  function buildRequest(provider, prompt, size, modelOverride, opts) {
     const Providers = root.Providers || (typeof require !== 'undefined' ? require('./providers.js') : null);
     if (!Providers || !Providers.buildImageRequest) throw new Error('Providers 未加载');
     const model = effectiveModel(provider, modelOverride);
     if (!model) throw new Error('缺少图片生成模型');
-    return Providers.buildImageRequest(provider, model, prompt, { size: normalizeSize(size) });
+    opts = opts || {};
+    const reqOpts = { size: normalizeSize(size) };
+    if (Array.isArray(opts.images) && opts.images.length) reqOpts.images = opts.images;
+    return Providers.buildImageRequest(provider, model, prompt, reqOpts);
   }
 
   function parseResponse(text) {

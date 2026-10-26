@@ -98,3 +98,15 @@ test('formatElapsed：整秒中文', () => {
   assert.strictEqual(ImageGen.formatElapsed(1000), '1 秒');
   assert.strictEqual(ImageGen.formatElapsed(12500), '12 秒');
 });
+
+test('buildRequest 带参考图时转发 images → Providers.body.image', () => {
+  const p = { type: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-test', imageModel: 'gpt-image-1', presetId: 'openai' };
+  const dataUrl = 'data:image/jpeg;base64,AAA';
+  const req = ImageGen.buildRequest(p, 'edit this', '1024x1024', null, { images: [dataUrl, 'data:image/png;base64,BBB'] });
+  const body = JSON.parse(req.body);
+  assert.strictEqual(body.image, dataUrl);
+  assert.strictEqual(body.prompt, 'edit this');
+  // 无参考图时不带 image
+  const bare = JSON.parse(ImageGen.buildRequest(p, 'a', '1024x1024').body);
+  assert.ok(!('image' in bare));
+});

@@ -93,6 +93,14 @@ test('图像生成请求与解析', () => {
   assert.deepStrictEqual(JSON.parse(r.body), { model: 'gpt-image-2.5-flare', prompt: '一只猫', n: 1, size: '1024x1024' });
   const sf = JSON.parse(P.buildImageRequest(preset('siliconflow'), 'Kwai-Kolors/Kolors', 'cat', { size: '1024x1024' }).body);
   assert.strictEqual(sf.image_size, '1024x1024');
+  assert.ok(!('image' in sf));
+  const withImg = JSON.parse(P.buildImageRequest(preset('siliconflow'), 'Kwai-Kolors/Kolors', 'cat', {
+    size: '1024x1024', images: ['data:image/jpeg;base64,QQ==', 'data:image/png;base64,WW=='],
+  }).body);
+  assert.strictEqual(withImg.image, 'data:image/jpeg;base64,QQ==');
+  assert.strictEqual(withImg.image_size, '1024x1024');
+  const noImg = JSON.parse(P.buildImageRequest(preset('openai'), 'gpt-image-2.5-flare', 'x', { size: '512x512', images: [] }).body);
+  assert.ok(!('image' in noImg));
   assert.deepStrictEqual(P.parseImageResponse('{"data":[{"b64_json":"QQ=="},{"url":"https://a/b.png"}]}'),
     ['data:image/png;base64,QQ==', 'https://a/b.png']);
   assert.deepStrictEqual(P.parseImageResponse('{"images":[{"url":"https://s/c.png"}]}'), ['https://s/c.png']);

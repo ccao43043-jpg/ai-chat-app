@@ -1150,13 +1150,8 @@
   input.addEventListener('focus', () => $('#composer-card').classList.add('focus'));
   input.addEventListener('blur', () => $('#composer-card').classList.remove('focus'));
   $('#btn-send').onclick = () => running ? stopGen() : send();
-  $('#btn-attach').onclick = () => {
-    if (imageMode) { toast('图片生成模式下不能添加附件'); return; }
-    $('#file-input').click();
-  };
-  $('#file-input').onchange = async e => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
+  async function handlePickedFiles(fileList) {
+    const files = Array.from(fileList || []);
     for (const f of files) {
       const kind = Files.classifyFile(f.name, f.type);
       if (kind === 'image') {
@@ -1164,6 +1159,21 @@
         renderAttachments();
       } else addDoc(f, kind);
     }
+  }
+  $('#btn-attach').onclick = () => {
+    if (imageMode) { toast('图片生成模式下不能添加附件'); return; }
+    actionSheet('添加', [
+      { label: '从相册选择', onClick: () => $('#file-input-image').click() },
+      { label: '选择文件', onClick: () => $('#file-input').click() },
+    ]);
+  };
+  $('#file-input').onchange = async e => {
+    const files = e.target.files; e.target.value = '';
+    await handlePickedFiles(files);
+  };
+  $('#file-input-image').onchange = async e => {
+    const files = e.target.files; e.target.value = '';
+    await handlePickedFiles(files);
   };
   const MAX_FILE_BYTES = 40 * 1024 * 1024;
   function addDoc(file, kind) {
@@ -2415,6 +2425,7 @@
   // 独立于聊天顶栏：settings.imageGenProviderId / imageGenModel
   // 聊天输入框「图片模式」(#btn-imagegen) 仍用当前对话服务商，见 generateImage(currentProvider)
   let igResults = [];
+  let igRefs = [];
   let igRunning = null;
   let igUiSyncing = false;
   function imageCapableProviders() {
@@ -2608,7 +2619,8 @@
     const size = ImageGen.normalizeSize($('#ig-size').value || settings.imageSize);
     settings.imageSize = size; saveSettings();
     let status = 0, raw = '';
-    const req = ImageGen.buildRequest(p, prompt, size, model);
+    if (igRefs.length > 1) toast('当前仅使用第一张参考图');
+    const req = ImageGen.buildRequest(p, prompt, size, model, { images: igRefs.slice() });
     const progress = beginImageGenProgress();
     $('#ig-generate').style.display = 'none';
     $('#ig-stop').style.display = '';
@@ -2667,6 +2679,25 @@
     openImageGen(prompt || '');
     if (!prompt) toast('当前对话没有可用于生图的文字，请自行填写提示词');
   }
+  function renderIgRefs() {
+    const box = $('#ig-refs'); if (!box) return;
+    box.innerHTML = '';
+    igRefs.forEach((src, i) => {
+      const t = document.createElement('div'); t.className = 'thumb';
+      t.innerHTML = '<img src="' + src + '"><button class="rm" aria-label="移除">×</button>';
+      t.querySelector('.rm').onclick = () => { igRefs.splice(i, 1); renderIgRefs(); };
+      box.appendChild(t);
+    });
+  }
+  if ($('#ig-pick-refs')) $('#ig-pick-refs').onclick = () => $('#ig-file').click();
+  if ($('#ig-file')) $('#ig-file').onchange = async e => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files) {
+      try { igRefs.push(await compressImage(f)); } catch (err) { toast('图片读取失败'); }
+    }
+    renderIgRefs();
+  };
   $('#ig-generate').onclick = () => runImageGenPage();
   $('#ig-stop').onclick = () => stopImageGenPage();
   if ($('#ig-provider-sel')) $('#ig-provider-sel').onchange = () => onImageGenProviderChange();

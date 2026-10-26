@@ -729,6 +729,13 @@ body.kb-open .ed-top { padding-top: 2px; padding-bottom: 2px; }
 
 /* ---- 生图页 ---- */
 #page-imagegen { z-index: 32; }
+.ig-refs { display: flex; gap: 8px; overflow-x: auto; margin-top: 8px; }
+.ig-refs:not(:empty) { padding: 6px 4px 4px; }
+.ig-refs .thumb { position: relative; flex-shrink: 0; }
+.ig-refs img { width: 64px; height: 64px; object-fit: cover; border-radius: 14px; display: block; border: 1px solid var(--line); }
+.ig-refs .rm { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--fg); color: var(--bg); font-size: 15px; line-height: 22px; text-align: center; box-shadow: var(--shadow); }
+
 #page-imagegen textarea { resize: vertical; line-height: 1.55; min-height: 120px; }
 .ig-provider { font-size: 13px; font-weight: 500; color: var(--fg-2); padding: 8px 12px; border-radius: 12px; background: var(--surface-2); line-height: 1.4; }
 .ig-provider.muted { color: var(--fg-3); font-weight: 500; }
