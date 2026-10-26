@@ -730,9 +730,10 @@ body.kb-open .ed-top { padding-top: 2px; padding-bottom: 2px; }
 /* ---- 生图页 ---- */
 #page-imagegen { z-index: 32; }
 #page-imagegen textarea { resize: vertical; line-height: 1.55; min-height: 120px; }
-.ig-provider { font-size: 14px; font-weight: 600; color: var(--fg-1); padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.ig-provider { font-size: 13px; font-weight: 500; color: var(--fg-2); padding: 8px 12px; border-radius: 12px; background: var(--surface-2); line-height: 1.4; }
 .ig-provider.muted { color: var(--fg-3); font-weight: 500; }
 .ig-provider.warn { color: var(--danger); }
+#ig-provider-sel, #ig-model { width: 100%; }
 .ig-results { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .ig-results .ig-empty { grid-column: 1 / -1; text-align: center; color: var(--fg-3); padding: 36px 12px; font-size: 13.5px; background: var(--surface); border: 1px dashed var(--line); border-radius: 16px; }
 .ig-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm); }

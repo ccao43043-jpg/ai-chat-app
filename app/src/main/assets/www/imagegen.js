@@ -7,14 +7,26 @@
   const HISTORY_LIMIT = 10;
   const MSG_SLICE = 280;
 
-  function canGenerate(provider) {
+  function effectiveModel(provider, modelOverride) {
+    const o = (modelOverride == null ? '' : String(modelOverride)).trim();
+    if (o) return o;
+    return provider ? String(provider.imageModel || '').trim() : '';
+  }
+
+  function canGenerate(provider, modelOverride) {
     if (!provider) return { ok: false, reason: '请先选择服务商' };
     if (provider.type !== 'openai') return { ok: false, reason: '图片生成仅支持 OpenAI 兼容接口' };
     if (!(provider.apiKey || '').trim()) return { ok: false, reason: '请先在设置中填写 API Key' };
-    if (!(provider.imageModel || '').trim()) {
-      return { ok: false, reason: '请先在设置中为「' + (provider.name || '当前服务商') + '」填写图片生成模型' };
+    const model = effectiveModel(provider, modelOverride);
+    if (!model) {
+      return { ok: false, reason: '请先填写图片生成模型（或在设置中为「' + (provider.name || '当前服务商') + '」配置 imageModel）' };
     }
-    return { ok: true };
+    return { ok: true, model: model };
+  }
+
+  /** 可作为生图页服务商的候选：OpenAI 兼容（可选手填模型） */
+  function listImageProviders(providers) {
+    return (providers || []).filter(p => p && p.type === 'openai');
   }
 
   function normalizeSize(size) {
@@ -39,10 +51,12 @@
     return '根据以下对话内容，生成一张配图：\n' + lines.join('\n');
   }
 
-  function buildRequest(provider, prompt, size) {
+  function buildRequest(provider, prompt, size, modelOverride) {
     const Providers = root.Providers || (typeof require !== 'undefined' ? require('./providers.js') : null);
     if (!Providers || !Providers.buildImageRequest) throw new Error('Providers 未加载');
-    return Providers.buildImageRequest(provider, provider.imageModel, prompt, { size: normalizeSize(size) });
+    const model = effectiveModel(provider, modelOverride);
+    if (!model) throw new Error('缺少图片生成模型');
+    return Providers.buildImageRequest(provider, model, prompt, { size: normalizeSize(size) });
   }
 
   function parseResponse(text) {
@@ -51,7 +65,8 @@
     return Providers.parseImageResponse(text);
   }
 
-  const api = { SIZES, DEFAULT_SIZE, HISTORY_LIMIT, canGenerate, normalizeSize, buildPromptFromMessages, buildRequest, parseResponse };
+  const api = { SIZES, DEFAULT_SIZE, HISTORY_LIMIT, canGenerate, effectiveModel, listImageProviders,
+    normalizeSize, buildPromptFromMessages, buildRequest, parseResponse };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ImageGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1,7 +1,7 @@
 {
   "name": "ai-chat-desktop",
   "productName": "AI Chat",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "AI Chat 桌面版（Windows）：复用 Android 版同一套网页资源",
   "author": "ccao43043-jpg",
   "license": "UNLICENSED",
