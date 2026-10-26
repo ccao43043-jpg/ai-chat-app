@@ -726,3 +726,19 @@ body.kb-open .ed-top { padding-top: 2px; padding-bottom: 2px; }
 
 /* 空状态微调 */
 .conv-empty { padding: 48px 16px; line-height: 1.55; }
+
+/* ---- 生图页 ---- */
+#page-imagegen { z-index: 32; }
+#page-imagegen textarea { resize: vertical; line-height: 1.55; min-height: 120px; }
+.ig-provider { font-size: 14px; font-weight: 600; color: var(--fg-1); padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.ig-provider.muted { color: var(--fg-3); font-weight: 500; }
+.ig-provider.warn { color: var(--danger); }
+.ig-results { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.ig-results .ig-empty { grid-column: 1 / -1; text-align: center; color: var(--fg-3); padding: 36px 12px; font-size: 13.5px; background: var(--surface); border: 1px dashed var(--line); border-radius: 16px; }
+.ig-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm); }
+.ig-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--surface-3); cursor: zoom-in; }
+.ig-card .ig-actions { display: flex; gap: 6px; padding: 8px; }
+.ig-card .ig-actions button { flex: 1; height: 34px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.ig-card .ig-actions button:active { opacity: .75; }
+#ig-status.busy { color: var(--accent); }
+#ig-status.err { color: var(--danger); }
