@@ -1,4 +1,4 @@
-// v0.6.1：独立生图模型选择 + 据此生图共享逻辑
+// v0.6.2：生成进度阶段 + v0.6.1 独立生图模型选择
 const test = require('node:test');
 const assert = require('assert');
 const ImageGen = require('../app/src/main/assets/www/imagegen.js');
@@ -78,4 +78,23 @@ test('normalizeSize 与 buildRequest 支持 model override', () => {
 test('parseResponse 解析 url / b64', () => {
   const urls = ImageGen.parseResponse(JSON.stringify({ data: [{ url: 'https://x/a.png' }, { b64_json: 'AAA' }] }));
   assert.deepStrictEqual(urls, ['https://x/a.png', 'data:image/png;base64,AAA']);
+});
+
+test('progressStage：按耗时与 HTTP 信号切换中文阶段（无假百分比）', () => {
+  assert.strictEqual(ImageGen.progressStage(0).text, '请求已发送…');
+  assert.strictEqual(ImageGen.progressStage(500).key, 'sent');
+  assert.strictEqual(ImageGen.progressStage(2000).text, '生成中…');
+  assert.strictEqual(ImageGen.progressStage(10000).text, '等待结果…');
+  assert.strictEqual(ImageGen.progressStage(30000).text, '仍在生成，请稍候…');
+  assert.strictEqual(ImageGen.progressStage(500, { httpStarted: true }).text, '等待结果…');
+  assert.strictEqual(ImageGen.progressStage(500, { receiving: true }).text, '正在接收…');
+  // receiving 优先于 httpStarted
+  assert.strictEqual(ImageGen.progressStage(500, { httpStarted: true, receiving: true }).key, 'receiving');
+});
+
+test('formatElapsed：整秒中文', () => {
+  assert.strictEqual(ImageGen.formatElapsed(0), '0 秒');
+  assert.strictEqual(ImageGen.formatElapsed(999), '0 秒');
+  assert.strictEqual(ImageGen.formatElapsed(1000), '1 秒');
+  assert.strictEqual(ImageGen.formatElapsed(12500), '12 秒');
 });

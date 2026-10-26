@@ -141,6 +141,14 @@
         <select id="ig-size"></select></label>
       <button class="pill-btn primary wide" id="ig-generate" type="button">生成图片</button>
       <button class="pill-btn wide" id="ig-stop" type="button" style="display:none;margin-top:8px">停止</button>
+      <div id="ig-progress" class="ig-progress" hidden>
+        <div class="ig-progress-bar" aria-hidden="true"><i></i></div>
+        <div class="ig-progress-row">
+          <span class="spin" aria-hidden="true"></span>
+          <span id="ig-progress-text">生成中…</span>
+          <span id="ig-progress-elapsed" class="ig-progress-elapsed"></span>
+        </div>
+      </div>
       <div class="hint small" id="ig-status" style="margin-top:10px"></div>
     </div>
     <div class="group-title">生成结果</div>
