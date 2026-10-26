@@ -1758,18 +1758,41 @@
     $('#pe-model-add').value = '';
     $('#pe-base-hint').textContent = presetHints[editing.presetId] || baseHints[editing.type];
     $('#pe-delete').style.display = fresh ? 'none' : '';
-    renderModelChips();
+    renderModelChips(); renderFieldPrices();
     $('#page-provider').classList.add('show');
   }
   function renderModelChips() {
     const box = $('#pe-model-chips'); box.innerHTML = '';
     editModels.forEach((m, i) => {
       const c = document.createElement('span'); c.className = 'mchip' + (i === 0 ? ' default' : '');
-      c.innerHTML = '<span class="mc-name">' + esc(m) + '</span><button class="mc-x" aria-label="删除">×</button>';
+      const pr = editMeta[m] && editMeta[m].price ? Providers.formatModelPrice(editMeta[m]) : '';
+      c.innerHTML = '<span class="mc-name">' + esc(m) + (pr && pr !== '—' ? '<small class="mc-price">' + esc(pr) + '</small>' : '') + '</span><button class="mc-x" aria-label="删除">×</button>';
+      if (pr) c.title = pr;
       c.querySelector('.mc-name').onclick = () => { editModels.splice(i, 1); editModels.unshift(m); renderModelChips(); };
       c.querySelector('.mc-x').onclick = () => { editModels.splice(i, 1); renderModelChips(); };
       box.appendChild(c);
     });
+  }
+  /** 图片/视频等单字段：若模型有价格元数据，在输入框下显示 #pe-*-price */
+  function renderFieldPrices() {
+    Object.keys(PE_FIELDS).forEach(f => {
+      const inp = $(PE_FIELDS[f]); const hid = PE_FIELDS[f].slice(1) + '-price';
+      let h = document.getElementById(hid);
+      if (!h) {
+        h = document.createElement('div'); h.id = hid; h.className = 'field-price';
+        inp.insertAdjacentElement('afterend', h);
+        inp.addEventListener('input', renderFieldPrices);
+      }
+      const meta = editMeta[inp.value.trim()]; const t = meta ? Providers.formatModelPrice(meta) : '—';
+      h.textContent = t === '—' ? '' : '价格：' + t; h.style.display = t === '—' ? 'none' : '';
+    });
+  }
+  function modelInfoLine(m) {
+    const meta = editMeta[m]; if (!meta) return '';
+    const parts = [];
+    if (meta.context) parts.push(Providers.formatContext(meta.context));
+    const t = Providers.formatModelPrice(meta); if (t !== '—') parts.push(t);
+    return parts.length ? '<small class="cl-price">' + esc(parts.join(' · ')) + '</small>' : '';
   }
   function addModels(list) {
     let n = 0;
@@ -1805,7 +1828,7 @@
     Object.keys(PE_FIELDS).forEach(f => { p[f] = $(PE_FIELDS[f]).value.trim(); });
     const th = $('#pe-thinking').value;
     if (th && Providers.isQwenEndpoint(p)) p.thinking = th;
-    const meta = {}; p.models.forEach(m => { if (editMeta[m]) meta[m] = editMeta[m]; });
+    const meta = {}; p.models.concat(Object.keys(PE_FIELDS).map(f => p[f])).forEach(m => { if (m && editMeta[m]) meta[m] = editMeta[m]; });
     if (Object.keys(meta).length) p.modelMeta = meta; // 模型列表接口返回的上下文窗口，供 RP 插件自动推导预算
     if ($('#pe-type').value === 'openai') {
       const su = $('#pe-streamusage').checked;
@@ -1867,7 +1890,7 @@
         const el = document.createElement('div'); el.className = 'check-item' + (cur ? ' on' : '');
         el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + '</span><span class="cl-tag">' +
           esc(Providers.MODEL_CATEGORIES.find(x => x.key === c).label) + '</span>';
-        el.onclick = () => { $(PE_FIELDS[f]).value = m; toast('已设为' + Providers.MODEL_CATEGORIES.find(x => x.key === c).label + '模型，记得保存'); renderFetchList(); };
+        el.onclick = () => { $(PE_FIELDS[f]).value = m; toast('已设为' + Providers.MODEL_CATEGORIES.find(x => x.key === c).label + '模型，记得保存'); renderFetchList(); renderFieldPrices(); };
         box.appendChild(el); return;
       }
       const had = editModels.includes(m);

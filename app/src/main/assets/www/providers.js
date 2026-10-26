@@ -183,10 +183,44 @@
       const o = {};
       if (ctx > 0) { o.context = Number(ctx); if (outT > 0) o.maxOutput = Number(outT); }
       if (modality) o.modality = String(modality);
+      const pr = parsePricing(m.pricing);
+      if (pr) o.price = pr;
       if (Object.keys(o).length) out[id] = o;
     });
     return out;
   }
+
+  /**
+   * OpenRouter pricing（美元/Token 字符串）-> { prompt, completion, cacheRead, image, imageOut }
+   * prompt/completion/cacheRead/imageOut 存为「美元/百万 Token」（与用量页一致）；image 为「美元/张」。
+   * 缺失、0、负数（如 openrouter/auto 的 -1）均不保存；全部缺失返回 null。
+   */
+  function parsePricing(pr) {
+    if (!pr || typeof pr !== 'object') return null;
+    const num = v => { const n = Number(v); return isFinite(n) && n > 0 ? n : 0; };
+    const r = x => Math.round(x * 1e6) / 1e6;
+    const o = {};
+    const perM = { prompt: pr.prompt, completion: pr.completion, cacheRead: pr.input_cache_read, imageOut: pr.image_output };
+    Object.keys(perM).forEach(k => { const n = num(perM[k]); if (n) o[k] = r(n * 1e6); });
+    const img = num(pr.image); if (img) o.image = r(img);
+    return Object.keys(o).length ? o : null;
+  }
+  function fmtUsd(n) {
+    if (n >= 100) return '$' + n.toFixed(0);
+    if (n >= 0.01) return '$' + n.toFixed(2);
+    return '$' + Number(n.toPrecision(2));
+  }
+  /** meta -> 「输入 $0.50 / 输出 $3.00 · 百万Token」/「约 $0.01/张」/「—」 */
+  function formatModelPrice(meta) {
+    const p = meta && meta.price; if (!p) return '—';
+    const parts = [];
+    if (p.prompt || p.completion) {
+      parts.push((p.prompt ? '输入 ' + fmtUsd(p.prompt) : '输入 —') + ' / ' + (p.completion ? '输出 ' + fmtUsd(p.completion) : '输出 —') + ' · 百万Token');
+    } else if (p.imageOut) parts.push('图片输出 ' + fmtUsd(p.imageOut) + ' · 百万Token');
+    if (p.image && !parts.length) parts.push('约 ' + fmtUsd(p.image) + '/张');
+    return parts.length ? parts.join(' · ') : '—';
+  }
+  function formatContext(n) { return n >= 1e6 ? +(n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'K' : String(n); }
 
   function trimSlash(u) { return String(u || '').trim().replace(/\/+$/, ''); }
 
@@ -507,7 +541,7 @@
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta,
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
