@@ -65,8 +65,29 @@
     return Providers.parseImageResponse(text);
   }
 
+  /**
+   * 单次 /images/generations 无真实百分比时，用耗时阶段 + 可选 HTTP 信号给出状态文案。
+   * @param {number} elapsedMs
+   * @param {{ receiving?: boolean, httpStarted?: boolean }} [opts]
+   */
+  function progressStage(elapsedMs, opts) {
+    opts = opts || {};
+    if (opts.receiving) return { key: 'receiving', text: '正在接收…' };
+    if (opts.httpStarted) return { key: 'waiting', text: '等待结果…' };
+    const s = Math.max(0, Number(elapsedMs) || 0) / 1000;
+    if (s < 1.2) return { key: 'sent', text: '请求已发送…' };
+    if (s < 8) return { key: 'generating', text: '生成中…' };
+    if (s < 22) return { key: 'waiting', text: '等待结果…' };
+    return { key: 'still', text: '仍在生成，请稍候…' };
+  }
+
+  function formatElapsed(elapsedMs) {
+    const s = Math.max(0, Math.floor((Number(elapsedMs) || 0) / 1000));
+    return s + ' 秒';
+  }
+
   const api = { SIZES, DEFAULT_SIZE, HISTORY_LIMIT, canGenerate, effectiveModel, listImageProviders,
-    normalizeSize, buildPromptFromMessages, buildRequest, parseResponse };
+    normalizeSize, buildPromptFromMessages, buildRequest, parseResponse, progressStage, formatElapsed };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ImageGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -604,7 +604,18 @@
       }
       if (m.content) { const md = renderMarkdown(m.content, m.sources); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
       if (m.error) { const e = document.createElement('div'); e.className = 'err'; e.textContent = m.error; body.appendChild(e); }
-      if (!m.content && !m.error) {
+      if (m.pending && m.imageGen && !m.error) {
+        const st = document.createElement('div'); st.className = 'gen-status';
+        const label = m.genStatus || '正在生成图片…';
+        st.innerHTML = '<span class="spin"></span><span></span>';
+        st.querySelector('span:last-child').textContent = label;
+        if (m.genElapsed) {
+          const el = document.createElement('span'); el.className = 'gen-elapsed'; el.textContent = m.genElapsed;
+          st.appendChild(el);
+        }
+        body.appendChild(st);
+        const t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t);
+      } else if (!m.content && !m.error) {
         if (m.pending && !m.reasoning && !m.searching && !m.pluginStatus) { const t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t); }
         else if (!m.pending && !m.reasoning && !(m.images && m.images.length)) { const e = document.createElement('div'); e.className = 'muted'; e.textContent = m.stopped ? '（已停止）' : '（空回复）'; body.appendChild(e); }
       }
@@ -1084,14 +1095,28 @@
     if (!check.ok) { toast(check.reason); return; }
     if (!prompt) { toast('请输入图片描述'); return; }
     const user = { id: uid(), role: 'user', content: prompt, imageGen: true, createdAt: Date.now() };
-    const bot = { id: uid(), role: 'assistant', content: '', pending: true, imageGen: true, model: p.imageModel + ' · 生成图片', createdAt: Date.now() };
+    const bot = { id: uid(), role: 'assistant', content: '', pending: true, imageGen: true,
+      genStatus: '请求已发送…', genElapsed: '0 秒',
+      model: (check.model || p.imageModel) + ' · 生成图片', createdAt: Date.now() };
     conv.messages.push(user, bot);
     if (conv.title === '新对话') conv.title = '🎨 ' + prompt.slice(0, 20);
     input.value = ''; autosize(); renderMessages();
     const req = ImageGen.buildRequest(p, prompt, settings.imageSize || ImageGen.DEFAULT_SIZE);
-    let status = 0, raw = '';
+    let status = 0, raw = '', httpStarted = false, receiving = false;
     const thisConv = conv;
-    const h = httpRequest(req, { onStatus: s => { status = s; }, onChunk: t => { raw += t; } });
+    const startedAt = Date.now();
+    const tickChatProgress = () => {
+      const elapsed = Date.now() - startedAt;
+      const stage = ImageGen.progressStage(elapsed, { httpStarted: httpStarted, receiving: receiving });
+      bot.genStatus = stage.text;
+      bot.genElapsed = ImageGen.formatElapsed(elapsed);
+      if (conv === thisConv) renderMessages();
+    };
+    const progressTimer = setInterval(tickChatProgress, 900);
+    const h = httpRequest(req, {
+      onStatus: s => { status = s; httpStarted = true; tickChatProgress(); },
+      onChunk: t => { raw += t; if (!receiving) { receiving = true; tickChatProgress(); } },
+    });
     setRunning({ cancel: h.cancel, msg: bot });
     h.promise.then(() => {
       if (bot.stopped) return;
@@ -1106,7 +1131,12 @@
         } catch (_) {}
       } catch (e) { bot.error = '无法解析响应：' + raw.slice(0, 300); }
     }).catch(e => { bot.error = '网络错误：' + e.message; })
-      .finally(() => { bot.pending = false; setRunning(null); saveConv(thisConv); if (conv === thisConv) renderMessages(); renderConvList(); });
+      .finally(() => {
+        clearInterval(progressTimer);
+        delete bot.genStatus; delete bot.genElapsed;
+        bot.pending = false; setRunning(null); saveConv(thisConv);
+        if (conv === thisConv) renderMessages(); renderConvList();
+      });
   }
 
   function stopGen() { if (!running) return; running.msg.stopped = true; running.cancel(); }
@@ -2449,6 +2479,39 @@
     el.textContent = text || '';
     el.className = 'hint small' + (cls ? ' ' + cls : '');
   }
+  let igProgressTimer = null;
+  function clearImageGenProgressTimer() {
+    if (igProgressTimer) { clearInterval(igProgressTimer); igProgressTimer = null; }
+  }
+  function setImageGenProgressVisible(on) {
+    const box = $('#ig-progress');
+    if (!box) return;
+    if (on) box.removeAttribute('hidden');
+    else box.setAttribute('hidden', '');
+  }
+  function updateImageGenProgressUI(elapsedMs, flags) {
+    const stage = ImageGen.progressStage(elapsedMs, flags || {});
+    const textEl = $('#ig-progress-text');
+    const elEl = $('#ig-progress-elapsed');
+    if (textEl) textEl.textContent = stage.text;
+    if (elEl) elEl.textContent = ImageGen.formatElapsed(elapsedMs);
+    setImageGenStatus(stage.text, 'busy');
+  }
+  function beginImageGenProgress() {
+    clearImageGenProgressTimer();
+    setImageGenProgressVisible(true);
+    const startedAt = Date.now();
+    const flags = { httpStarted: false, receiving: false };
+    updateImageGenProgressUI(0, flags);
+    igProgressTimer = setInterval(() => updateImageGenProgressUI(Date.now() - startedAt, flags), 400);
+    return {
+      startedAt,
+      flags,
+      markHttp() { flags.httpStarted = true; updateImageGenProgressUI(Date.now() - startedAt, flags); },
+      markReceiving() { flags.receiving = true; updateImageGenProgressUI(Date.now() - startedAt, flags); },
+      stop() { clearImageGenProgressTimer(); setImageGenProgressVisible(false); },
+    };
+  }
   function saveGeneratedImage(src) {
     if (!src) return;
     if (bridge && bridge.saveImage) { bridge.saveImage(src); toast('正在保存…'); }
@@ -2472,9 +2535,11 @@
   function stopImageGenPage() {
     if (!igRunning) return;
     try { igRunning.cancel && igRunning.cancel(); } catch (_) {}
+    if (igRunning.progress) igRunning.progress.stop();
     igRunning = null;
     $('#ig-generate').style.display = '';
     $('#ig-stop').style.display = 'none';
+    setImageGenProgressVisible(false);
     setImageGenStatus('已停止', '');
     refreshImageGenMeta();
   }
@@ -2491,11 +2556,14 @@
     settings.imageSize = size; saveSettings();
     let status = 0, raw = '';
     const req = ImageGen.buildRequest(p, prompt, size, model);
-    setImageGenStatus('正在生成…', 'busy');
+    const progress = beginImageGenProgress();
     $('#ig-generate').style.display = 'none';
     $('#ig-stop').style.display = '';
-    const h = httpRequest(req, { onStatus: s => { status = s; }, onChunk: t => { raw += t; } });
-    igRunning = { cancel: h.cancel };
+    const h = httpRequest(req, {
+      onStatus: s => { status = s; progress.markHttp(); },
+      onChunk: t => { raw += t; progress.markReceiving(); },
+    });
+    igRunning = { cancel: h.cancel, progress: progress };
     refreshImageGenMeta();
     h.promise.then(() => {
       if (!igRunning) return;
@@ -2505,7 +2573,7 @@
         if (!imgs.length) { setImageGenStatus('未返回图片：' + raw.slice(0, 200), 'err'); return; }
         igResults = imgs.concat(igResults).slice(0, 24);
         renderImageGenResults();
-        setImageGenStatus('已生成 ' + imgs.length + ' 张（' + model + '）', '');
+        setImageGenStatus('已生成 ' + imgs.length + ' 张（' + model + ' · ' + ImageGen.formatElapsed(Date.now() - progress.startedAt) + '）', '');
         try {
           const obj = JSON.parse(raw);
           const u = Providers.normalizeUsage(p.type, obj.usage || obj.meta || null);
@@ -2514,6 +2582,8 @@
       } catch (e) { setImageGenStatus('无法解析响应：' + raw.slice(0, 200), 'err'); }
     }).catch(e => { if (igRunning) setImageGenStatus('网络错误：' + e.message, 'err'); })
       .finally(() => {
+        if (igRunning && igRunning.progress) igRunning.progress.stop();
+        else { clearImageGenProgressTimer(); setImageGenProgressVisible(false); }
         igRunning = null;
         $('#ig-generate').style.display = '';
         $('#ig-stop').style.display = 'none';
@@ -2525,6 +2595,8 @@
     fillImageGenControls();
     if (typeof prefill === 'string' && prefill.trim()) $('#ig-prompt').value = prefill.trim();
     renderImageGenResults();
+    clearImageGenProgressTimer();
+    setImageGenProgressVisible(false);
     setImageGenStatus('', '');
     $('#page-imagegen').classList.add('show');
   }
