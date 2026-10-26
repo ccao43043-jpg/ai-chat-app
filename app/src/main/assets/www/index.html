@@ -95,6 +95,10 @@
         <span class="feat-ic"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg></span>
         <span class="feat-text"><span>模板</span><small id="template-count">提示词模板</small></span>
       </button>
+      <button class="feat-btn" id="btn-imagegen-page">
+        <span class="feat-ic grad"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3.5 15.5l4.5-4 3.5 3.2 3-2.7 6 5.5"/></svg></span>
+        <span class="feat-text"><span>生图</span><small id="imagegen-count">文字生成图片</small></span>
+      </button>
       <button class="feat-btn" id="btn-usage">
         <span class="feat-ic"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16V10M12 16V7M16 16v-5"/></svg></span>
         <span class="feat-text"><span>用量</span><small id="usage-count">Token 统计</small></span>
@@ -114,6 +118,33 @@
     </div>
   </div>
 </aside>
+
+
+<!-- 生图页 -->
+<section id="page-imagegen" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title">生图</div>
+    <span class="icon-btn ghost"></span>
+  </header>
+  <div class="page-body">
+    <div class="hint">使用当前对话所选服务商的图片模型（OpenAI 兼容 <code>/images/generations</code>）。本地 Comfy 后续支持。</div>
+    <div class="group form">
+      <div class="field"><span>服务商 / 模型</span><div id="ig-provider" class="ig-provider muted">—</div></div>
+      <label class="field"><span>提示词</span>
+        <textarea id="ig-prompt" rows="6" placeholder="描述你想生成的图片，例如：赛博朋克风格的城市夜景，霓虹灯倒映在湿润路面上"></textarea></label>
+      <label class="field"><span>尺寸<small>默认取自设置里的「生成图片尺寸」</small></span>
+        <select id="ig-size"></select></label>
+      <button class="pill-btn primary wide" id="ig-generate" type="button">生成图片</button>
+      <button class="pill-btn wide" id="ig-stop" type="button" style="display:none;margin-top:8px">停止</button>
+      <div class="hint small" id="ig-status" style="margin-top:10px"></div>
+    </div>
+    <div class="group-title">生成结果</div>
+    <div id="ig-results" class="ig-results">
+      <div class="ig-empty">生成的图片会出现在这里</div>
+    </div>
+  </div>
+</section>
 
 <!-- 设置页 -->
 <section id="page-settings" class="page">
@@ -168,7 +199,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.5.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.6.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -496,6 +527,7 @@
 <script src="lib/highlight.min.js"></script>
 <script src="lib/fflate.min.js"></script>
 <script src="providers.js"></script>
+<script src="imagegen.js"></script>
 <script src="search.js"></script>
 <script src="files.js"></script>
 <script src="personas.js"></script>

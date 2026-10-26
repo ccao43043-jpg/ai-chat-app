@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.6.0：独立生图页 + 聊天「据此生图」**
+- 侧边栏「功能」新增 **生图**：独立页面填写提示词、选择尺寸，调用当前服务商的 OpenAI 兼容 `/images/generations`（需配置 `imageModel`），结果可预览、保存到相册，或插入当前对话
+- 聊天消息操作栏新增 **据此生图**：根据最近若干轮对话文字预填提示词，打开生图页后可编辑再生成
+- 输入框原有「图片模式」与重新生成图片逻辑保持不变；本地 Comfy 生图留作后续
+- 版本号同步至 Android `0.6.0`（versionCode 13）与桌面 / npm `0.6.0`
+
 **v0.5.0：千问（阿里云百炼）+ RP 缓存优化器自动化**
 - **千问预设**：「阿里云百炼 · 千问（中国）」`https://dashscope.aliyuncs.com/compatible-mode/v1` 与「千问（国际）」`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`（也识别业务空间专属域名 `*.maas.aliyuncs.com`）。预设模型 qwen3.8-max、qwen3.7-plus、qwen3.8-flash、qwen-plus、qwen-flash、qwen-plus-character（角色扮演）、qwen3-coder-flash、qwen3-vl-plus（看图）
 - **思考模式**：服务商设置里可选 `enable_thinking` 开 / 关 / 默认；思考内容（`reasoning_content`）显示在回复上方。插件的摘要调用自动关闭思考
