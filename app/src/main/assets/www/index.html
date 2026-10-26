@@ -128,9 +128,13 @@
     <span class="icon-btn ghost"></span>
   </header>
   <div class="page-body">
-    <div class="hint">使用当前对话所选服务商的图片模型（OpenAI 兼容 <code>/images/generations</code>）。本地 Comfy 后续支持。</div>
+    <div class="hint">在此页单独选择生图服务商与模型，与聊天顶栏当前模型互不影响。走 OpenAI 兼容 <code>/images/generations</code>；聊天输入框「图片模式」仍用当前对话服务商。本地 Comfy 后续支持。</div>
     <div class="group form">
-      <div class="field"><span>服务商 / 模型</span><div id="ig-provider" class="ig-provider muted">—</div></div>
+      <label class="field"><span>生图服务商</span>
+        <select id="ig-provider-sel"></select></label>
+      <label class="field"><span>图片模型<small>默认取自该服务商的 imageModel，可改写</small></span>
+        <input id="ig-model" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例如 gpt-image-1"></label>
+      <div id="ig-provider-status" class="ig-provider muted" style="margin-top:-4px">—</div>
       <label class="field"><span>提示词</span>
         <textarea id="ig-prompt" rows="6" placeholder="描述你想生成的图片，例如：赛博朋克风格的城市夜景，霓虹灯倒映在湿润路面上"></textarea></label>
       <label class="field"><span>尺寸<small>默认取自设置里的「生成图片尺寸」</small></span>
@@ -199,7 +203,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.6.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.6.1 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 

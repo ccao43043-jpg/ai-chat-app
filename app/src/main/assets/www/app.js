@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.6.0';
+  const APP_VERSION = '0.6.1';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -89,6 +89,7 @@
   const defaultSettings = () => ({
     providers: Providers.PRESETS.map(presetToProvider),
     systemPrompt: '', stream: true, temperature: '', maxTokens: '', imageSize: '1024x1024',
+    imageGenProviderId: '', imageGenModel: '',
     lastProviderId: '', lastModel: '', settingsVersion: Providers.SETTINGS_VERSION,
     search: defaultSearch(), searchOn: false, removedPersonas: [],
   });
@@ -2328,17 +2329,33 @@
   const usFmtN = n => (n == null ? '—' : n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 1 : 2).replace(/\.?0+$/, '') + '万' : String(Math.round(n)));
   const usFmtUsd = v => (v == null ? '—' : '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3)));
   // ---------------- 生图页 ----------------
+  // 独立于聊天顶栏：settings.imageGenProviderId / imageGenModel
+  // 聊天输入框「图片模式」(#btn-imagegen) 仍用当前对话服务商，见 generateImage(currentProvider)
   let igResults = [];
   let igRunning = null;
+  let igUiSyncing = false;
   function imageCapableProviders() {
-    return (settings.providers || []).filter(p => p && p.type === 'openai' && (p.imageModel || '').trim() && (p.apiKey || '').trim());
+    return ImageGen.listImageProviders(settings.providers);
+  }
+  function resolveImageModel(provider) {
+    return ImageGen.effectiveModel(provider, settings.imageGenModel);
   }
   function resolveImageProvider() {
-    const cur = conv && getProvider(conv.providerId);
-    if (cur && ImageGen.canGenerate(cur).ok) return cur;
+    const id = (settings.imageGenProviderId || '').trim();
+    if (id) {
+      const p = getProvider(id);
+      if (p && p.type === 'openai') return p;
+    }
     const list = imageCapableProviders();
-    if (list.length) return list[0];
-    return cur || getProvider(settings.lastProviderId) || (settings.providers || [])[0] || null;
+    const withKey = list.filter(p => (p.apiKey || '').trim());
+    const prefer = withKey.find(p => (p.imageModel || '').trim()) || withKey[0] || list[0] || null;
+    if (prefer && !id) {
+      settings.imageGenProviderId = prefer.id;
+      if (!(settings.imageGenModel || '').trim() && (prefer.imageModel || '').trim())
+        settings.imageGenModel = prefer.imageModel;
+      saveSettings();
+    }
+    return prefer;
   }
   function fillImageSizeSelect(preferred) {
     const sel = $('#ig-size'); if (!sel) return;
@@ -2347,13 +2364,62 @@
     if (want && !sizes.includes(want)) sizes.unshift(want);
     sel.innerHTML = sizes.map(s => '<option value="' + esc(s) + '"' + (s === want ? ' selected' : '') + '>' + esc(s) + '</option>').join('');
   }
+  function fillImageGenControls() {
+    const sel = $('#ig-provider-sel');
+    const modelEl = $('#ig-model');
+    if (!sel || !modelEl) return;
+    igUiSyncing = true;
+    const list = imageCapableProviders();
+    const cur = resolveImageProvider();
+    const curId = cur ? cur.id : '';
+    if (!list.length) {
+      sel.innerHTML = '<option value="">（无 OpenAI 兼容服务商）</option>';
+    } else {
+      sel.innerHTML = list.map(p => {
+        const label = esc(p.name || p.id) + ((p.apiKey || '').trim() ? '' : '（未填 Key）');
+        return '<option value="' + esc(p.id) + '"' + (p.id === curId ? ' selected' : '') + '>' + label + '</option>';
+      }).join('');
+      if (curId) sel.value = curId;
+    }
+    const model = (settings.imageGenModel || '').trim() || (cur && cur.imageModel) || '';
+    modelEl.value = model;
+    if (!(settings.imageGenModel || '').trim() && model) {
+      settings.imageGenModel = model;
+    }
+    igUiSyncing = false;
+    refreshImageGenMeta();
+  }
+  function persistImageGenSelection() {
+    if (igUiSyncing) return;
+    const sel = $('#ig-provider-sel');
+    const modelEl = $('#ig-model');
+    if (sel) settings.imageGenProviderId = sel.value || '';
+    if (modelEl) settings.imageGenModel = (modelEl.value || '').trim();
+    saveSettings();
+    refreshImageGenMeta();
+  }
+  function onImageGenProviderChange() {
+    if (igUiSyncing) return;
+    const sel = $('#ig-provider-sel');
+    const modelEl = $('#ig-model');
+    const pid = sel ? sel.value : '';
+    settings.imageGenProviderId = pid;
+    const p = getProvider(pid);
+    // 切换服务商时，用其默认 imageModel 覆盖当前模型栏（便于快速切换）
+    const next = p && (p.imageModel || '').trim() ? p.imageModel.trim() : '';
+    if (modelEl) modelEl.value = next;
+    settings.imageGenModel = next;
+    saveSettings();
+    refreshImageGenMeta();
+  }
   function refreshImageGenMeta() {
-    const el = $('#ig-provider'); if (!el) return;
+    const el = $('#ig-provider-status'); if (!el) return;
     const p = resolveImageProvider();
-    const check = ImageGen.canGenerate(p);
-    if (!p) { el.textContent = '未配置服务商'; el.className = 'ig-provider warn'; }
+    const model = resolveImageModel(p);
+    const check = ImageGen.canGenerate(p, model);
+    if (!p) { el.textContent = '请添加 OpenAI 兼容服务商并填写 API Key'; el.className = 'ig-provider warn'; }
     else if (!check.ok) { el.textContent = (p.name || '服务商') + ' · ' + check.reason; el.className = 'ig-provider warn'; }
-    else { el.textContent = p.name + ' · ' + p.imageModel; el.className = 'ig-provider'; }
+    else { el.textContent = '将使用：' + p.name + ' · ' + model; el.className = 'ig-provider'; }
     const btn = $('#ig-generate');
     if (btn) btn.disabled = !!igRunning || !check.ok;
   }
@@ -2394,9 +2460,10 @@
   function insertImageToChat(src, prompt) {
     if (!conv) newConv();
     const p = resolveImageProvider();
+    const model = resolveImageModel(p);
     const user = { id: uid(), role: 'user', content: prompt || '（生图页插入）', imageGen: true, createdAt: Date.now() };
     const bot = { id: uid(), role: 'assistant', content: '', imageGen: true, images: [src],
-      model: (p && p.imageModel ? p.imageModel + ' · 生成图片' : '生成图片'), createdAt: Date.now() };
+      model: (model ? model + ' · 生成图片' : '生成图片'), createdAt: Date.now() };
     conv.messages.push(user, bot);
     if (conv.title === '新对话') conv.title = '🎨 ' + (prompt || '生图').slice(0, 20);
     saveConv(conv); renderMessages(); renderConvList();
@@ -2413,15 +2480,17 @@
   }
   function runImageGenPage() {
     if (igRunning) return;
+    persistImageGenSelection();
     const prompt = ($('#ig-prompt').value || '').trim();
     if (!prompt) { toast('请输入图片描述'); return; }
     const p = resolveImageProvider();
-    const check = ImageGen.canGenerate(p);
+    const model = resolveImageModel(p);
+    const check = ImageGen.canGenerate(p, model);
     if (!check.ok) { toast(check.reason); refreshImageGenMeta(); return; }
     const size = ImageGen.normalizeSize($('#ig-size').value || settings.imageSize);
     settings.imageSize = size; saveSettings();
     let status = 0, raw = '';
-    const req = ImageGen.buildRequest(p, prompt, size);
+    const req = ImageGen.buildRequest(p, prompt, size, model);
     setImageGenStatus('正在生成…', 'busy');
     $('#ig-generate').style.display = 'none';
     $('#ig-stop').style.display = '';
@@ -2436,11 +2505,11 @@
         if (!imgs.length) { setImageGenStatus('未返回图片：' + raw.slice(0, 200), 'err'); return; }
         igResults = imgs.concat(igResults).slice(0, 24);
         renderImageGenResults();
-        setImageGenStatus('已生成 ' + imgs.length + ' 张', '');
+        setImageGenStatus('已生成 ' + imgs.length + ' 张（' + model + '）', '');
         try {
           const obj = JSON.parse(raw);
           const u = Providers.normalizeUsage(p.type, obj.usage || obj.meta || null);
-          if (u && conv) recordUsage({ usage: u, type: 'image', conv, provider: p, model: p.imageModel, msgId: null, at: Date.now() });
+          if (u && conv) recordUsage({ usage: u, type: 'image', conv, provider: p, model: model, msgId: null, at: Date.now() });
         } catch (_) {}
       } catch (e) { setImageGenStatus('无法解析响应：' + raw.slice(0, 200), 'err'); }
     }).catch(e => { if (igRunning) setImageGenStatus('网络错误：' + e.message, 'err'); })
@@ -2453,14 +2522,15 @@
   }
   function openImageGen(prefill) {
     fillImageSizeSelect(settings.imageSize);
+    fillImageGenControls();
     if (typeof prefill === 'string' && prefill.trim()) $('#ig-prompt').value = prefill.trim();
-    refreshImageGenMeta();
     renderImageGenResults();
     setImageGenStatus('', '');
     $('#page-imagegen').classList.add('show');
   }
   function closeImageGen() {
     if (igRunning) stopImageGenPage();
+    persistImageGenSelection();
     $('#page-imagegen').classList.remove('show');
   }
   function openImageGenFromChat(anchorMsg) {
@@ -2474,6 +2544,11 @@
   }
   $('#ig-generate').onclick = () => runImageGenPage();
   $('#ig-stop').onclick = () => stopImageGenPage();
+  if ($('#ig-provider-sel')) $('#ig-provider-sel').onchange = () => onImageGenProviderChange();
+  if ($('#ig-model')) {
+    $('#ig-model').addEventListener('change', () => persistImageGenSelection());
+    $('#ig-model').addEventListener('blur', () => persistImageGenSelection());
+  }
 
   function openUsage() {
     closeDrawer();

@@ -1,15 +1,36 @@
-// v0.6.0：独立生图 / 据此生图共享逻辑
+// v0.6.1：独立生图模型选择 + 据此生图共享逻辑
 const test = require('node:test');
 const assert = require('assert');
 const ImageGen = require('../app/src/main/assets/www/imagegen.js');
 const Providers = require('../app/src/main/assets/www/providers.js');
 
-test('canGenerate：需要 openai + apiKey + imageModel', () => {
+test('canGenerate：需要 openai + apiKey + imageModel（或 override）', () => {
   assert.strictEqual(ImageGen.canGenerate(null).ok, false);
   assert.strictEqual(ImageGen.canGenerate({ type: 'anthropic', apiKey: 'k', imageModel: 'x' }).ok, false);
   assert.strictEqual(ImageGen.canGenerate({ type: 'openai', apiKey: '', imageModel: 'gpt-image-1', name: 'O' }).ok, false);
   assert.strictEqual(ImageGen.canGenerate({ type: 'openai', apiKey: 'sk', imageModel: '', name: 'O' }).ok, false);
   assert.ok(ImageGen.canGenerate({ type: 'openai', apiKey: 'sk', imageModel: 'gpt-image-1', name: 'O' }).ok);
+  // 服务商未配 imageModel，但页面覆盖模型时可通过
+  const r = ImageGen.canGenerate({ type: 'openai', apiKey: 'sk', imageModel: '', name: 'O' }, 'dall-e-3');
+  assert.ok(r.ok);
+  assert.strictEqual(r.model, 'dall-e-3');
+});
+
+test('effectiveModel：覆盖优先于 provider.imageModel', () => {
+  const p = { imageModel: 'gpt-image-1' };
+  assert.strictEqual(ImageGen.effectiveModel(p, ''), 'gpt-image-1');
+  assert.strictEqual(ImageGen.effectiveModel(p, '  custom-img  '), 'custom-img');
+  assert.strictEqual(ImageGen.effectiveModel({ imageModel: '' }, null), '');
+});
+
+test('listImageProviders：仅 openai 类型', () => {
+  const list = ImageGen.listImageProviders([
+    { id: 'a', type: 'openai' },
+    { id: 'b', type: 'anthropic' },
+    { id: 'c', type: 'openai' },
+    null,
+  ]);
+  assert.deepStrictEqual(list.map(p => p.id), ['a', 'c']);
 });
 
 test('buildPromptFromMessages：跳过 imageGen/error/pending，拼接中文模板', () => {
@@ -31,7 +52,7 @@ test('buildPromptFromMessages：跳过 imageGen/error/pending，拼接中文模�
   assert.strictEqual(ImageGen.buildPromptFromMessages([]), '');
 });
 
-test('normalizeSize 与 buildRequest 走 Providers', () => {
+test('normalizeSize 与 buildRequest 支持 model override', () => {
   assert.strictEqual(ImageGen.normalizeSize(''), ImageGen.DEFAULT_SIZE);
   assert.strictEqual(ImageGen.normalizeSize('512x512'), '512x512');
   const p = { type: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-test', imageModel: 'gpt-image-1', presetId: 'openai' };
@@ -42,6 +63,16 @@ test('normalizeSize 与 buildRequest 走 Providers', () => {
   assert.strictEqual(body.model, 'gpt-image-1');
   assert.strictEqual(body.prompt, 'a red balloon');
   assert.strictEqual(body.size, '1024x1024');
+
+  const req2 = ImageGen.buildRequest(p, 'cat', '512x512', 'dall-e-3');
+  assert.strictEqual(JSON.parse(req2.body).model, 'dall-e-3');
+  assert.strictEqual(JSON.parse(req2.body).size, '512x512');
+
+  // 无 imageModel 时必须传 override
+  const bare = { type: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk', imageModel: '', presetId: 'openai' };
+  assert.throws(() => ImageGen.buildRequest(bare, 'x', '1024x1024'));
+  const req3 = ImageGen.buildRequest(bare, 'x', '1024x1024', 'my-img');
+  assert.strictEqual(JSON.parse(req3.body).model, 'my-img');
 });
 
 test('parseResponse 解析 url / b64', () => {
