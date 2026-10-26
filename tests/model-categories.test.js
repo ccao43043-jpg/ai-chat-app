@@ -43,3 +43,12 @@ test('OpenAI preset carries category models', () => {
   const o = P.PRESETS.find(p => p.presetId === 'openai');
   assert.ok(o.imageModel && o.speechModel && o.transcriptionModel && o.embeddingModel);
 });
+
+test('classifyModel: 多模态输出优先专用模态', () => {
+  const c = P.classifyModel;
+  assert.strictEqual(c('google/gemini-2.5-flash-image', { modality: 'text+image->text+image' }), 'image');
+  assert.strictEqual(c('x/v', { modality: 'text->video' }), 'video');
+  assert.strictEqual(c('x/e', { modality: 'text->embeddings' }), 'embedding');
+  assert.strictEqual(c('x/a', { modality: 'text->text+audio' }), 'speech');
+  assert.strictEqual(c('x/t', { modality: 'text+image->text' }), 'text');
+});

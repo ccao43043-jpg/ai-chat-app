@@ -345,3 +345,8 @@ npm test          # 单元测试：服务商请求、SSE 与 usage 解析、搜�
 npm i && npm run test:ui   # 可选：用本机 Chrome 跑界面端到端测试（模拟原生桥，不访问网络；含旧版数据迁移、联网搜索、文件对话、助手、提示词模板、插件与 RP 优化器全流程；截图输出到 docs/）
 npm run fixtures  # 重新生成测试用 PDF（一般不需要）
 ```
+
+### OpenRouter 图片模型（0.6.4）
+OpenRouter 的 `/models` 默认只返回文本模型，App 现以 `?output_modalities=all` 获取全部模型。
+使用：打开 OpenRouter 服务商 → 从接口获取模型列表 → 点「图片」分类 → 点选模型填入「图片生成」字段 → 保存。
+注意：图片生成仍走 OpenAI 兼容的 `POST /images/generations`；若某模型在该路径不可用，属于 OpenRouter 侧接口差异，后续版本再适配其专用图片 API。

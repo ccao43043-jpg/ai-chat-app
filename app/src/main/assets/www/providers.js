@@ -117,10 +117,12 @@
     const mod = meta && meta.modality ? String(meta.modality).toLowerCase() : '';
     if (mod) {
       const [inp, out = ''] = mod.split('->');
-      if (/embed/.test(mod)) return 'embedding';
+      // 优先专用输出模态（如 text+image->text+image 归为图片）
+      if (/embed/.test(out) || (!out && /embed/.test(mod))) return 'embedding';
       if (/video/.test(out)) return 'video';
-      if (/image/.test(out) && !/text/.test(out)) return 'image';
-      if (/audio/.test(out) && !/text/.test(out)) return 'speech';
+      if (/image/.test(out)) return 'image';
+      if (/audio|speech/.test(out)) return 'speech';
+      if (/transcri/.test(out)) return 'transcription';
       if (/audio/.test(inp) && out.trim() === 'text' && !/image|video/.test(inp) && /whisper|transcri|asr|stt/i.test(id)) return 'transcription';
       if (out) return 'text';
     }
@@ -142,6 +144,10 @@
     }
     if (provider.type === 'gemini') {
       return { url: base + '/models?pageSize=1000', method: 'GET', headers: { 'x-goog-api-key': key } };
+    }
+    // OpenRouter 默认只返回文本输出模型，需 output_modalities=all 才含图片/视频等
+    if (provider.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) {
+      return { url: base + '/models?output_modalities=all', method: 'GET', headers: { 'Authorization': 'Bearer ' + key } };
     }
     return { url: base + '/models', method: 'GET', headers: { 'Authorization': 'Bearer ' + key } };
   }
