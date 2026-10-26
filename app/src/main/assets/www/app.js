@@ -1841,6 +1841,7 @@
       fetchSel = new Set(); fetchCat = 'all';
       $('#fetch-search').value = '';
       renderFetchList();
+      if (/openrouter\.ai/i.test(prov.baseUrl) && fetched.some(m => ['image', 'video'].includes(catOf(m)))) toast('已包含图片/视频等模型，可切换分类查看');
       $('#fetch-sheet').classList.add('show'); $('#fetch-mask').classList.add('show');
     } catch (e) {
       dialog({ title: '获取失败', body: String(e.message || e) + '\n\n部分服务商不提供模型列表接口，可手动输入模型名。', okText: '知道了', info: true });

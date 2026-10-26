@@ -153,3 +153,10 @@ test('获取模型列表：请求与解析', () => {
     { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent', 'countTokens'] },
     { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] }] })), ['gemini-3.8-flash']);
 });
+
+test('OpenRouter 获取模型列表包含全部输出模态', () => {
+  const r = P.buildModelsRequest({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1/', apiKey: 'k' });
+  assert.strictEqual(r.url, 'https://openrouter.ai/api/v1/models?output_modalities=all');
+  const r2 = P.buildModelsRequest({ type: 'openai', presetId: 'openrouter', baseUrl: 'https://proxy.example/v1', apiKey: 'k' });
+  assert.strictEqual(r2.url, 'https://proxy.example/v1/models?output_modalities=all');
+});
