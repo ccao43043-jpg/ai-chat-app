@@ -1888,14 +1888,14 @@
         let c = Providers.classifyModel(m, editMeta[m]); if (c === 'audio' || c === 'text') c = 'speech';
         const f = CAT_FIELD[c], cur = $(PE_FIELDS[f]).value.trim() === m;
         const el = document.createElement('div'); el.className = 'check-item' + (cur ? ' on' : '');
-        el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + '</span><span class="cl-tag">' +
+        el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + modelInfoLine(m) + '</span><span class="cl-tag">' +
           esc(Providers.MODEL_CATEGORIES.find(x => x.key === c).label) + '</span>';
         el.onclick = () => { $(PE_FIELDS[f]).value = m; toast('已设为' + Providers.MODEL_CATEGORIES.find(x => x.key === c).label + '模型，记得保存'); renderFetchList(); renderFieldPrices(); };
         box.appendChild(el); return;
       }
       const had = editModels.includes(m);
       const el = document.createElement('div'); el.className = 'check-item' + (fetchSel.has(m) || had ? ' on' : '');
-      el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + '</span>' + (had ? '<span class="cl-tag">已添加</span>' : '');
+      el.innerHTML = '<span class="box">' + ICON.check + '</span><span class="cl-name">' + esc(m) + modelInfoLine(m) + '</span>' + (had ? '<span class="cl-tag">已添加</span>' : '');
       if (!had) el.onclick = () => { fetchSel.has(m) ? fetchSel.delete(m) : fetchSel.add(m); renderFetchList(); };
       box.appendChild(el);
     });
