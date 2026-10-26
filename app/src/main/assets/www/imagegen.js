@@ -89,8 +89,29 @@
     return s + ' 秒';
   }
 
+  /** FLUX/Seedream 档位模型：委托 Providers（未加载时用本地启发） */
+  function isFluxTierModel(model, provider) {
+    const Providers = root.Providers || (typeof require !== 'undefined' ? require('./providers.js') : null);
+    if (Providers && Providers.isFluxTierModel) return Providers.isFluxTierModel(model, provider);
+    const id = String(model || '').toLowerCase();
+    return /flux[\-._]?3/.test(id) || (/black-forest-labs\//.test(id) && /flux/.test(id));
+  }
+
+  /** 生图页尺寸下拉：FLUX 时用更清晰的档位标签，value 仍为 WxH */
+  function sizeOptionLabel(size, fluxTier) {
+    if (!fluxTier) return size;
+    const Providers = root.Providers || (typeof require !== 'undefined' ? require('./providers.js') : null);
+    if (Providers && Providers.pixelSizeToTier) {
+      const t = Providers.pixelSizeToTier(size);
+      const square = t.aspect_ratio === '1:1';
+      return t.resolution + ' · ' + (square ? '正方形' : t.aspect_ratio);
+    }
+    return size;
+  }
+
   const api = { SIZES, DEFAULT_SIZE, HISTORY_LIMIT, canGenerate, effectiveModel, listImageProviders,
-    normalizeSize, buildPromptFromMessages, buildRequest, parseResponse, progressStage, formatElapsed };
+    normalizeSize, buildPromptFromMessages, buildRequest, parseResponse, progressStage, formatElapsed,
+    isFluxTierModel, sizeOptionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ImageGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);
