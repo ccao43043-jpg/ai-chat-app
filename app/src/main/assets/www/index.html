@@ -236,18 +236,29 @@
       <label class="field"><span>API Key</span>
         <div class="input-row"><input id="pe-key" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-..."><button class="chip-btn" id="pe-key-toggle" type="button">显示</button></div></label>
     </div>
-    <div class="group-title row">模型
+    <div class="group-title row">模型分类
       <button class="chip-btn accent" id="pe-fetch" type="button">
         <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>从接口获取模型列表</button>
     </div>
-    <div class="group form">
+    <div class="group form" id="pe-cat-text">
+      <div class="field"><span>文本模型<small>用于聊天；第一个为默认聊天模型，点 × 删除，点模型名设为默认</small></span></div>
       <div id="pe-model-chips" class="model-chips"></div>
       <div class="input-row"><input id="pe-model-add" placeholder="输入模型名称后添加" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="chip-btn" id="pe-model-add-btn" type="button">添加</button></div>
-      <div class="hint small" style="margin-top:8px">第一个为默认模型；点 × 删除，点模型名设为默认。</div>
+      <div class="hint small" style="margin-top:8px">第一个为默认聊天模型</div>
       <label class="field inline" id="pe-su-row" style="margin-top:6px"><span>流式请求返回用量<small>发送 stream_options.include_usage，用于缓存命中统计；不支持的服务商可能报错</small></span><input type="checkbox" id="pe-streamusage" class="switch"></label>
       <label class="field" id="pe-think-row" style="margin-top:6px"><span>思考模式（千问 enable_thinking）<small>默认 = 不发送该参数，由模型决定；思考内容会显示在回复上方</small></span><select id="pe-thinking"><option value="">默认（模型自身设置）</option><option value="on">开启思考</option><option value="off">关闭思考（更快、更省）</option></select></label>
-      <label class="field" style="margin-top:6px"><span>图片生成模型（可选，仅 OpenAI 兼容）</span>
-        <input id="pe-imgmodel" autocapitalize="off" spellcheck="false" placeholder="如 gpt-image-2.5-flare / cogview-3-flash"></label>
+    </div>
+    <div class="group form" id="pe-cat-other">
+      <label class="field"><span>图片生成<small>OpenAI 兼容 /images/generations；生图页默认使用</small></span>
+        <input id="pe-imgmodel" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 gpt-image-2.5-flare / cogview-3-flash"></label>
+      <label class="field"><span>视频生成<small>预留配置，暂未接入生成接口</small></span>
+        <input id="pe-videomodel" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 wanx2.1-t2v / kling-v2"></label>
+      <label class="field"><span>嵌入向量<small>/embeddings，预留配置</small></span>
+        <input id="pe-embedmodel" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 text-embedding-3-small"></label>
+      <label class="field"><span>语音合成（TTS）<small>/audio/speech，预留配置</small></span>
+        <input id="pe-speechmodel" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 tts-1 / cosyvoice-v2"></label>
+      <label class="field"><span>语音转写（STT）<small>/audio/transcriptions，预留配置</small></span>
+        <input id="pe-sttmodel" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 whisper-1"></label>
     </div>
     <button class="ghost-btn danger" id="pe-delete">删除此服务商</button>
   </div>
@@ -465,6 +476,8 @@
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
     <input id="fetch-search" placeholder="筛选模型">
   </div>
+  <div id="fetch-cats" class="model-chips" style="padding:0 16px 8px"></div>
+  <div class="hint small" id="fetch-cat-hint" style="padding:0 16px"></div>
   <div id="fetch-list" class="check-list"></div>
   <div class="btn-row">
     <button class="pill-btn" id="fetch-cancel">取消</button>

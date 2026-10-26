@@ -5,7 +5,7 @@
   // 预设模型名均已对照各家官方文档核实（2026-10）；用户可随时编辑或「从接口获取模型列表」
   const PRESETS = [
     { presetId: 'openai', name: 'OpenAI', type: 'openai', baseUrl: 'https://api.openai.com/v1',
-      models: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'], imageModel: 'gpt-image-2.5-flare', vision: true },
+      models: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'], imageModel: 'gpt-image-2.5-flare', videoModel: '', embeddingModel: 'text-embedding-3-small', speechModel: 'tts-1', transcriptionModel: 'whisper-1', vision: true },
     { presetId: 'deepseek', name: 'DeepSeek', type: 'openai', baseUrl: 'https://api.deepseek.com',
       models: ['deepseek-flash', 'deepseek-v4-pro'], imageModel: '', vision: true },
     // 阿里云百炼（DashScope OpenAI 兼容模式）：help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope · model-pricing（2026-10-15 更新）
@@ -92,6 +92,47 @@
     return false;
   }
 
+
+  /** 模型分类（API 设置里细分选择）：text 用 models[]，其余为单个主模型字段 */
+  const MODEL_CATEGORIES = [
+    { key: 'text', label: '文本模型', field: 'models' },
+    { key: 'image', label: '图片生成', field: 'imageModel' },
+    { key: 'video', label: '视频生成', field: 'videoModel' },
+    { key: 'embedding', label: '嵌入向量', field: 'embeddingModel' },
+    { key: 'speech', label: '语音合成', field: 'speechModel' },
+    { key: 'transcription', label: '语音转写', field: 'transcriptionModel' },
+  ];
+  const EXTRA_MODEL_FIELDS = ['imageModel', 'videoModel', 'embeddingModel', 'speechModel', 'transcriptionModel'];
+
+  /** 补齐分类字段（缺失 = ''），不改动已有 models / imageModel */
+  function normalizeModelFields(p) {
+    if (!p || typeof p !== 'object') return p;
+    if (!Array.isArray(p.models)) p.models = [];
+    EXTRA_MODEL_FIELDS.forEach(f => { if (typeof p[f] !== 'string') p[f] = p[f] == null ? '' : String(p[f]); });
+    return p;
+  }
+
+  /** 按名称/模态推测模型分类：返回 text|image|video|embedding|speech|transcription|audio */
+  function classifyModel(id, meta) {
+    const mod = meta && meta.modality ? String(meta.modality).toLowerCase() : '';
+    if (mod) {
+      const [inp, out = ''] = mod.split('->');
+      if (/embed/.test(mod)) return 'embedding';
+      if (/video/.test(out)) return 'video';
+      if (/image/.test(out) && !/text/.test(out)) return 'image';
+      if (/audio/.test(out) && !/text/.test(out)) return 'speech';
+      if (/audio/.test(inp) && out.trim() === 'text' && !/image|video/.test(inp) && /whisper|transcri|asr|stt/i.test(id)) return 'transcription';
+      if (out) return 'text';
+    }
+    const n = String(id || '').toLowerCase();
+    if (/embed|bge-|\bm3e\b/.test(n)) return 'embedding';
+    if (/whisper|transcri|\basr\b|stt|paraformer|sensevoice/.test(n)) return 'transcription';
+    if (/tts|speech|cosyvoice|sambert|fishaudio/.test(n)) return 'speech';
+    if (/video|sora|kling|wanx?[\d.-]*-?(t2v|i2v)|cogvideo|veo|hunyuanvideo|ltx/.test(n)) return 'video';
+    if (/image|kolors|cogview|flux|wanx|dall-?e|stable-diffusion|sdxl|imagen|seedream/.test(n)) return 'image';
+    return 'text';
+  }
+
   /** 获取模型列表的请求 */
   function buildModelsRequest(provider) {
     const base = trimSlash(provider.baseUrl);
@@ -130,7 +171,13 @@
       const ctx = m.context_length || m.context_window || m.max_context_length || m.max_input_tokens || m.inputTokenLimit ||
         (m.top_provider && m.top_provider.context_length) || 0;
       const outT = m.outputTokenLimit || m.max_output_tokens || (m.top_provider && m.top_provider.max_completion_tokens) || 0;
-      if (ctx > 0) out[id] = Object.assign({ context: Number(ctx) }, outT > 0 ? { maxOutput: Number(outT) } : {});
+      const arch = m.architecture || {};
+      const modality = arch.modality || (arch.input_modalities && arch.output_modalities ? arch.input_modalities.join('+') + '->' + arch.output_modalities.join('+') : '') ||
+        (typeof m.modality === 'string' ? m.modality : '') || (m.type && /embed|image|video|audio|tts|stt/i.test(m.type) ? m.type + '->' + m.type : '');
+      const o = {};
+      if (ctx > 0) { o.context = Number(ctx); if (outT > 0) o.maxOutput = Number(outT); }
+      if (modality) o.modality = String(modality);
+      if (Object.keys(o).length) out[id] = o;
     });
     return out;
   }
@@ -454,7 +501,8 @@
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta };
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta,
+    MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);
