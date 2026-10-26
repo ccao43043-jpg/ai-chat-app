@@ -2456,7 +2456,19 @@
     const want = ImageGen.normalizeSize(preferred || settings.imageSize || ImageGen.DEFAULT_SIZE);
     const sizes = ImageGen.SIZES.slice();
     if (want && !sizes.includes(want)) sizes.unshift(want);
-    sel.innerHTML = sizes.map(s => '<option value="' + esc(s) + '"' + (s === want ? ' selected' : '') + '>' + esc(s) + '</option>').join('');
+    const p = resolveImageProvider();
+    const model = resolveImageModel(p);
+    const flux = ImageGen.isFluxTierModel(model, p);
+    sel.innerHTML = sizes.map(s => {
+      const label = ImageGen.sizeOptionLabel(s, flux);
+      return '<option value="' + esc(s) + '"' + (s === want ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    const hint = $('#ig-size-hint');
+    if (hint) {
+      hint.textContent = flux
+        ? 'FLUX 3 使用分辨率档位 + 宽高比（已自动转换）'
+        : '默认取自设置里的「生成图片尺寸」';
+    }
   }
   function fillImageGenControls() {
     const sel = $('#ig-provider-sel');
@@ -2481,6 +2493,7 @@
       settings.imageGenModel = model;
     }
     igUiSyncing = false;
+    fillImageSizeSelect($('#ig-size') && $('#ig-size').value);
     refreshImageGenMeta();
   }
   function persistImageGenSelection() {
@@ -2490,6 +2503,7 @@
     if (sel) settings.imageGenProviderId = sel.value || '';
     if (modelEl) settings.imageGenModel = (modelEl.value || '').trim();
     saveSettings();
+    fillImageSizeSelect($('#ig-size') && $('#ig-size').value);
     refreshImageGenMeta();
   }
   function onImageGenProviderChange() {
@@ -2504,6 +2518,7 @@
     if (modelEl) modelEl.value = next;
     settings.imageGenModel = next;
     saveSettings();
+    fillImageSizeSelect($('#ig-size') && $('#ig-size').value);
     refreshImageGenMeta();
   }
   function refreshImageGenMeta() {

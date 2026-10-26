@@ -516,35 +516,123 @@
     return 'HTTP ' + status + (hint ? '（' + hint + '）' : '') + (msg ? '：' + msg : '');
   }
 
-  /** OpenAI 兼容 /images/generations；opts.images 为 data-URL 数组时写入 image 字段做图生图 */
+  /** OpenRouter 服务商（预设或 baseUrl） */
+  function isOpenRouterProvider(provider) {
+    if (!provider) return false;
+    if (provider.presetId === 'openrouter') return true;
+    return /openrouter\.ai/i.test(String(provider.baseUrl || ''));
+  }
+
+  /**
+   * FLUX 3 / Seedream 等使用 resolution 档位 + aspect_ratio，而非像素 size。
+   * 匹配：flux-3 / flux.3 / flux3，或 black-forest-labs/ + flux；可选 openrouter 上的 seedream。
+   */
+  function isFluxTierModel(model, provider) {
+    const id = String(model || '').toLowerCase();
+    if (!id) return false;
+    if (/flux[\-._]?3/.test(id)) return true;
+    if (/black-forest-labs\//.test(id) && /flux/.test(id)) return true;
+    if (provider && isOpenRouterProvider(provider) && /seedream/.test(id)) return true;
+    return false;
+  }
+
+  const ASPECT_RATIOS = [
+    '21:9', '2:1', '16:9', '3:2', '7:5', '4:3', '5:4', '1:1',
+    '4:5', '3:4', '5:7', '2:3', '9:16', '1:2', '9:21',
+  ];
+
+  function parsePixelSize(size) {
+    const m = String(size || '').trim().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+    if (!m) return null;
+    const w = parseInt(m[1], 10), h = parseInt(m[2], 10);
+    if (!w || !h) return null;
+    return { w: w, h: h };
+  }
+
+  function resolutionFromLongEdge(maxEdge) {
+    if (maxEdge <= 768) return '768';
+    if (maxEdge <= 1280) return '1K';
+    if (maxEdge <= 1792) return '1.5K';
+    if (maxEdge <= 2560) return '2K';
+    return '4K';
+  }
+
+  function closestAspectRatio(w, h) {
+    const r = w / h;
+    let best = '1:1', bestDiff = Infinity;
+    for (let i = 0; i < ASPECT_RATIOS.length; i++) {
+      const parts = ASPECT_RATIOS[i].split(':');
+      const ar = Number(parts[0]) / Number(parts[1]);
+      const d = Math.abs(ar - r);
+      if (d < bestDiff) { bestDiff = d; best = ASPECT_RATIOS[i]; }
+    }
+    return best;
+  }
+
+  /** 像素 WxH → { resolution, aspect_ratio }；无法解析时默认 1K + 1:1 */
+  function pixelSizeToTier(size) {
+    const wh = parsePixelSize(size);
+    if (!wh) return { resolution: '1K', aspect_ratio: '1:1' };
+    return {
+      resolution: resolutionFromLongEdge(Math.max(wh.w, wh.h)),
+      aspect_ratio: closestAspectRatio(wh.w, wh.h),
+    };
+  }
+
+  /** OpenAI 兼容图像生成；FLUX 档位模型用 resolution+aspect_ratio；OpenRouter 走 /images */
   function buildImageRequest(provider, model, prompt, opts) {
     opts = opts || {};
-    const body = { model, prompt, n: 1 };
-    if (opts.size) body.size = opts.size;
-    if (provider.presetId === 'siliconflow') {
-      body.image_size = opts.size || '1024x1024'; delete body.size; delete body.n;
-      if (/kolors/i.test(model)) body.batch_size = 1;
+    const body = { model: model, prompt: prompt, n: 1 };
+    const images = Array.isArray(opts.images) ? opts.images.filter(Boolean).slice(0, 10) : [];
+    const tier = isFluxTierModel(model, provider);
+    const openrouter = isOpenRouterProvider(provider);
+
+    if (tier) {
+      const mapped = pixelSizeToTier(opts.size || '1024x1024');
+      body.resolution = mapped.resolution;
+      body.aspect_ratio = mapped.aspect_ratio;
+      delete body.size;
+      if (images.length) {
+        body.input_references = images.map(function (url) {
+          return { type: 'image_url', image_url: { url: url } };
+        });
+      }
+    } else {
+      if (opts.size) body.size = opts.size;
+      if (provider.presetId === 'siliconflow') {
+        body.image_size = opts.size || '1024x1024'; delete body.size; delete body.n;
+        if (/kolors/i.test(model)) body.batch_size = 1;
+      }
+      if (images.length) body.image = images[0];
     }
-    const images = Array.isArray(opts.images) ? opts.images.filter(Boolean) : [];
-    if (images.length) body.image = images[0];
+
+    const path = openrouter ? '/images' : '/images/generations';
     return {
-      url: trimSlash(provider.baseUrl) + '/images/generations', method: 'POST',
+      url: trimSlash(provider.baseUrl) + path, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (provider.apiKey || '').trim() },
       body: JSON.stringify(body),
     };
   }
 
-  /** 返回图片 src 列表（URL 或 data:URL） */
+  /** 返回图片 src 列表（URL 或 data:URL）；尊重 media_type */
   function parseImageResponse(text) {
     const obj = JSON.parse(text);
     const list = obj.data || obj.images || [];
-    return list.map(it => it.url ? it.url : (it.b64_json ? 'data:image/png;base64,' + it.b64_json : null)).filter(Boolean);
+    return list.map(function (it) {
+      if (it.url) return it.url;
+      if (it.b64_json) {
+        const mt = (it.media_type || it.mime_type || 'image/png').trim() || 'image/png';
+        return 'data:' + mt + ';base64,' + it.b64_json;
+      }
+      return null;
+    }).filter(Boolean);
   }
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
-    MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel };
+    MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

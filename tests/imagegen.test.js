@@ -110,3 +110,33 @@ test('buildRequest 带参考图时转发 images → Providers.body.image', () =>
   const bare = JSON.parse(ImageGen.buildRequest(p, 'a', '1024x1024').body);
   assert.ok(!('image' in bare));
 });
+
+
+test('FLUX OpenRouter：buildRequest 走 /images 且 resolution+aspect_ratio', () => {
+  const p = { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk', imageModel: 'black-forest-labs/flux-3-image', presetId: 'openrouter' };
+  const req = ImageGen.buildRequest(p, 'neon city', '768x768');
+  assert.ok(req.url.endsWith('/images'));
+  assert.ok(!req.url.includes('/generations'));
+  const body = JSON.parse(req.body);
+  assert.strictEqual(body.resolution, '768');
+  assert.strictEqual(body.aspect_ratio, '1:1');
+  assert.ok(!('size' in body));
+});
+
+test('FLUX 参考图 → input_references', () => {
+  const p = { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk', imageModel: '', presetId: 'openrouter' };
+  const dataUrl = 'data:image/jpeg;base64,AAA';
+  const req = ImageGen.buildRequest(p, 'edit', '1024x1024', 'black-forest-labs/flux-3-image', { images: [dataUrl] });
+  const body = JSON.parse(req.body);
+  assert.ok(Array.isArray(body.input_references));
+  assert.deepStrictEqual(body.input_references[0], { type: 'image_url', image_url: { url: dataUrl } });
+  assert.ok(!('image' in body));
+});
+
+test('isFluxTierModel / sizeOptionLabel', () => {
+  assert.ok(ImageGen.isFluxTierModel('black-forest-labs/flux-3-image'));
+  assert.ok(!ImageGen.isFluxTierModel('gpt-image-1'));
+  assert.strictEqual(ImageGen.sizeOptionLabel('768x768', false), '768x768');
+  assert.ok(ImageGen.sizeOptionLabel('768x768', true).includes('768'));
+  assert.ok(ImageGen.sizeOptionLabel('1024x1792', true).includes('9:16') || ImageGen.sizeOptionLabel('1024x1792', true).includes('1.5K'));
+});
