@@ -498,9 +498,9 @@
     });
   }
   const SUGGESTIONS = [
-    { t: '写一封邮件', d: '向客户说明项目延期并致歉', p: '帮我写一封邮件，向客户说明项目将延期一周，语气诚恳专业。' },
-    { t: '解释概念', d: '用简单的话讲清楚一个知识点', p: '用通俗易懂的方式解释一下什么是大语言模型，并举个生活中的例子。' },
-    { t: '写段代码', d: 'Python 批量重命名文件', p: '写一个 Python 脚本，把一个文件夹里的所有图片按拍摄日期重命名。' },
+    { t: '写一份周报', d: '总结本周工作与下周计划', p: '帮我写一份简洁专业的周报，包含本周完成事项、进行中事项和下周计划，用条目列出。' },
+    { t: '解释这段代码', d: '用通俗语言讲清逻辑', p: '请用通俗易懂的方式解释下面这段代码在做什么，并指出关键逻辑（我会接着粘贴代码）：' },
+    { t: '翻译成英文', d: '自然、地道的英文表达', p: '把下面内容翻译成自然、地道的英文，保留专业术语：' },
     { t: '旅行规划', d: '制定三天两晚的行程', p: '帮我规划一个杭州三天两晚的旅行行程，包含美食推荐。' },
   ];
   function renderMessages() {
@@ -519,10 +519,10 @@
         $('#empty-switch').onclick = () => openPersonas();
         return;
       }
-      empty.innerHTML = '<img class="hero-logo" src="logo.svg" alt=""><h1>AI Chat</h1>' +
-        (has ? '<p class="sub">你好，今天想聊点什么？</p><div class="suggest"></div>' +
+      empty.innerHTML = '<div class="hero-icon"><img class="hero-logo" src="logo.svg" alt=""></div><h1>你好，我是 AI Chat</h1>' +
+        (has ? '<p class="sub">专注高质量文字生成。支持插件扩展能力。</p><div class="suggest"></div>' +
           '<div class="persona-strip-head"><span>从助手开始</span><button class="link-btn" id="empty-all-personas">全部 ›</button></div><div class="persona-strip"></div>'
-             : '<p class="sub">一个应用，连接多家 AI 服务</p><div class="setup-card"><b>开始之前</b><ol><li>打开设置，选择一个服务商</li><li>粘贴你的 API Key 并保存</li><li>回到这里，点顶部切换模型即可聊天</li></ol><button class="pill-btn primary" id="empty-setup" style="width:100%">去设置 API Key</button></div>');
+             : '<p class="sub">一个应用，连接多家 AI 服务。支持插件扩展能力。</p><div class="setup-card"><b>开始之前</b><ol><li>打开设置，选择一个服务商</li><li>粘贴你的 API Key 并保存</li><li>回到这里，点顶部切换模型即可聊天</li></ol><button class="pill-btn primary" id="empty-setup" style="width:100%">去设置 API Key</button></div>');
       box.appendChild(empty);
       if (has) {
         const sg = empty.querySelector('.suggest');
