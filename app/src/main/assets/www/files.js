@@ -188,7 +188,14 @@
 
   function formatSize(n) { if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'; return (n / 1048576).toFixed(1) + ' MB'; }
 
-  const api = { TEXT_EXTS, DEFAULT_FILE_MAX, DEFAULT_TOTAL_MAX, extOf, classifyFile, decodeText, looksBinary, docxXmlToText, pptxXmlToText,
+  // 必须先把 FileList 拷贝成数组再清空 input.value：FileList 是实时引用，清空后会变成空列表
+  function takeInputFiles(input) {
+    const files = Array.from((input && input.files) || []);
+    if (input) { try { input.value = ''; } catch (e) {} }
+    return files;
+  }
+
+  const api = { TEXT_EXTS, takeInputFiles, DEFAULT_FILE_MAX, DEFAULT_TOTAL_MAX, extOf, classifyFile, decodeText, looksBinary, docxXmlToText, pptxXmlToText,
     extractDocx, extractPptx, extractXlsx, extractPdf, normalizeCjk, capText, buildFileContext, formatSize };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Files = api;

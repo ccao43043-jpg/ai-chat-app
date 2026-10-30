@@ -1168,12 +1168,14 @@
     ]);
   };
   $('#file-input').onchange = async e => {
-    const files = e.target.files; e.target.value = '';
-    await handlePickedFiles(files);
+    const files = Files.takeInputFiles(e.target);
+    if (!files.length) { toast('未选择文件或读取失败，请重试'); return; }
+    try { await handlePickedFiles(files); } catch (err) { console.error(err); toast('文件添加失败：' + (err && err.message || err)); }
   };
   $('#file-input-image').onchange = async e => {
-    const files = e.target.files; e.target.value = '';
-    await handlePickedFiles(files);
+    const files = Files.takeInputFiles(e.target);
+    if (!files.length) { toast('未选择文件或读取失败，请重试'); return; }
+    try { await handlePickedFiles(files); } catch (err) { console.error(err); toast('文件添加失败：' + (err && err.message || err)); }
   };
   const MAX_FILE_BYTES = 40 * 1024 * 1024;
   function addDoc(file, kind) {

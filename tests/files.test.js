@@ -117,3 +117,13 @@ test('注入文件内容：文件名标题、单文件截断提示、总长度�
   assert.strictEqual(F.buildFileContext([], '仅问题'), '仅问题');
   assert.strictEqual(F.formatSize(1536), '1.5 KB');
 });
+
+test('takeInputFiles 在清空 input.value 前拷贝实时 FileList（v0.6.7 上传无反应回归）', () => {
+  const Files = require('../app/src/main/assets/www/files.js');
+  const live = [{ name: 'a.pdf' }, { name: 'b.txt' }];
+  const input = { get files() { return live; }, set value(v) { if (v === '') live.length = 0; } };
+  const got = Files.takeInputFiles(input);
+  assert.strictEqual(got.length, 2);
+  assert.strictEqual(got[0].name, 'a.pdf');
+  assert.deepStrictEqual(Files.takeInputFiles(null), []);
+});
