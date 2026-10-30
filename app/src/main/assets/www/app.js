@@ -457,6 +457,12 @@
     const dot = $('#mp-dot');
     dot.style.background = ok ? (PROVIDER_COLORS[p.presetId] || PROVIDER_COLORS.custom) : '';
     dot.textContent = ok ? p.name.trim().charAt(0).toUpperCase() : '';
+    const sub = document.querySelector('.brand-sub');
+    if (sub) {
+      if (ok && conv.model) sub.textContent = (p.name || '多模型') + ' · ' + conv.model;
+      else if (ok) sub.textContent = (p.name || '多模型') + ' · 文字生成';
+      else sub.textContent = '文字生成 · 多模型';
+    }
     renderConvBar();
   }
   function dayGroup(t) {
@@ -559,24 +565,31 @@
     if (pst && pst.dim) el.classList.add(pst.light ? 'dim-light' : 'dim');
     if (pst && pst.label) { const lb = document.createElement('div'); lb.className = 'msg-state'; lb.textContent = pst.label; el.appendChild(lb); }
     const isLast = conv.messages[conv.messages.length - 1] === m;
+    let botCol = null;
     if (m.role === 'assistant') {
-      const head = document.createElement('div'); head.className = 'bot-head';
+      const row = document.createElement('div'); row.className = 'bot-row';
+      const avWrap = document.createElement('div'); avWrap.className = 'bot-avatar-wrap';
       const pe = m.personaEmoji || (!m.imageGen && conv.personaEmoji);
       const pn = m.personaName || (!m.imageGen && conv.personaName);
-      head.innerHTML = (pe ? '<span class="bot-avatar emoji">' + esc(pe) + '</span>' : '<img class="bot-avatar" src="logo.svg" alt="">') +
-        '<span class="bot-name">' + (pn ? '<b>' + esc(pn) + '</b> · ' : '') + esc(m.model || 'AI') + (m.stopped ? ' · 已停止' : '') + '</span>';
+      avWrap.innerHTML = pe ? '<span class="bot-avatar emoji">' + esc(pe) + '</span>' : '<img class="bot-avatar" src="logo.svg" alt="">';
+      botCol = document.createElement('div'); botCol.className = 'bot-col';
+      const head = document.createElement('div'); head.className = 'bot-head';
+      head.innerHTML = '<span class="bot-name">' + (pn ? '<b>' + esc(pn) + '</b> · ' : '') + esc(m.model || 'AI') + (m.stopped ? ' · 已停止' : '') + '</span>';
       if (!m.pending) Plugins.registry.messageBadges(m, settings, conv, pluginHost).forEach(b => {
         const bd = document.createElement('button'); bd.className = 'mbadge tone-' + (b.tone || 'info'); bd.textContent = b.text; if (b.title) bd.title = b.title;
         if (b.action) bd.onclick = e => { e.stopPropagation(); b.action(); };
         head.appendChild(bd);
       });
-      el.appendChild(head);
+      botCol.appendChild(head);
+      row.appendChild(avWrap); row.appendChild(botCol);
+      el.appendChild(row);
     }
-    if (m.files && m.files.length) el.appendChild(buildFileChips(m.files));
+    const attachTarget = botCol || el;
+    if (m.files && m.files.length) attachTarget.appendChild(buildFileChips(m.files));
     if (m.images && m.images.length) {
       const imgs = document.createElement('div'); imgs.className = 'msg-images';
       m.images.forEach(src => { const i = document.createElement('img'); i.src = src; i.onclick = () => openViewer(src); imgs.appendChild(i); });
-      el.appendChild(imgs);
+      attachTarget.appendChild(imgs);
     }
     if (m.role === 'user') {
       if (m.content) { const b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.content; el.appendChild(b); }
@@ -621,7 +634,7 @@
         if (m.pending && !m.reasoning && !m.searching && !m.pluginStatus) { const t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t); }
         else if (!m.pending && !m.reasoning && !(m.images && m.images.length)) { const e = document.createElement('div'); e.className = 'muted'; e.textContent = m.stopped ? '（已停止）' : '（空回复）'; body.appendChild(e); }
       }
-      if (body.childNodes.length) el.appendChild(body);
+      if (body.childNodes.length) (botCol || el).appendChild(body);
     }
     if (!m.pending) {
       const act = document.createElement('div'); act.className = 'actions';
@@ -636,7 +649,7 @@
       if (m.role === 'user' && !running && !m.imageGen) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (m.role === 'assistant' && !running && !m.imageGen && m.content) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (!running) act.appendChild(mkAct(ICON.trash, '删除', () => deleteMsg(m)));
-      el.appendChild(act);
+      (botCol || el).appendChild(act);
     }
   }
   const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', text: '文本', unknown: '文本' };
@@ -1272,21 +1285,47 @@
     return out;
   }
 
+  function syncComposerTags() {
+    const box = $('#composer-tags');
+    if (!box) return;
+    const tags = [];
+    if (settings.searchOn && !imageMode) tags.push({ icon: 'globe', label: '联网' });
+    if (imageMode) tags.push({ icon: 'spark', label: '生图' });
+    box.innerHTML = '';
+    if (!tags.length) { box.hidden = true; return; }
+    box.hidden = false;
+    tags.forEach(t => {
+      const s = document.createElement('span'); s.className = 'composer-tag';
+      s.innerHTML = (t.icon === 'globe'
+        ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5s1.2-6.1 3.6-8.5z"/></svg>'
+        : '<svg viewBox="0 0 24 24"><path d="M12 3.5c.6 4.2 1.9 5.5 6 6.3-4.1.8-5.4 2.1-6 6.3-.6-4.2-1.9-5.5-6-6.3 4.1-.8 5.4-2.1 6-6.3z"/></svg>') +
+        '<span>' + t.label + '</span>';
+      box.appendChild(s);
+    });
+  }
+  function defaultPlaceholder() {
+    if (imageMode) return '描述你想生成的图片…';
+    if (settings.searchOn) return '联网搜索已开启，问点新鲜事…';
+    return '输入消息… (Shift + Enter 换行)';
+  }
   $('#btn-imagegen').onclick = () => {
     imageMode = !imageMode;
     $('#btn-imagegen').classList.toggle('active', imageMode);
     $('#composer-card').classList.toggle('imgmode', imageMode);
-    input.placeholder = imageMode ? '描述你想生成的图片…' : (settings.searchOn ? '联网搜索已开启，问点新鲜事…' : '给 AI 发消息…');
+    input.placeholder = defaultPlaceholder();
+    syncComposerTags();
     toast(imageMode ? '已切换到图片生成模式' : '已切换回聊天模式');
     if (imageMode && (attachments.length || docs.length)) { attachments = []; docs = []; renderAttachments(); }
   };
   function renderSearchChip() {
     $('#btn-search').classList.toggle('active', !!settings.searchOn);
-    if (!imageMode) input.placeholder = settings.searchOn ? '联网搜索已开启，问点新鲜事…' : '给 AI 发消息…';
+    if (!imageMode) input.placeholder = defaultPlaceholder();
+    syncComposerTags();
   }
   $('#btn-search').onclick = () => {
     if (!settings.searchOn && !searchReady()) { askSearchSetup(); return; }
     settings.searchOn = !settings.searchOn; saveSettings(); renderSearchChip();
+  syncComposerTags();
     toast(settings.searchOn ? '联网搜索已开启（' + searchInfo(settings.search.provider).name + '）' : '联网搜索已关闭');
   };
   function renderAttachments() {

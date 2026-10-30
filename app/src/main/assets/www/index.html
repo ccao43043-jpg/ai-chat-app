@@ -3,35 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>AI Chat</title>
-<link rel="stylesheet" href="lib/hl-light.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="lib/hl-dark.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="lib/hl-dark.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div id="app">
   <header class="topbar main-top">
-    <button class="icon-btn" id="btn-menu" aria-label="对话列表">
+    <button class="icon-btn menu-btn" id="btn-menu" aria-label="对话列表">
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h16"/></svg>
     </button>
-    <button class="model-pill" id="model-pill" aria-label="切换模型">
-      <span class="mp-dot" id="mp-dot"></span>
-      <span class="mp-text"><span class="mp-model" id="mp-model">选择模型</span><span class="mp-provider" id="mp-provider">点此切换</span></span>
-      <svg class="mp-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>
-    </button>
-    <button class="icon-btn" id="btn-new" aria-label="新对话">
-      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
-    </button>
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5c.6 4.2 1.9 5.5 6 6.3-4.1.8-5.4 2.1-6 6.3-.6-4.2-1.9-5.5-6-6.3 4.1-.8 5.4-2.1 6-6.3z"/></svg>
+      </div>
+      <div class="brand-copy">
+        <div class="brand-title">AI Chat</div>
+        <div class="brand-sub">文字生成 · 多模型</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="model-pill" id="model-pill" aria-label="切换模型">
+        <span class="mp-dot" id="mp-dot"></span>
+        <span class="mp-text"><span class="mp-model" id="mp-model">选择模型</span><span class="mp-provider" id="mp-provider">点此切换</span></span>
+        <svg class="mp-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-new" aria-label="新对话">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
   </header>
 
   <div id="conv-bar" class="conv-bar"></div>
   <main id="messages"></main>
 
   <footer class="composer">
-    <div class="composer-card" id="composer-card">
-      <div id="attach-preview" class="attach-preview"></div>
-      <textarea id="input" rows="1" placeholder="给 AI 发消息…"></textarea>
+    <div class="composer-wrap">
+      <div class="composer-tags" id="composer-tags" hidden></div>
       <div class="composer-tools">
         <button class="tool-btn" id="btn-attach" aria-label="添加图片或文件">
           <svg viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 01-7.1-7.1l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.4 8.4a1.7 1.7 0 01-2.4-2.4l7.7-7.7"/></svg>
@@ -51,12 +60,16 @@
           <svg viewBox="0 0 24 24"><path d="M12 3.5c.6 4.2 1.9 5.5 6 6.3-4.1.8-5.4 2.1-6 6.3-.6-4.2-1.9-5.5-6-6.3 4.1-.8 5.4-2.1 6-6.3z"/><path d="M18.5 15.5c.25 1.6.75 2.1 2.3 2.4-1.55.3-2.05.8-2.3 2.4-.25-1.6-.75-2.1-2.3-2.4 1.55-.3 2.05-.8 2.3-2.4z"/></svg>
           <span>生图</span>
         </button>
-        <span class="spacer"></span>
+      </div>
+      <div class="composer-card" id="composer-card">
+        <div id="attach-preview" class="attach-preview"></div>
+        <textarea id="input" rows="1" placeholder="输入消息… (Shift + Enter 换行)"></textarea>
         <button class="send-btn" id="btn-send" aria-label="发送" disabled>
-          <svg class="ic-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+          <svg class="ic-send" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           <svg class="ic-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
         </button>
       </div>
+      <p class="composer-disclaimer">AI 可能会犯错。请核实重要信息。</p>
     </div>
     <input type="file" id="file-input" multiple hidden>
     <input type="file" id="file-input-image" accept="image/*" multiple hidden>
@@ -70,51 +83,47 @@
 <!-- 侧边栏 -->
 <div id="drawer-mask" class="mask"></div>
 <aside id="drawer">
-  <div class="drawer-head">
-    <img class="brand-logo" src="logo.svg" alt="">
-    <div class="brand-name">AI Chat</div>
-  </div>
   <div class="drawer-tools">
+    <button class="new-chat-btn" id="drawer-new">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新对话
+    </button>
     <div class="search">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
       <input id="conv-search" placeholder="搜索对话">
     </div>
-    <button class="new-chat-btn" id="drawer-new">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新对话
-    </button>
   </div>
-  <div class="drawer-sec-label" id="drawer-sec-chats">对话</div>
+  <div class="drawer-sec-label" id="drawer-sec-chats" hidden>对话</div>
   <div id="conv-list"></div>
   <div class="drawer-foot">
-    <div class="drawer-sec-label">功能</div>
+    <button class="nav-row" id="btn-settings" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+      <span>设置</span>
+    </button>
+    <button class="nav-row" id="btn-plugins" type="button">
+      <svg viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 114 0V6h3a1 1 0 011 1v3h-1.5a2 2 0 100 4H18v3a1 1 0 01-1 1h-3v-1.5a2 2 0 10-4 0V18H7a1 1 0 01-1-1v-3h1.5a2 2 0 100-4H6V7a1 1 0 011-1h3z"/></svg>
+      <span>插件</span><small id="plugin-count" class="nav-meta">RP 等</small>
+    </button>
+    <div class="drawer-sec-label">更多</div>
     <div class="drawer-grid">
-      <button class="feat-btn" id="btn-personas">
-        <span class="feat-ic grad"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg></span>
-        <span class="feat-text"><span>助手</span><small id="persona-count">助手与提示词</small></span>
+      <button class="nav-row feat-btn" id="btn-personas" type="button">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg>
+        <span>助手</span><small id="persona-count" class="nav-meta">助手与提示词</small>
       </button>
-      <button class="feat-btn" id="btn-templates">
-        <span class="feat-ic"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg></span>
-        <span class="feat-text"><span>模板</span><small id="template-count">提示词模板</small></span>
+      <button class="nav-row feat-btn" id="btn-templates" type="button">
+        <svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg>
+        <span>模板</span><small id="template-count" class="nav-meta">提示词模板</small>
       </button>
-      <button class="feat-btn" id="btn-imagegen-page">
-        <span class="feat-ic grad"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3.5 15.5l4.5-4 3.5 3.2 3-2.7 6 5.5"/></svg></span>
-        <span class="feat-text"><span>生图</span><small id="imagegen-count">文字生成图片</small></span>
+      <button class="nav-row feat-btn" id="btn-imagegen-page" type="button">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3.5 15.5l4.5-4 3.5 3.2 3-2.7 6 5.5"/></svg>
+        <span>生图</span><small id="imagegen-count" class="nav-meta">文字生成图片</small>
       </button>
-      <button class="feat-btn" id="btn-usage">
-        <span class="feat-ic"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16V10M12 16V7M16 16v-5"/></svg></span>
-        <span class="feat-text"><span>用量</span><small id="usage-count">Token 统计</small></span>
+      <button class="nav-row feat-btn" id="btn-usage" type="button">
+        <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16V10M12 16V7M16 16v-5"/></svg>
+        <span>用量</span><small id="usage-count" class="nav-meta">Token 统计</small>
       </button>
-      <button class="feat-btn" id="btn-balance">
-        <span class="feat-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="M3.5 10h17"/><circle cx="15.5" cy="14" r="1.2"/></svg></span>
-        <span class="feat-text"><span>余额</span><small id="balance-count">账户余额</small></span>
-      </button>
-      <button class="feat-btn" id="btn-plugins">
-        <span class="feat-ic"><svg viewBox="0 0 24 24"><path d="M10 4.5a2 2 0 114 0V6h3a1 1 0 011 1v3h-1.5a2 2 0 100 4H18v3a1 1 0 01-1 1h-3v-1.5a2 2 0 10-4 0V18H7a1 1 0 01-1-1v-3h1.5a2 2 0 100-4H6V7a1 1 0 011-1h3z"/></svg></span>
-        <span class="feat-text"><span>插件</span><small id="plugin-count">RP 等</small></span>
-      </button>
-      <button class="feat-btn" id="btn-settings">
-        <span class="feat-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></span>
-        <span class="feat-text"><span>设置</span><small>服务商与偏好</small></span>
+      <button class="nav-row feat-btn" id="btn-balance" type="button">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="M3.5 10h17"/><circle cx="15.5" cy="14" r="1.2"/></svg>
+        <span>余额</span><small id="balance-count" class="nav-meta">账户余额</small>
       </button>
     </div>
   </div>
