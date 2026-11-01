@@ -47,7 +47,7 @@ test('搜索与标签筛选：收藏在前', () => {
   const all = T.filter(l, {});
   assert.deepStrictEqual(all.filter(t => t.pinned).slice(0, 3).map(t => t.name), ['通用助手', '简洁回答', '沉浸式角色扮演'], '内置收藏在前');
   assert.deepStrictEqual(T.filter(l, { query: '翻译' }).map(t => t.id), ['t-translate']);
-  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-cardgen', 't-rp-narrator', 't-rp-longform', 't-rp-cardrefine'], '按标签搜索');
+  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-cardgen', 't-rp-narrator', 't-rp-longform'], '按标签搜索');
   assert.ok(T.filter(l, { tag: '常用' }).every(t => t.tags.includes('常用')));
   assert.ok(T.allTags(l).includes('写作'));
 });
@@ -129,7 +129,7 @@ test('自动宏：time/date/时间/日期 自动替换且不进入变量表单',
 // v0.7.6：RP 模板
 test('v0.7.6 RP 模板：变量完整、支持 date/time、留空省略、旧内置原文升级', () => {
   const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
-  ['沉浸式角色扮演', 'RP 叙事风格', '长篇续写', '角色卡生成助手'].forEach(n => assert.ok(d.some(t => t.name === n), n));
+  ['沉浸式角色扮演', 'RP 叙事风格', '长篇续写', '角色卡 Skill'].forEach(n => assert.ok(d.some(t => t.name === n), n));
   const imm = by('t-rp-immersive');
   ['角色名', '用户名', '角色设定', '性格', '世界背景', '场景', '规则', '禁止事项'].forEach(v => assert.ok(T.variables(imm.content).includes(v), v));
   assert.ok(/\{\{date\}\}/.test(imm.content) && /\{\{time\}\}/.test(imm.content));
@@ -153,26 +153,7 @@ test('v0.7.6 分段设定解析与块模板', () => {
   ['world', 'character', 'rules', 'format', 'fewshot', 'prohibit', 'style'].forEach(k => assert.ok(R.BLOCK_TEMPLATES[k], k));
 });
 
-// v0.7.7：角色卡生成助手完善
-test('v0.7.7 角色卡生成助手：模式变量、一句话/问答、分层字段、精修模板、旧文升级', () => {
-  const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
-  const gen = by('t-rp-cardgen'), ref = by('t-rp-cardrefine');
-  assert.ok(gen && gen.pinned);
-  assert.deepStrictEqual(T.variables(gen.content).sort(), ['额外要求', '想法', '模式', '用户名', '风格偏好'].sort());
-  assert.ok(gen.content.includes('一句话生成') && gen.content.includes('逐步问答'));
-  ['外貌', '性格优点', '性格缺点', '说话方式', '背景经历', '人物关系', '秘密', '禁忌'].forEach(k => assert.ok(gen.content.includes(k), k));
-  ['【世界观】','【角色卡】','【RP规则】','【输出格式】','【示例对白】','【禁止事项】','【写作风格】','【开场白】'].forEach(h => assert.ok(gen.content.includes(h), h));
-  const one = T.fill(gen.content, { 模式: '一句话生成', 想法: '冷淡黑客' }, { dropEmpty: true });
-  assert.ok(one.includes('一句话生成') && one.includes('冷淡黑客') && !one.includes('风格偏好'));
-  const ask = T.fill(gen.content, { 模式: '逐步问答' }, { dropEmpty: true });
-  assert.ok(ask.includes('逐步问答') && !/想法：/.test(ask));
-  assert.ok(ref && ref.content.includes('【精修说明】'));
-  assert.ok(T.variables(ref.content).includes('精修重点'));
-  // 旧版 cardgen 原文升级
-  const old = '你是一名角色卡设计助手，帮助用户把零散的想法整理成可以直接用于角色扮演的完整设定。\n\n用户会给出一个角色或故事的想法（可能只有一两句话）。请：\n1. 先用 1–3 个简短问题确认最关键的缺失信息；如果用户说「直接写」，就合理补全。\n2. 然后按下面的分段输出设定，每段标题保持不变，方便复制到 RP 缓存优化器的「分层设定」对应块里：\n\n【世界观】时代、地点、势力、规则与基调（150–300 字）\n【角色卡】姓名、年龄、外貌、身份、背景经历、性格（优点与缺点）、说话方式与口头禅、喜好与禁忌、与用户的关系\n【RP规则】扮演时必须遵守的规则（如视角、不替用户行动、知识边界）\n【输出格式】回复长度、动作 / 对白的写法、人称\n【示例对白】3 组「用户：…… / 角色：……」的示范，体现角色的语气\n【禁止事项】角色绝不会做 / 说的事，以及不希望出现的内容\n【写作风格】文风、节奏、描写侧重\n【开场白】一段可以直接作为第一条消息的开场（100–200 字）\n\n不要输出与设定无关的解释。';
-  const m = T.mergeBuiltins([{ id: 't-rp-cardgen', name: '角色卡生成助手', content: old, builtin: true }], []);
-  assert.strictEqual(m.find(t => t.id === 't-rp-cardgen').content, gen.content);
-});
+// v0.7.7 parseSections 保留
 test('v0.7.7 parseSections：开场白 / 精修说明 / 往回查找', () => {
   const f = R.parseSections('【世界观】A\n【角色卡】B\n【开场白】开场\n【精修说明】改了外貌');
   assert.strictEqual(f.opening, '开场'); assert.ok(!f.精修说明); assert.strictEqual(f.world, 'A');
@@ -180,3 +161,34 @@ test('v0.7.7 parseSections：开场白 / 精修说明 / 往回查找', () => {
   const hit = R.findSectionMessage([{ role: 'assistant', content: '无' }, { role: 'assistant', content: '【世界观】X\n【角色卡】Y' }], 8);
   assert.strictEqual(hit.fields.world, 'X');
 });
+
+// v0.7.8：角色卡 Skill（无变量，生成+精修合一）
+test('v0.7.8 角色卡 Skill：无变量、skill 标记、八段齐全、旧文升级与精修退役', () => {
+  const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
+  const skill = by('t-rp-cardgen');
+  assert.ok(skill && skill.pinned && skill.skill);
+  assert.strictEqual(skill.name, '角色卡 Skill');
+  assert.ok(skill.tags.includes('Skill'));
+  assert.deepStrictEqual(T.variables(skill.content), []);
+  assert.strictEqual(T.CARD_SKILL_ID, 't-rp-cardgen');
+  assert.ok(!by('t-rp-cardrefine'), '内置列表不再含精修模板');
+  ['外貌', '性格优点', '性格缺点', '说话方式', '背景经历', '人物关系', '秘密', '禁忌', '精修一下'].forEach(k => assert.ok(skill.content.includes(k), k));
+  ['【世界观】','【角色卡】','【RP规则】','【输出格式】','【示例对白】','【禁止事项】','【写作风格】','【开场白】'].forEach(h => assert.ok(skill.content.includes(h), h));
+  // 0.7.6 / 0.7.7 旧文升级
+  for (const old of ["你是一名角色卡设计助手，帮助用户把零散的想法整理成可以直接用于角色扮演的完整设定。\n\n用户会给出一个角色或故事的想法（可能只有一两句话）。请：\n1. 先用 1–3 个简短问题确认最关键的缺失信息；如果用户说「直接写」，就合理补全。\n2. 然后按下面的分段输出设定，每段标题保持不变，方便复制到 RP 缓存优化器的「分层设定」对应块里：\n\n【世界观】时代、地点、势力、规则与基调（150–300 字）\n【角色卡】姓名、年龄、外貌、身份、背景经历、性格（优点与缺点）、说话方式与口头禅、喜好与禁忌、与用户的关系\n【RP规则】扮演时必须遵守的规则（如视角、不替用户行动、知识边界）\n【输出格式】回复长度、动作 / 对白的写法、人称\n【示例对白】3 组「用户：…… / 角色：……」的示范，体现角色的语气\n【禁止事项】角色绝不会做 / 说的事，以及不希望出现的内容\n【写作风格】文风、节奏、描写侧重\n【开场白】一段可以直接作为第一条消息的开场（100–200 字）\n\n不要输出与设定无关的解释。", "你是一名专业的角色卡设计助手。任务是把用户零散的想法，整理成可直接用于角色扮演、并可一键导入「RP 缓存优化器 · 分层设定」的完整设定。\n\n工作模式：{{模式|一句话生成}}\n- 「一句话生成」：用户给出一句想法（或下方「想法」已填）后，立刻输出完整分段设定；缺失信息请合理补全，不要先提问，也不要寒暄。\n- 「逐步问答」：先用 1–3 个简短问题确认最关键的缺失信息（每次只问一轮）；用户回答后，或明确说「直接写 / 开始生成」时，再输出完整分段设定。提问阶段不要输出【世界观】等分段标题。\n\n想法：{{想法}}\n用户扮演身份：{{用户名|用户}}\n风格偏好：{{风格偏好}}\n额外要求：{{额外要求}}\n\n—— 正式输出时，严格按下面 8 个标题分段，标题字面必须完全一致（含【】），方便自动导入。每段单独成块，段内用「- 」列表。不要输出与设定无关的开场白或收尾解释。——\n\n【世界观】\n- 时代 / 地点：\n- 主要势力与关系：\n- 世界规则（魔法 / 科技 / 社会制度）：\n- 基调与氛围：\n- 重要地点：\n（合计约 150–300 字）\n\n【角色卡】\n- 姓名：\n- 年龄 / 性别 / 外貌（身高、发色、穿着、标志性特征）：\n- 身份与背景经历（出身、关键转折）：\n- 性格优点：\n- 性格缺点 / 软肋：\n- 说话方式与口头禅：\n- 喜好：\n- 禁忌 / 雷区：\n- 人物关系（与 {{用户名|用户}}、重要 NPC）：\n- 目标与动机：\n- 秘密（角色自己知道、平时不会主动说破的）：\n（写具体、可扮演，避免空泛形容词堆砌）\n\n【RP规则】\n- 视角与人称：\n- 不替 {{用户名|用户}} 决定行动 / 台词 / 内心：\n- 知识边界（角色不知道的事）：\n- 剧情推进方式：\n- 其他必须遵守的规则：\n\n【输出格式】\n- 人称（第一 / 第三人称）：\n- 动作 / 神态 / 环境写法（如 *斜体*）：\n- 对白标点（如「」）：\n- 每次回复大致字数：\n- 结尾是否留下互动钩子：\n\n【示例对白】\n（恰好 3 组，体现角色语气与人物关系）\n{{用户名|用户}}：……\n角色：……\n\n{{用户名|用户}}：……\n角色：……\n\n{{用户名|用户}}：……\n角色：……\n\n【禁止事项】\n- 角色绝不会做 / 说的事：\n- 不希望出现的内容或题材：\n- 禁止的元信息（如「（扮演开始）」「旁白：」）：\n\n【写作风格】\n- 文风：\n- 节奏：\n- 描写侧重（动作 / 心理 / 环境 / 对白）：\n- 参考作品或作者（可选）：\n\n【开场白】\n一段可直接当作本对话第一条用户消息或开场旁白的文字（100–200 字），沉浸、可互动，不要解释这是开场白。"]) {
+    const m = T.mergeBuiltins([{ id: 't-rp-cardgen', name: '角色卡生成助手', content: old, builtin: true }], []);
+    assert.strictEqual(m.find(t => t.id === 't-rp-cardgen').content, skill.content);
+    assert.strictEqual(m.find(t => t.id === 't-rp-cardgen').name, '角色卡 Skill');
+  }
+  // 未改过的精修退役，并确保 Skill 仍在列表；自定义精修保留
+  const retired = T.mergeBuiltins([
+    { id: 't-rp-cardrefine', name: '角色卡精修', content: "你是一名角色卡精修编辑。用户会发来已有的角色 / 世界观设定（多为【世界观】【角色卡】【RP规则】【输出格式】【示例对白】【禁止事项】【写作风格】【开场白】分段，也可能是散乱笔记）。\n\n精修重点：{{精修重点}}\n必须保留：{{必须保留}}\n用户扮演身份：{{用户名|用户}}\n\n请：\n1. 保留原有核心设定与人物关系，不无无改名或推翻人设；只补全缺失项、理顺矛盾、润色表达，让设定更可扮演。\n2. 角色卡尽量覆盖：外貌、性格优缺点、说话方式、背景经历、人物关系、秘密 / 禁忌。\n3. 输出时标题字面必须完全一致，便于一键导入分层设定：\n【世界观】\n【角色卡】\n【RP规则】\n【输出格式】\n【示例对白】\n【禁止事项】\n【写作风格】\n【开场白】\n4. 全部 8 段都要给出（原有则改写优化，缺失则合理补全）。段内用「- 」列表。\n5. 正文结束后另起一行写【精修说明】，用 3–5 条要点说明主要改动（这一段不会被导入分层设定）。\n\n不要寒暄；除上述分段外不要输出别的内容。", builtin: true },
+    { id: 'mine', name: '我的', content: 'x' }
+  ], []);
+  assert.ok(!retired.some(t => t.id === 't-rp-cardrefine'));
+  assert.ok(retired.some(t => t.id === 't-rp-cardgen'));
+  assert.ok(retired.some(t => t.id === 'mine'));
+  const kept = T.mergeBuiltins([{ id: 't-rp-cardrefine', name: '我改的精修', content: '自定义精修提示词', builtin: true }], []);
+  assert.ok(kept.some(t => t.id === 't-rp-cardrefine' && t.content === '自定义精修提示词'));
+});
+

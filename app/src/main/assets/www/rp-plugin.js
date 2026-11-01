@@ -248,7 +248,7 @@
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.4.0', perConversation: true, defaultEnabled: true, autoActive,
+    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.5.0', perConversation: true, defaultEnabled: true, autoActive,
     desc: '长篇角色扮演专用的上下文构建器（默认对 DeepSeek、千问生效，RP 类对话自动启用；千问自动加显式缓存断点，预算按模型自动推导）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
@@ -509,14 +509,21 @@
       const dup = sysC.length >= 30 && ['character', 'world'].find(k => { const c = R.getBlock(st, k).content; return c && (c.includes(sysC.slice(0, 60)) || sysC.includes(c.slice(0, 60))); });
       if (dup) { const w = document.createElement('div'); w.className = 'hint'; w.style.color = 'var(--warn, #d08a00)';
         w.textContent = '⚠ 对话系统提示词与「' + BLOCK_CN(dup) + '」内容重复，同一段设定会发送两遍。建议只保留一处（例如清空系统提示词，保留分层设定）。'; body.appendChild(w); }
-      // v0.7.6/0.7.7：配合模板说明 + 从「角色卡生成助手 / 精修」回复导入（往回找最近一条可解析的助手消息）
+      // v0.7.8：角色卡 Skill 一键启用 + 分段导入
       const found = R.findSectionMessage(conv.messages, 8);
+      const skillOn = !!(conv.templateId === 't-rp-cardgen' || /角色卡 Skill/.test(conv.templateName || ''));
       const tg = document.createElement('div'); tg.className = 'rp-suggest'; tg.id = 'rp-tpl-guide';
-      tg.innerHTML = '<b>怎么配合模板：</b>系统提示词选「沉浸式角色扮演」/「RP 叙事风格」/「长篇续写」时，长设定写进下面的分层块更稳。' +
-        '生成设定：先套用「角色卡生成助手」（一句话生成或逐步问答）或「角色卡精修」，等回复出现【世界观】【角色卡】等分段后点下方按钮导入；编辑页也有「从模板填充」骨架。' +
+      tg.innerHTML = '<b>角色卡 Skill：</b>无需填写变量。点下方启用后，在聊天里直接发一句想法或贴旧设定；AI 会输出【世界观】【角色卡】等 8 段。之后可说「精修一下」「加秘密」「改性格」，会基于上一版重出完整分段，再导入到分层设定。' +
+        ' <button class="chip-btn accent" id="rp-card-skill" type="button"' + (skillOn ? ' disabled' : '') + '>' + (skillOn ? '角色卡 Skill 使用中' : '启用角色卡 Skill') + '</button>' +
         (found ? ' <button class="chip-btn accent" id="rp-import-sections" type="button">导入分段设定</button>' +
           '<div class="hint small" style="margin:4px 0 0">将导入世界观 / 角色卡 / RP规则 / 输出格式 / 示例对白 / 禁止事项 / 写作风格（只填空白块；已有内容可再点「覆盖已有」）。开场白可复制，不写入块。</div>' : '');
       body.appendChild(tg);
+      const sb = tg.querySelector('#rp-card-skill');
+      if (sb && !skillOn) sb.onclick = async () => {
+        if (host.applyCardSkill) await host.applyCardSkill();
+        else host.toast('请在模板列表选择「角色卡 Skill」');
+        this._render();
+      };
       const ib = tg.querySelector('#rp-import-sections'); if (ib) ib.onclick = () => { importSections(host, conv, found.fields); };
       const fu = firstUserText(conv); const ax = st.autoExtract;
       if (fu.text) {

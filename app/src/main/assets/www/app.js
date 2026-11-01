@@ -2028,7 +2028,11 @@
     setConvSystem(text, tpl, { kind: 'template', name: tpl.name });
     if (!String(tpl.id).startsWith('persona:')) { settings.recentTemplates = Templates.pushRecent(settings.recentTemplates, tpl.id, 5); saveSettings(); }
     closeTemplateSheet();
-    toast('已切换为「' + tpl.name + '」' + (conv.messages.length ? '，从下一条消息开始生效' : ''));
+    // v0.7.8：Skill 无变量，套用后直接引导在输入框说话
+    if (tpl.skill || tpl.id === Templates.CARD_SKILL_ID) {
+      toast('已启用「' + tpl.name + '」：直接发一句想法或贴旧设定；之后可说「精修一下」「加秘密」等');
+      const inp = $('#input'); if (inp) { inp.placeholder = '发一句角色想法，或贴旧设定 / 说「精修一下」…'; setTimeout(() => inp.focus(), 80); }
+    } else toast('已切换为「' + tpl.name + '」' + (conv.messages.length ? '，从下一条消息开始生效' : ''));
     return true;
   }
 
@@ -2082,6 +2086,7 @@
     el.className = 'prompt-item tpl-item' + (cur ? ' current' : '');
     const vars = Templates.variables(t.content);
     el.innerHTML = '<span class="pi-t"><span class="tpl-emoji">' + esc(t.emoji || '📋') + '</span>' + esc(t.name) + (t.pinned ? '<span class="tpl-star">★</span>' : '') +
+      (t.skill ? '<span class="tpl-skill">Skill</span>' : '') +
       (cur ? '<span class="tpl-cur">使用中</span>' : '') + (vars.length ? '<span class="tpl-var">' + vars.length + ' 个变量</span>' : '') + '</span>' +
       '<span class="pi-c">' + esc(t.content.replace(/\s+/g, ' ').slice(0, 70)) + '</span>';
     el.onclick = () => applyTemplate(t);
@@ -2230,6 +2235,8 @@
     saveConv: c => saveConvSoon(c || conv),
     store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v) },
     toast, dialog, esc,
+    /** v0.7.8：一键启用角色卡 Skill（无变量模板） */
+    applyCardSkill: () => { const t = templates.find(x => x.id === Templates.CARD_SKILL_ID) || templates.find(x => x.skill); return t ? applyTemplate(t) : (toast('未找到角色卡 Skill'), false); },
     /** 当前打开的对话（插件判断后台任务完成时是否刷新界面） */
     isCurrent: c => c === conv,
     refresh: () => { if (conv) { renderHeader(); renderMessages(); } },
