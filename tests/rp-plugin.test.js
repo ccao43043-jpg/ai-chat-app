@@ -302,3 +302,13 @@ test('v0.7.5 JSON 模式只对支持的服务商生效', () => {
   const other = Object.assign({}, ds, { presetId: 'custom', baseUrl: 'https://example.com/v1' });
   assert.ok(!JSON.parse(P.buildChatRequest(other, 'm', [{ role: 'user', content: 'x' }], '', { stream: false, jsonMode: true }).body).response_format);
 });
+
+test('v0.7.6 从回复导入分段设定：只填空白块，可撤销', () => {
+  const conv = mkConv('c76a'); const host = mkHost(conv, {}, '');
+  conv.plugins.rpcache.state = R.setBlock(R.normalizeState(null), 'world', '已有世界观', 1).state;
+  const filled = getPl()._internals.importSections(host, conv, '【世界观】新世界\n【角色卡】莉亚\n【写作风格】冷峻');
+  assert.deepStrictEqual(filled.sort(), ['character', 'style']);
+  assert.strictEqual(R.getBlock(conv.plugins.rpcache.state, 'world').content, '已有世界观');
+  host.toasts.actions[0].onClick();
+  assert.strictEqual(R.getBlock(conv.plugins.rpcache.state, 'character').content, '');
+});

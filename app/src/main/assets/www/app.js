@@ -2022,7 +2022,7 @@
     const vars = Templates.variables(tpl.content);
     let values = {};
     if (vars.length) { values = await openVarDialog(tpl, vars); if (!values) return false; }
-    const text = Templates.fill(tpl.content, values);
+    const text = Templates.fill(tpl.content, values, { dropEmpty: !!tpl.builtin }); // 内置模板：留空的变量行 / 分段省略
     if (text === (conv.systemPrompt || '') && conv.templateId === tpl.id) { closeTemplateSheet(); toast('已经在使用「' + tpl.name + '」'); return false; }
     if (rpOn(conv) && !(await dialog({ title: '切换为「' + tpl.name + '」？', body: RP_WARN, okText: '切换' }))) return false;
     setConvSystem(text, tpl, { kind: 'template', name: tpl.name });
@@ -2040,17 +2040,24 @@
     const box = $('#tv-fields'); box.innerHTML = '';
     vars.forEach(v => {
       const l = document.createElement('label'); l.className = 'field';
-      l.innerHTML = '<span>' + esc(v) + '</span><input data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '">';
-      l.querySelector('input').value = last[v] || '';
+      const long = /设定|背景|场景|信息|规则|禁止|风格/.test(v); // v0.7.6：长内容用多行输入
+      l.innerHTML = '<span>' + esc(v) + (tpl.builtin ? '<small>可留空' + (long ? '，留空时整段省略' : '') + '</small>' : '') + '</span>' +
+        (long ? '<textarea rows="3" data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '"></textarea>' : '<input data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '">');
+      l.querySelector('[data-var]').value = last[v] || '';
       box.appendChild(l);
     });
-    const preview = () => { const vals = collectVars(); $('#tv-preview').textContent = Templates.fill(tpl.content, vals).slice(0, 160); };
-    box.querySelectorAll('input').forEach(i => i.addEventListener('input', preview)); preview();
+    if (tpl.builtin && (tpl.tags || []).indexOf('角色扮演') >= 0 && rpOn(conv)) {
+      const h = document.createElement('div'); h.className = 'hint';
+      h.textContent = '本对话已启用 RP 缓存优化器：角色设定 / 世界背景等长内容更建议写进「分层设定」的角色卡 / 世界观块（缓存更稳），这里可以留空，避免同一段设定发送两遍。';
+      box.appendChild(h);
+    }
+    const preview = () => { const vals = collectVars(); $('#tv-preview').textContent = Templates.fill(tpl.content, vals, { dropEmpty: !!tpl.builtin }).slice(0, 200); };
+    box.querySelectorAll('[data-var]').forEach(i => i.addEventListener('input', preview)); preview();
     $('#tv-mask').classList.add('show');
-    setTimeout(() => { const f = box.querySelector('input'); if (f) f.focus(); }, 80);
+    setTimeout(() => { const f = box.querySelector('[data-var]'); if (f) f.focus(); }, 80);
     return new Promise(res => { varResolve = vals => { if (vals) { settings.templateVars = Object.assign({}, settings.templateVars, { [tpl.id]: vals }); saveSettings(); } res(vals); }; });
   }
-  function collectVars() { const o = {}; $('#tv-fields').querySelectorAll('input').forEach(i => { o[i.dataset.var] = i.value; }); return o; }
+  function collectVars() { const o = {}; $('#tv-fields').querySelectorAll('[data-var]').forEach(i => { o[i.dataset.var] = i.value; }); return o; }
   function closeVarDialog(vals) { $('#tv-mask').classList.remove('show'); const r = varResolve; varResolve = null; if (r) r(vals); }
   $('#tv-cancel').onclick = () => closeVarDialog(null);
   $('#tv-ok').onclick = () => closeVarDialog(collectVars());

@@ -47,7 +47,7 @@ test('搜索与标签筛选：收藏在前', () => {
   const all = T.filter(l, {});
   assert.deepStrictEqual(all.slice(0, 2).map(t => t.name), ['通用助手', '简洁回答'], '内置收藏在前');
   assert.deepStrictEqual(T.filter(l, { query: '翻译' }).map(t => t.id), ['t-translate']);
-  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-narrator'], '按标签搜索');
+  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-narrator', 't-rp-longform', 't-rp-cardgen'], '按标签搜索');
   assert.ok(T.filter(l, { tag: '常用' }).every(t => t.tags.includes('常用')));
   assert.ok(T.allTags(l).includes('写作'));
 });
@@ -124,4 +124,31 @@ test('自动宏：time/date/时间/日期 自动替换且不进入变量表单',
   const out = T.fill(s, {});
   assert.match(out, /^现在\d{2}:\d{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} \d{4}-\d{2}-\d{2} \{\{角色名\}\}$/);
   assert.strictEqual(T.fill('{{date}}', { date: '自定义' }), '自定义');
+});
+
+// v0.7.6：RP 模板
+test('v0.7.6 RP 模板：变量完整、支持 date/time、留空省略、旧内置原文升级', () => {
+  const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
+  ['沉浸式角色扮演', 'RP 叙事风格', '长篇续写', '角色卡生成助手'].forEach(n => assert.ok(d.some(t => t.name === n), n));
+  const imm = by('t-rp-immersive');
+  ['角色名', '用户名', '角色设定', '性格', '世界背景', '场景', '规则', '禁止事项'].forEach(v => assert.ok(T.variables(imm.content).includes(v), v));
+  assert.ok(/\{\{date\}\}/.test(imm.content) && /\{\{time\}\}/.test(imm.content));
+  const out = T.fill(imm.content, { 角色名: '艾琳', 用户名: '阿杰' }, { dropEmpty: true });
+  assert.ok(!/\{\{/.test(out), '留空的变量行被省略、默认值生效'); assert.ok(out.includes('200–400'));
+  assert.ok(!out.includes('【世界背景】'), '空分段标题也省略');
+  assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out));
+  assert.ok(out.includes('艾琳') && out.includes('【规则】'));
+  assert.ok(T.fill('- {{x}}', {}).includes('{{x}}'), '默认仍保留原样');
+  // 旧版内置原文（用户没改过）升级为新内容；改过的保留
+  const oldNar = '你是一名沉浸式角色扮演的叙事者，扮演{{角色名}}，世界背景：{{世界背景}}。\n- 以第三人称描写环境、动作与神态，对话用引号；\n- 只描写{{角色名}}和 NPC 的言行，绝不替玩家决定行动或心理；\n- NPC 只知道自己应该知道的信息；\n- 每次回复 150–300 字，结尾留下可以继续互动的钩子。';
+  const m = T.mergeBuiltins([{ id: 't-rp-narrator', name: 'RP 叙事风格', content: oldNar, builtin: true }, { id: 't-rp-immersive', name: 'x', content: '我改过', builtin: true }], []);
+  assert.strictEqual(m.find(t => t.id === 't-rp-narrator').content, by('t-rp-narrator').content);
+  assert.strictEqual(m.find(t => t.id === 't-rp-immersive').content, '我改过');
+});
+test('v0.7.6 分段设定解析与块模板', () => {
+  assert.strictEqual(R.parseSections('只有一段【世界观】'), null);
+  const f = R.parseSections('好的，设定如下：\n【世界观】\n蒸汽朋克王都\n【角色卡】姓名：莉亚\n【示例对白】\n用户：你好\n角色：哼。\n【开场白】\n雨夜……');
+  assert.deepStrictEqual(Object.keys(f).sort(), ['character', 'fewshot', 'world']);
+  assert.strictEqual(f.character, '姓名：莉亚');
+  ['world', 'character', 'rules', 'format', 'fewshot', 'prohibit', 'style'].forEach(k => assert.ok(R.BLOCK_TEMPLATES[k], k));
 });

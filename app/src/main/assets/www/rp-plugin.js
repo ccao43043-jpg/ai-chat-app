@@ -108,6 +108,22 @@
       return null;
     }
   }
+  /** v0.7.6：把「角色卡生成助手」等输出的【世界观】【角色卡】…分段文本导入空白块（可撤销），返回填充的块 */
+  const SECTION_KEYS = ['world', 'character', 'rules', 'format', 'fewshot', 'prohibit', 'style'];
+  function importSections(host, conv, text) {
+    const fields = R.parseSections(text);
+    if (!fields) { host.toast('没有找到【世界观】【角色卡】这样的分段标题（至少 2 段）'); return null; }
+    const d = data(conv); const before = {}; SECTION_KEYS.forEach(k => { before[k] = R.getBlock(d.state, k).content; });
+    const r = R.fillEmptyBlocks(d.state, fields, Date.now(), SECTION_KEYS);
+    const snap = {}; r.filled.forEach(k => { snap[k] = { before: before[k], after: R.getBlock(r.state, k).content }; });
+    d.state = Object.assign({}, r.state, { autoExtract: { at: Date.now(), status: 'done', filled: r.filled, skipped: [], snapshot: snap, manual: true, source: 'sections' } }); normalized.add(d.state);
+    host.saveConv(conv); host.refresh && host.refresh();
+    if (r.filled.length) host.toast('已导入分段设定：' + r.filled.map(BLOCK_CN).join('、'), [
+      { label: '撤销', onClick: () => { const n = undoExtract(host, conv); host.toast(n ? '已撤销导入（' + n + ' 个块）' : '内容已被修改，没有可撤销的块'); } }]);
+    else host.toast('对应的块都已有内容，没有覆盖');
+    rerender(host, conv);
+    return r.filled;
+  }
   /** 撤销最近一次提取：只恢复仍是自动填充内容的块（用户之后改过的保留），返回恢复的块数 */
   function undoExtract(host, conv) {
     const d = data(conv); const ax = d.state.autoExtract;
@@ -216,7 +232,7 @@
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.2.0', perConversation: true, defaultEnabled: true, autoActive,
+    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.3.0', perConversation: true, defaultEnabled: true, autoActive,
     desc: '长篇角色扮演专用的上下文构建器（默认对 DeepSeek、千问生效，RP 类对话自动启用；千问自动加显式缓存断点，预算按模型自动推导）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
@@ -477,6 +493,15 @@
       const dup = sysC.length >= 30 && ['character', 'world'].find(k => { const c = R.getBlock(st, k).content; return c && (c.includes(sysC.slice(0, 60)) || sysC.includes(c.slice(0, 60))); });
       if (dup) { const w = document.createElement('div'); w.className = 'hint'; w.style.color = 'var(--warn, #d08a00)';
         w.textContent = '⚠ 对话系统提示词与「' + BLOCK_CN(dup) + '」内容重复，同一段设定会发送两遍。建议只保留一处（例如清空系统提示词，保留分层设定）。'; body.appendChild(w); }
+      // v0.7.6：配合提示词模板使用的说明 + 从「角色卡生成助手」的回复导入
+      const lastBot = (conv.messages || []).slice().reverse().find(m => m.role === 'assistant' && !m.error && m.content);
+      const canImport = !!(lastBot && R.parseSections(lastBot.content));
+      const tg = document.createElement('div'); tg.className = 'rp-suggest'; tg.id = 'rp-tpl-guide';
+      tg.innerHTML = '<b>怎么配合模板：</b>系统提示词选「沉浸式角色扮演」/「RP 叙事风格」/「长篇续写」时，长的角色设定、世界背景可以留空，改写进下面的角色卡 / 世界观等块（只发送一次、缓存更稳）。' +
+        '每个块的编辑页都有「从模板填充」骨架；也可以先用「角色卡生成助手」模板让 AI 按【世界观】【角色卡】【RP规则】【输出格式】【示例对白】【禁止事项】【写作风格】分段写好，再一键导入。' +
+        (canImport ? ' <button class="chip-btn accent" id="rp-import-sections" type="button">从最后一条回复导入分段设定</button>' : '');
+      body.appendChild(tg);
+      const ib = tg.querySelector('#rp-import-sections'); if (ib) ib.onclick = () => { importSections(host, conv, lastBot.content); };
       const fu = firstUserText(conv); const ax = st.autoExtract;
       if (fu.text) {
         const ex = document.createElement('div'); ex.className = 'rp-suggest'; ex.id = 'rp-extract';
@@ -548,8 +573,10 @@
         '<div class="hint">' + host.esc(def.hint) + '<br><span class="muted">' + host.esc(warn) + '</span></div>' +
         '<div class="group form"><textarea id="rb-text" rows="12" placeholder="在这里输入' + host.esc(def.title) + '…"></textarea>' +
         '<div class="rb-meta" id="rb-meta"></div>' +
-        ((id === 'character' || id === 'world') ? '<div class="btn-row" style="justify-content:flex-start"><button class="chip-btn" id="rb-import-sys" type="button">＋ 插入对话系统提示词 / 助手设定</button>' +
-          (firstUserText(conv).text ? '<button class="chip-btn" id="rb-import-first" type="button">＋ 插入首条消息原文</button>' : '') + '</div>' : '') +
+        ((id === 'character' || id === 'world' || R.BLOCK_TEMPLATES[id]) ? '<div class="btn-row" style="justify-content:flex-start">' +
+          (R.BLOCK_TEMPLATES[id] ? '<button class="chip-btn" id="rb-from-tpl" type="button">＋ 从模板填充</button>' : '') +
+          ((id === 'character' || id === 'world') ? '<button class="chip-btn" id="rb-import-sys" type="button">＋ 插入对话系统提示词 / 助手设定</button>' +
+          (firstUserText(conv).text ? '<button class="chip-btn" id="rb-import-first" type="button">＋ 插入首条消息原文</button>' : '') : '') + '</div>' : '') +
         '<div class="btn-row"><button class="pill-btn" id="rb-cancel">取消</button><button class="pill-btn primary" id="rb-save">保存</button></div></div>' +
         '<div class="group-title">版本历史</div><div class="group" id="rb-hist"></div>';
       box.appendChild(wrap);
@@ -560,6 +587,7 @@
       };
       ta.addEventListener('input', meta); meta();
       const ins = t => { t = R.canonicalize(t); if (!t) { host.toast('内容为空'); return; } ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t; meta(); };
+      const bt = wrap.querySelector('#rb-from-tpl'); if (bt) bt.onclick = () => { ins(R.BLOCK_TEMPLATES[id]); ta.focus(); };
       const bs = wrap.querySelector('#rb-import-sys'); if (bs) bs.onclick = () => ins(conv.systemPrompt);
       const bf = wrap.querySelector('#rb-import-first'); if (bf) bf.onclick = () => ins(firstUserText(conv).text);
       if (host.expandTextarea) host.expandTextarea(ta, def.layer + ' · ' + def.title, '全屏编辑完成后回到这里，点「保存」才会生效。' + warn);
@@ -847,7 +875,7 @@
       body.querySelector('#rp-reset-win').onclick = () => { data(conv).state.window = { startId: null, startOrdinal: 0 }; host.saveConv(conv); host.refresh(); host.toast('已重置截断起点'); };
     },
   });
-  plugin._internals = { toItems, makeSummary, planConv, planConvAuto, loadLogs, applicability, convItems, rpLike, autoActive, envFor, placeMarkers, autoExtract, firstUserText, undoExtract };
+  plugin._internals = { toItems, makeSummary, planConv, planConvAuto, loadLogs, applicability, convItems, rpLike, autoActive, envFor, placeMarkers, autoExtract, firstUserText, undoExtract, importSections };
 
   // 第二个内置插件：Token 用量显示（演示通用钩子；对所有对话生效，可在对话中关闭）
   reg.register({
