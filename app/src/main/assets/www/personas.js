@@ -43,7 +43,6 @@
       desc: String(p.desc || '').trim(), systemPrompt: String(p.systemPrompt || ''),
       providerId: p.providerId || '', model: String(p.model || '').trim(),
       temperature: isNaN(t) ? '' : Math.max(0, Math.min(2, t)), builtin: !!p.builtin,
-      tavern: !!p.tavern, firstMes: String(p.firstMes || ''),
     };
   }
   function upsert(list, item) {
@@ -91,29 +90,7 @@
     return { value: next, cursor: (before + sep + snippet).length };
   }
 
-  /** 导入角色：本应用导出 / 酒馆 (SillyTavern / TavernAI V1/V2) 角色卡 JSON */
-  function fromCard(obj) {
-    if (!obj || typeof obj !== 'object') throw new Error('不是有效的角色卡');
-    const d = obj.data && typeof obj.data === 'object' ? obj.data : obj;
-    const name = String(d.name || d.char_name || '').trim();
-    if (!name) throw new Error('角色卡缺少名称');
-    if (d.systemPrompt) return normalizePersona({ emoji: d.emoji, name, desc: d.desc, systemPrompt: d.systemPrompt, temperature: d.temperature });
-    const parts = [];
-    const desc = d.description || d.char_persona || '';
-    if (desc) parts.push('【角色设定】\n' + desc);
-    if (d.personality) parts.push('【性格】\n' + d.personality);
-    if (d.scenario || d.world_scenario) parts.push('【场景】\n' + (d.scenario || d.world_scenario));
-    if (d.mes_example || d.example_dialogue) parts.push('【对话示例】\n' + (d.mes_example || d.example_dialogue));
-    if (d.system_prompt) parts.unshift(d.system_prompt);
-    let sp = '你正在扮演「' + name + '」。请始终保持角色，使用简体中文回复，不要提及自己是 AI。\n\n' + parts.join('\n\n');
-    sp = sp.replace(/\{\{char\}\}/gi, name).replace(/\{\{user\}\}/gi, '你');
-    const p = normalizePersona({ emoji: '🎭', name, desc: String(d.creator_notes || desc || '').replace(/\{\{char\}\}/gi, name).replace(/\{\{user\}\}/gi, '你').slice(0, 40), systemPrompt: sp });
-    p.tavern = true;
-    if (d.first_mes) p.firstMes = String(d.first_mes).replace(/\{\{char\}\}/gi, name).replace(/\{\{user\}\}/gi, '你');
-    return p;
-  }
-
-  const api = { fromCard, BUILTIN_PERSONAS, BUILTIN_PROMPTS, defaultPersonas, defaultPrompts, normalizePersona, upsert, duplicate, remove, mergeBuiltins,
+  const api = { BUILTIN_PERSONAS, BUILTIN_PROMPTS, defaultPersonas, defaultPrompts, normalizePersona, upsert, duplicate, remove, mergeBuiltins,
     conversationFromPersona, normalizePrompt, insertSnippet };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Personas = api;

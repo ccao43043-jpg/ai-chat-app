@@ -74,64 +74,7 @@
     <input type="file" id="file-input" multiple hidden>
     <input type="file" id="file-input-image" accept="image/*" multiple hidden>
   </footer>
-
-  <!-- 角色 Tab -->
-  <section id="tab-characters" class="tabview">
-    <header class="tab-head"><div class="tab-title">角色卡</div><button class="text-btn" id="ch-new-top">新建</button></header>
-    <div class="tab-body">
-      <div class="search-bar"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
-        <input id="ch-search" placeholder="搜索角色…"><button class="mini-btn" id="ch-import" type="button">导入</button></div>
-      <div id="ch-grid" class="persona-grid ch-grid"></div>
-      <button class="fab-btn" id="ch-new" type="button">新建角色</button>
-      <input type="file" id="ch-file" accept=".json,application/json,image/png" hidden>
-    </div>
-  </section>
-
-  <!-- 世界书 Tab -->
-  <section id="tab-lorebook" class="tabview">
-    <header class="tab-head"><button class="text-btn" id="lb-more" type="button">导入/导出</button><span></span><button class="text-btn" id="lb-new-top">新建条目</button></header>
-    <div class="tab-body">
-      <div class="lb-hero"><div class="lb-big">世界书</div><div class="lb-sub" id="lb-sub">0 条目</div></div>
-      <div class="chip-row lb-filters" id="lb-filters">
-        <button class="fchip active" data-f="all">全部</button><button class="fchip" data-f="sticky">常驻</button><button class="fchip" data-f="keyword">关键词</button><button class="fchip" data-f="enabled">已启用</button>
-      </div>
-      <div id="lb-list"></div>
-      <input type="file" id="lb-file" accept=".json,application/json,text/plain" hidden>
-    </div>
-  </section>
-
-  <!-- 设置 Tab -->
-  <section id="tab-settings" class="tabview">
-    <header class="tab-head"><span></span><div class="tab-title">设置 / 预设</div><span></span></header>
-    <div class="tab-body" id="st-body"></div>
-  </section>
-
-  <nav id="bottom-nav" class="bottom-nav">
-    <button data-tab="chat" class="active"><svg viewBox="0 0 24 24"><path d="M5 5h14a1.5 1.5 0 011.5 1.5v9A1.5 1.5 0 0119 17h-8l-4.5 3.5V17H5a1.5 1.5 0 01-1.5-1.5v-9A1.5 1.5 0 015 5z"/><path d="M8 10h8M8 13h5"/></svg><span>聊天</span></button>
-    <button data-tab="characters"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0115 0"/></svg><span>角色</span></button>
-    <button data-tab="lorebook"><svg viewBox="0 0 24 24"><path d="M12 6.5C10 5 7 4.5 3.5 5v13c3.5-.5 6.5 0 8.5 1.5 2-1.5 5-2 8.5-1.5V5C17 4.5 14 5 12 6.5zM12 6.5v13"/></svg><span>世界书</span></button>
-    <button data-tab="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span>设置</span></button>
-  </nav>
 </div>
-
-<!-- 世界书条目编辑 -->
-<section id="page-lbentry" class="page">
-  <header class="topbar">
-    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
-    <div class="page-title" id="lbe-title">新建条目</div>
-    <button class="text-btn" id="lbe-save">保存</button>
-  </header>
-  <div class="page-body">
-    <div class="group form">
-      <label class="field"><span>标题</span><input id="lbe-name" placeholder="例如：雨夜茶馆"></label>
-      <label class="field"><span>关键词<small>用逗号分隔；最近消息里出现任一关键词时注入</small></span><input id="lbe-keys" placeholder="茶馆, 雨夜, 灯笼"></label>
-      <label class="field"><span>内容</span><textarea id="lbe-content" rows="10" placeholder="描述：一个宁静的茶馆，窗外细雨绵绵，灯笼摇曳。"></textarea></label>
-      <label class="field inline"><span>常驻<small>无需关键词，每次都注入</small></span><input type="checkbox" id="lbe-sticky" class="switch"></label>
-      <label class="field inline"><span>启用</span><input type="checkbox" id="lbe-enabled" class="switch"></label>
-    </div>
-    <button class="ghost-btn danger" id="lbe-delete">删除此条目</button>
-  </div>
-</section>
 
 <!-- 模型快速切换菜单 -->
 <div id="menu-mask" class="mask clear"></div>
@@ -634,7 +577,6 @@
 <script src="plugins.js"></script>
 <script src="rpcache.js"></script>
 <script src="rp-plugin.js"></script>
-<script src="lorebook.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
