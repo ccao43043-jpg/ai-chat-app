@@ -14,6 +14,8 @@
       content: '你是一名专业翻译。用户输入中文时翻译成地道的英文；输入其他语言时翻译成流畅自然的简体中文。\n保留原文的语气、格式和专有名词，只输出译文，不要解释。' },
     { id: 't-polish', emoji: '✍️', name: '润色改写', tags: ['写作'],
       content: '你是一名中文写作编辑。用户发来的每一段文字都需要润色：保持原意，使表达更准确、通顺、有节奏感，删去空话套话。\n先给出润色后的全文，再用 2–4 个要点说明主要改动。' },
+    { id: 't-rp-immersive', emoji: '🎬', name: '沉浸式角色扮演', tags: ['角色扮演'], pinned: true,
+      content: "你是一个专业的角色扮演 AI。接下来请严格按照角色设定进行回复。\nWrite {{角色名}}'s next reply in a fictional chat between {{角色名}} and {{用户名}}.\n\n【角色设定】\n{{角色设定}}\n\n{{性格}}\n\n【场景】\n{{场景}}\n\n【用户信息】\n{{用户信息}}\n\n【回复要求】\n- 你正在扮演 {{角色名}}，与 {{用户名}} 进行沉浸式角色扮演。\n- 始终保持角色一致性，不要跳出角色（禁止 OOC、禁止提及自己是 AI）。\n- 使用简体中文回复，除非角色设定明确要求其他语言。\n- 回复要自然、有细节、推动剧情，避免重复句式和空洞描写。\n- 如果用户输入不完整或意图不明，可以合理补充细节继续推进。\n- 不要在回复开头或结尾加任何元信息（如「（扮演开始）」等）。" },
     { id: 't-rp-narrator', emoji: '🎭', name: 'RP 叙事风格', tags: ['角色扮演'],
       content: '你是一名沉浸式角色扮演的叙事者，扮演{{角色名}}，世界背景：{{世界背景}}。\n- 以第三人称描写环境、动作与神态，对话用引号；\n- 只描写{{角色名}}和 NPC 的言行，绝不替玩家决定行动或心理；\n- NPC 只知道自己应该知道的信息；\n- 每次回复 150–300 字，结尾留下可以继续互动的钩子。' },
     { id: 't-coder', emoji: '💻', name: '代码审查', tags: ['编程'],
@@ -71,12 +73,25 @@
   const recentOf = (list, recent) => (recent || []).map(id => list.find(t => t.id === id)).filter(Boolean);
 
   // ---------------- 变量 {{变量名}} ----------------
+  const AUTO_NAMES = ['time', 'date', '时间', '日期'];
   const VAR_RE = /\{\{\s*([^{}\n]{1,30}?)\s*\}\}/g;
-  function variables(content) { const out = []; String(content || '').replace(VAR_RE, (m, n) => { if (out.indexOf(n) < 0) out.push(n); return m; }); return out; }
+  function variables(content) { const out = []; String(content || '').replace(VAR_RE, (m, n) => { if (out.indexOf(n) < 0 && AUTO_NAMES.indexOf(n) < 0) out.push(n); return m; }); return out; }
   /** 用填写的值替换变量；没填的保留原样，便于用户之后在系统提示词里手动修改 */
   function fill(content, values) {
     values = values || {};
-    return String(content || '').replace(VAR_RE, (m, n) => (values[n] != null && String(values[n]).trim() !== '' ? String(values[n]).trim() : m));
+    const auto = autoMacros();
+    return String(content || '').replace(VAR_RE, (m, n) => {
+      if (values[n] != null && String(values[n]).trim() !== '') return String(values[n]).trim();
+      if (Object.prototype.hasOwnProperty.call(auto, n)) return auto[n];
+      return m;
+    });
+  }
+  /** 自动宏：{{time}}/{{时间}} → HH:mm，{{date}}/{{日期}} → YYYY-MM-DD（运行环境本地时间） */
+  function autoMacros(now) {
+    const d = now || new Date(); const p = x => String(x).padStart(2, '0');
+    const time = p(d.getHours()) + ':' + p(d.getMinutes());
+    const date = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    return { time: time, '时间': time, date: date, '日期': date };
   }
 
   // ---------------- 导入 / 导出 ----------------

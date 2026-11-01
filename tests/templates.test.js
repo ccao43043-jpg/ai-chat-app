@@ -47,7 +47,7 @@ test('搜索与标签筛选：收藏在前', () => {
   const all = T.filter(l, {});
   assert.deepStrictEqual(all.slice(0, 2).map(t => t.name), ['通用助手', '简洁回答'], '内置收藏在前');
   assert.deepStrictEqual(T.filter(l, { query: '翻译' }).map(t => t.id), ['t-translate']);
-  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-narrator'], '按标签搜索');
+  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-narrator'], '按标签搜索');
   assert.ok(T.filter(l, { tag: '常用' }).every(t => t.tags.includes('常用')));
   assert.ok(T.allTags(l).includes('写作'));
 });
@@ -116,4 +116,12 @@ test('RP 插件：切换模板走显式 L1 更新（static 版本 +1），诊断
   assert.strictEqual(e2.reason, '切换了提示词模板「简洁回答」，L1 固定前缀改变');
   assert.strictEqual(R.makeLogEntry({ fp: fp2, diag: d2, at: 3, prev: e1, staticCause: { kind: 'clear' } }).reason, '清空了提示词模板，L1 固定前缀改变');
   assert.strictEqual(R.makeLogEntry({ fp: fp2, diag: d2, at: 3, prev: e1 }).reason, '角色卡 / 世界观等永久锚点被修改');
+});
+
+test('自动宏：time/date/时间/日期 自动替换且不进入变量表单', () => {
+  const s = '现在{{time}} {{date}} {{时间}} {{日期}} {{角色名}}';
+  assert.deepStrictEqual(T.variables(s), ['角色名']);
+  const out = T.fill(s, {});
+  assert.match(out, /^现在\d{2}:\d{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} \d{4}-\d{2}-\d{2} \{\{角色名\}\}$/);
+  assert.strictEqual(T.fill('{{date}}', { date: '自定义' }), '自定义');
 });

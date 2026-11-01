@@ -1,10 +1,10 @@
 {
   "name": "ai-chat-app",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "AI Chat Android 应用（前端逻辑测试）",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.js",
     "test:ui": "node tests/ui-e2e.js",
     "fixtures": "node tests/fixtures/make-fixtures.js"
   },
