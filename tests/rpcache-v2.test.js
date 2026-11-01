@@ -106,6 +106,7 @@ test('只追加章节：生成章节那一轮仍命中 固定设定 + 长期记�
   let st = R.setBlock(R.normalizeState(null), 'character', '角色卡'.repeat(150), 1).state;
   st = R.setBlock(st, 'memory', '记忆'.repeat(50), 1).state;
   st.settings.summary = Object.assign({}, st.settings.summary, { trigger_tokens: 600, min_new_turns: 3, keep_recent_turns: 3, min_interval_turns: 0, chapter_cap_tokens: 1000000 });
+  st.settings.auto_extract = false; // 本用例只统计摘要调用
   s.data().state = st;
   let chapterTurns = [];
   for (let i = 1; i <= 30; i++) {

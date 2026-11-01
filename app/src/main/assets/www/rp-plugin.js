@@ -51,7 +51,40 @@
     const st = d && d.state;
     if (st && ((st.blocks || []).some(b => b.content) || (st.chapters || []).length)) return true; // 已经在用分层设定 / 章节
     if (/character/i.test(conv.model || '')) return true;
-    return RP_WORDS.test(String(conv.systemPrompt || '').slice(0, 4000));
+    if (RP_WORDS.test(String(conv.systemPrompt || '').slice(0, 4000))) return true;
+    const fu = (conv.messages || []).find(m => m.role === 'user' && !m.error); // v0.7.4：首条消息写的是角色 / 世界设定也算
+    return !!(fu && RP_WORDS.test(String(fu.content || '').slice(0, 4000)));
+  }
+  /** v0.7.4：首条消息自动提取设定（全局 + 本对话两级开关，默认开启） */
+  const extractOn = (host, conv) => reg.config(host.settings(), ID).auto_extract !== false && data(conv).state.settings.auto_extract !== false;
+  function firstUserText(conv) {
+    const us = (conv.messages || []).filter(m => m.role === 'user' && !m.error && !m.imageGen);
+    return us.length ? { text: String(us[0].rpSent != null ? us[0].rpSent : us[0].content || ''), count: us.length } : { text: '', count: 0 };
+  }
+  const BLOCK_CN = id => (R.BLOCK_DEFS.find(d => d.id === id) || {}).title || id;
+  /** 调用模型提取首条消息里的设定，只填空白块；失败只提示，不影响聊天 */
+  async function autoExtract(host, conv, text, manual) {
+    const d = data(conv);
+    if (!manual) d.state.autoExtract = { at: Date.now(), status: 'running' };
+    try {
+      const raw = await host.callModel(R.buildExtractPrompt(text), { maxTokens: 2048, model: d.state.settings.summary_model || undefined, usageType: 'extract' });
+      const fields = R.parseExtract(raw);
+      if (!fields) throw new Error('模型没有返回可解析的 JSON');
+      const st = data(conv).state;
+      const r = R.fillEmptyBlocks(st, fields, Date.now());
+      const dd = data(conv);
+      dd.state = Object.assign({}, r.state, { autoExtract: { at: Date.now(), status: 'done', filled: r.filled } }); normalized.add(dd.state);
+      host.saveConv(conv); if (host.conv() === conv) host.refresh && host.refresh();
+      if (r.filled.length) host.toast('已根据首条消息填充 RP 设定：' + r.filled.map(BLOCK_CN).join('、'));
+      else if (manual) host.toast(Object.keys(fields).length ? '没有空白的设定块需要填充（已填写的内容不会被覆盖）' : '首条消息里没有提取到设定');
+      if (plugin._box && host.conv() === conv) plugin._render();
+      return r.filled;
+    } catch (e) {
+      const dd = data(conv); dd.state.autoExtract = { at: Date.now(), status: 'error', error: String(e && e.message || e) };
+      host.saveConv(conv);
+      host.toast('自动提取 RP 设定失败：' + String(e && e.message || e).slice(0, 60));
+      return null;
+    }
   }
   /** V3：自动启用判断（只在对话里没有手动开 / 关时调用） */
   function autoActive(conv, settings, host) {
@@ -146,7 +179,7 @@
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.0.0', perConversation: true, defaultEnabled: true, autoActive,
+    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.1.0', perConversation: true, defaultEnabled: true, autoActive,
     desc: '长篇角色扮演专用的上下文构建器（默认对 DeepSeek、千问生效，RP 类对话自动启用；千问自动加显式缓存断点，预算按模型自动推导）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
@@ -230,6 +263,12 @@
           supported: entry.supported, anomaly: an.anomaly, summaryNo: entry.summary_no, merged: entry.summary_merged, reason: entry.reason, req: entry.request_id };
         d.lastAnomaly = an.anomaly ? { at: entry.timestamp, avg: an.avg, current: an.current, causes: an.causes, changed: an.changed } : null;
         if (an.anomaly) host.toast('⚠ 缓存命中率骤降（' + pct(an.avg) + ' → ' + pct(an.current) + '），点消息上的徽章查看原因');
+        // v0.7.4：第一轮回复成功后，后台提取首条消息里的设定（不阻塞聊天，只填空白块）
+        const fu = firstUserText(ctx.conv);
+        if (fu.count === 1 && !d.state.autoExtract && extractOn(host, ctx.conv) && R.canonicalize(fu.text).length >= 20 && host.callModel) {
+          const pr = autoExtract(host, ctx.conv, fu.text, false);
+          plugin._lastExtract = pr;
+        }
       },
       messageBadges(msg, conv, host) {
         if (msg.role !== 'assistant' || !msg.rpCache) return [];
@@ -281,6 +320,7 @@
         '<button class="chip-btn pr-del" data-m="' + host.esc(id) + '" type="button" title="删除">×</button></div>';
       box.innerHTML = '<label class="field"><span>自动启用<small>只对支持缓存的服务商（DeepSeek / 千问）生效；对话里手动开 / 关始终优先</small></span><select id="rp-auto-mode">' +
         '<option value="rp">角色扮演类对话自动启用（推荐）</option><option value="cache">支持缓存的服务商上所有对话</option><option value="off">关闭（只手动启用）</option></select></label>' +
+        '<label class="field inline"><span>首条消息自动提取设定<small>对话第一轮回复后，额外调用一次模型，把首条消息里的角色 / 世界观 / 规则填进空白的分层设定（不覆盖已填写内容）</small></span><input type="checkbox" class="switch" id="rp-auto-extract"' + (c.auto_extract !== false ? ' checked' : '') + '></label>' +
         '<div class="pl-set-title">价格（美元 / 百万 Token，高峰价），用于估算节省 / 额外花费</div>' +
         '<div class="price-row head"><span>模型关键词</span><span>缓存命中</span><span>未命中</span><span>输出</span><span></span></div>' +
         names.map(row).join('') +
@@ -295,6 +335,7 @@
       box.querySelector('#rp-price-mode').value = c.priceMode;
       box.querySelector('#rp-auto-mode').value = c.auto_mode;
       box.querySelector('#rp-auto-mode').onchange = e => { reg.config(host.settings(), ID).auto_mode = e.target.value; c.auto_mode = e.target.value; host.saveSettings(); host.refresh && host.refresh(); };
+      box.querySelector('#rp-auto-extract').onchange = e => { reg.config(host.settings(), ID).auto_extract = e.target.checked; host.saveSettings(); };
       const save = () => host.saveSettings();
       box.querySelectorAll('input[data-k]').forEach(inp => inp.addEventListener('change', () => {
         const v = parseFloat(inp.value); if (isNaN(v) || v < 0) { inp.value = c.prices[inp.dataset.m][inp.dataset.k]; return; }
@@ -393,8 +434,18 @@
         card(def.title, '<span class="rb-tag soft" title="发送给模型时的分段标记">[' + def.tag + ']</span><span class="rb-ver">' + ver(b.version) + '</span>', b.content, b.content ? R.sha256(b.content) : '', edit(id));
       };
       const tip = document.createElement('div'); tip.className = 'hint';
-      tip.textContent = '请求按 L1 → L6 的固定顺序组装。只有你手动保存且内容真正改变时版本号才会 +1，插件从不自动改写设定。越靠前的层越稳定，修改它会让其后的缓存全部重建。方括号里的英文（如 [WORLD]）是发送给模型的分段标记，保持不变以稳定缓存。';
+      tip.textContent = '请求按 L1 → L6 的固定顺序组装。只有内容真正改变时版本号才会 +1；插件不会改写你已填写的设定（首条消息自动提取只填空白块）。越靠前的层越稳定，修改它会让其后的缓存全部重建。方括号里的英文（如 [WORLD]）是发送给模型的分段标记，保持不变以稳定缓存。';
       body.appendChild(tip);
+      const fu = firstUserText(conv); const ax = st.autoExtract;
+      if (fu.text) {
+        const ex = document.createElement('div'); ex.className = 'rp-suggest'; ex.id = 'rp-extract';
+        ex.innerHTML = (ax && ax.status === 'done' ? '✓ 已从首条消息提取设定' + (ax.filled && ax.filled.length ? '：' + ax.filled.map(x => host.esc(BLOCK_CN(x))).join('、') : '（没有空白块需要填充）')
+          : ax && ax.status === 'running' ? '<span class="spin"></span>正在从首条消息提取设定…' : ax && ax.status === 'error' ? '首条消息提取失败：' + host.esc(ax.error || '') : '可以从首条消息（角色 / 故事背景）自动提取设定') +
+          ' <button class="chip-btn accent" id="rp-extract-btn" type="button"' + (ax && ax.status === 'running' ? ' disabled' : '') + '>从首条消息提取</button>' +
+          '<div class="hint small" style="margin:4px 0 0">只填写空白的块，已有内容不会被覆盖；会额外调用一次模型。' + (extractOn(host, conv) ? '' : '（本对话 / 全局已关闭自动提取）') + '</div>';
+        body.appendChild(ex);
+        ex.querySelector('#rp-extract-btn').onclick = async e => { e.target.disabled = true; e.target.textContent = '提取中…'; await autoExtract(host, conv, fu.text, true); this._render(); };
+      }
       layer('L1', '固定设定', R.verLabel('static', st.staticVersion) + ' · ≈' + fmtN(p.tokens.static) + ' Token');
       card('对话系统提示词 / 助手设定', '<span class="rb-tag soft">来自对话</span>', base, base ? R.sha256(base) : '',
         () => host.dialog({ title: '对话系统提示词 / 助手设定', body: (base || '（空）') + '\n\n这是本对话的系统提示词（或所选助手的设定），作为 L1 固定设定的第一部分。可在顶部模型菜单 →「本对话系统提示词」或「提示词模板」中修改；修改后固定设定版本 +1。', okText: '知道了', info: true }), 'base');
@@ -450,6 +501,8 @@
         '<div class="hint">' + host.esc(def.hint) + '<br><span class="muted">' + host.esc(warn) + '</span></div>' +
         '<div class="group form"><textarea id="rb-text" rows="12" placeholder="在这里输入' + host.esc(def.title) + '…"></textarea>' +
         '<div class="rb-meta" id="rb-meta"></div>' +
+        ((id === 'character' || id === 'world') ? '<div class="btn-row" style="justify-content:flex-start"><button class="chip-btn" id="rb-import-sys" type="button">＋ 插入对话系统提示词 / 助手设定</button>' +
+          (firstUserText(conv).text ? '<button class="chip-btn" id="rb-import-first" type="button">＋ 插入首条消息原文</button>' : '') + '</div>' : '') +
         '<div class="btn-row"><button class="pill-btn" id="rb-cancel">取消</button><button class="pill-btn primary" id="rb-save">保存</button></div></div>' +
         '<div class="group-title">版本历史</div><div class="group" id="rb-hist"></div>';
       box.appendChild(wrap);
@@ -459,6 +512,9 @@
         wrap.querySelector('#rb-meta').textContent = c.length + ' 字 · 约 ' + R.estimateTokens(c) + ' Token · 指纹 ' + R.sha256(c).slice(0, 12) + '…' + (c === b.content ? ' · 未修改' : ' · 保存后为' + ver(b.version + 1));
       };
       ta.addEventListener('input', meta); meta();
+      const ins = t => { t = R.canonicalize(t); if (!t) { host.toast('内容为空'); return; } ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t; meta(); };
+      const bs = wrap.querySelector('#rb-import-sys'); if (bs) bs.onclick = () => ins(conv.systemPrompt);
+      const bf = wrap.querySelector('#rb-import-first'); if (bf) bf.onclick = () => ins(firstUserText(conv).text);
       if (host.expandTextarea) host.expandTextarea(ta, def.layer + ' · ' + def.title, '全屏编辑完成后回到这里，点「保存」才会生效。' + warn);
       const back = () => { this.panel.view = null; this._render(); };
       wrap.querySelector('#rb-back').onclick = back; wrap.querySelector('#rb-cancel').onclick = back;
@@ -685,6 +741,8 @@
         n('rp-cap', '章节合计上限', s.summary.chapter_cap_tokens, 1000, '全部章节超过这么多 Token 时，下一次摘要改为合并全部章节（缓存重建一次）') +
         '<label class="field"><span>摘要所用模型<small>留空 = 与对话相同；可以填更便宜的模型</small></span><input id="rp-summodel" type="text" placeholder="例如 deepseek-flash" value="' + host.esc(s.summary_model || '') + '"></label>' +
         '<div class="hint small" style="margin:0">超出上下文上限时会立即摘要，不受以上条件限制。</div></div>' +
+        '<div class="group-title">设定提取</div><div class="group form">' +
+        '<label class="field inline"><span>首条消息自动提取设定<small>本对话第一轮回复后，把首条消息里的角色 / 世界观 / 规则填进空白的分层设定</small></span><input type="checkbox" class="switch" id="rp-extract-on"' + (s0.auto_extract !== false ? ' checked' : '') + '></label></div>' +
         '<div class="group-title">冻结与估算</div><div class="group form">' +
         '<label class="field inline"><span>重新生成时刷新冻结的用户消息<small>默认关闭：重新生成最后一条回复时沿用首次发送的原文（含当时的联网 / 文件内容），保持缓存</small></span><input type="checkbox" class="switch" id="rp-refresh"' + (s.refresh_on_regen ? ' checked' : '') + '></label>' +
         '<div class="kv"><span>Token 估算校准系数</span><b>× ' + (d.state.calib || 1).toFixed(2) + (d.state.calibN ? '（已按 ' + d.state.calibN + ' 次真实用量校准）' : '（尚未校准）') + '</b></div>' +
@@ -728,7 +786,8 @@
         s.summary_model = body.querySelector('#rp-summodel').value.trim();
         host.saveConv(conv); host.refresh();
       };
-      body.querySelectorAll('input:not(#rp-saveprompt):not(#rp-auto-budget):not(#rp-auto-sum)').forEach(i => i.addEventListener('change', save));
+      body.querySelector('#rp-extract-on').onchange = e => { data(conv).state.settings.auto_extract = e.target.checked; host.saveConv(conv); };
+      body.querySelectorAll('input:not(#rp-saveprompt):not(#rp-auto-budget):not(#rp-auto-sum):not(#rp-extract-on)').forEach(i => i.addEventListener('change', save));
       body.querySelector('#rp-saveprompt').onchange = async e => {
         if (e.target.checked) {
           const ok = await host.dialog({ title: '开启完整提示词日志？', body: '日志可能包含角色卡、私密剧情、API 请求内容，请谨慎使用。\n\n日志只保存在本机（不会上传），可随时在「缓存监控」中清空。', okText: '仍然开启', danger: true });
@@ -741,7 +800,7 @@
       body.querySelector('#rp-reset-win').onclick = () => { data(conv).state.window = { startId: null, startOrdinal: 0 }; host.saveConv(conv); host.refresh(); host.toast('已重置截断起点'); };
     },
   });
-  plugin._internals = { toItems, makeSummary, planConv, planConvAuto, loadLogs, applicability, convItems, rpLike, autoActive, envFor, placeMarkers };
+  plugin._internals = { toItems, makeSummary, planConv, planConvAuto, loadLogs, applicability, convItems, rpLike, autoActive, envFor, placeMarkers, autoExtract, firstUserText };
 
   // 第二个内置插件：Token 用量显示（演示通用钩子；对所有对话生效，可在对话中关闭）
   reg.register({

@@ -858,6 +858,47 @@
     return res;
   }
 
+  // ---------------- v0.7.4：首条消息自动提取设定 ----------------
+  /** 可自动填充的块（L1 固定设定 + 长期记忆 + 当前状态）；只填空白块，绝不覆盖已有内容 */
+  const EXTRACT_FIELDS = ['world', 'character', 'rules', 'format', 'style', 'prohibit', 'memory', 'state'];
+  function buildExtractPrompt(text) {
+    return '下面是用户在一段角色扮演 / 故事对话中发送的第一条消息，通常包含角色背景、人物设定、世界观或故事背景。\n' +
+      '请从中提取设定信息，只输出一个 JSON 对象（不要代码块、不要解释），字段如下，原文没有提到的字段输出空字符串，不要编造：\n' +
+      '{\n  "world": "世界观：时代、地点、势力、魔法/科技规则、故事背景",\n  "character": "角色卡：角色名字、身份、外貌、性格、说话方式、人物关系",\n' +
+      '  "rules": "RP 规则：用户明确提出的扮演规则（如不替玩家行动）",\n  "format": "输出格式：回复长度、人称、是否带动作描写等",\n' +
+      '  "style": "写作风格：文风、语气、节奏",\n  "prohibit": "禁止事项",\n  "memory": "已确定的重要事实 / 前情（非长期设定的剧情事实）",\n' +
+      '  "state": "当前状态：开场时间、地点、场景、数值等"\n}\n' +
+      '要求：用简洁的中文条目（可用「- 」分行），尽量保留原文中的专有名词与关键细节；不要把用户本轮的行动或提问写进设定。\n\n=== 用户的第一条消息 ===\n' + String(text || '').slice(0, 12000);
+  }
+  /** 解析模型返回的 JSON（容忍代码块、前后多余文字）；失败返回 null */
+  function parseExtract(raw) {
+    const t = String(raw || '').replace(/```(?:json)?/gi, '');
+    const a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if (a < 0 || b <= a) return null;
+    let o; try { o = JSON.parse(t.slice(a, b + 1)); } catch (e) { return null; }
+    if (!o || typeof o !== 'object') return null;
+    const out = {};
+    EXTRACT_FIELDS.forEach(k => {
+      let v = o[k];
+      if (Array.isArray(v)) v = v.map(x => (typeof x === 'string' ? '- ' + x : JSON.stringify(x))).join('\n');
+      else if (v && typeof v === 'object') v = Object.keys(v).map(x => '- ' + x + '：' + (typeof v[x] === 'string' ? v[x] : JSON.stringify(v[x]))).join('\n');
+      v = canonicalize(v == null ? '' : String(v));
+      if (v && !/^(无|空|没有|未提及|none|null|n\/a)$/i.test(v)) out[k] = v;
+    });
+    return out;
+  }
+  /** 只把提取结果写进空白块（用户已填写的块保持不变）；返回写入的块 id */
+  function fillEmptyBlocks(st, fields, at) {
+    let state = st; const filled = [];
+    EXTRACT_FIELDS.forEach(k => {
+      const v = fields && fields[k];
+      if (!v || getBlock(state, k).content) return;
+      const r = setBlock(state, k, v, at);
+      if (r.changed) { state = r.state; filled.push(k); }
+    });
+    return { state, filled };
+  }
+
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
@@ -865,7 +906,7 @@
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
-    makeLogEntry, appendLog, stats, detectAnomaly };
+    makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, buildExtractPrompt, parseExtract, fillEmptyBlocks };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

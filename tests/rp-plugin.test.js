@@ -195,3 +195,30 @@ test('RP + 版本：切换较早回复 → 下一轮 History CHANGED，原因写
   assert.strictEqual(logs[3].history_cause.kind, 'version');
   assert.strictEqual(reg.convData(conv, 'rpcache').state.pendingHistoryCause, null, '成功后清除');
 });
+
+// v0.7.4：首条消息自动提取设定
+test('v0.7.4 首条消息自动提取：只填空白块，失败不影响', async () => {
+  const conv = { id: 'cx', model: 'deepseek-flash', systemPrompt: '', messages: [] };
+  const settings = {};
+  reg.setForConversation(conv, 'rpcache', true);
+  const reply = JSON.stringify({ world: '赛博朋克都市 新港', character: '- 名字：艾琳\n- 性格：冷静', rules: '', memory: '无', state: '雨夜，酒吧' });
+  const host = mkHost(conv, settings, reply);
+  const R0 = R.normalizeState(null);
+  conv.plugins.rpcache.state = R.setBlock(R0, 'character', '用户已写的角色卡', 1).state;
+  await send(conv, settings, host, '我们来角色扮演。世界观：赛博朋克都市新港。你扮演艾琳，冷静的黑客。');
+  const pl = reg.get ? reg.get('rpcache') : reg.all().find(p => p.id === 'rpcache');
+  await pl._lastExtract;
+  const st = conv.plugins.rpcache.state;
+  assert.strictEqual(R.getBlock(st, 'character').content, '用户已写的角色卡');
+  assert.strictEqual(R.getBlock(st, 'world').content, '赛博朋克都市 新港');
+  assert.strictEqual(R.getBlock(st, 'state').content, '雨夜，酒吧');
+  assert.strictEqual(R.getBlock(st, 'memory').content, '');
+  assert.ok(host.toasts.some(t => t.includes('已根据首条消息填充 RP 设定')));
+  const n = host.calls.length;
+  await send(conv, settings, host, '继续');
+  assert.strictEqual(host.calls.length, n, '第二轮不再提取');
+});
+test('v0.7.4 parseExtract 容错 / 可关闭', () => {
+  assert.strictEqual(R.parseExtract('not json'), null);
+  assert.deepStrictEqual(R.parseExtract('```json\n{"world":["a","b"],"rules":"无"}\n```'), { world: '- a\n- b' });
+});
