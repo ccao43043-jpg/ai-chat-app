@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.6.1';
+  const APP_VERSION = '0.8.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -112,6 +112,9 @@
   const savePrompts = () => Store.set('prompts.json', prompts);
   let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
   const saveTemplates = () => Store.set('templates.json', templates);
+  let lorebook = (Store.get('lorebook.json', null) || []).map(Lorebook.normalize);
+  const saveLorebook = () => Store.set('lorebook.json', lorebook);
+  let curTab = 'chat';
   // 全局 Token 用量统计（非插件，独立页面）
   let usageState = UsageStats.normalize(Store.get('usage-stats.json', null));
   // 若 RP 插件里改过价格，合并过来（用户只改一处）
@@ -440,6 +443,10 @@
     const bar = $('#conv-bar'); if (!bar) return;
     const badges = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
     if (conv && conv.templateName) badges.unshift({ text: (conv.templateEmoji || '📋') + ' ' + conv.templateName, tone: 'info', title: '当前提示词模板（点击切换）', action: openTemplateSheet, cls: 'tpl' });
+    if (conv && lorebookActive(conv)) {
+      const hit = Lorebook.match(lorebook, Lorebook.scanText(conv.messages, 4));
+      if (hit.length) badges.unshift({ text: '📖 世界书已激活 · ' + hit.length + ' 条', tone: 'info', title: '本轮将注入的世界书条目（点击管理）', action: lorebookBadgeMenu, cls: 'lb' });
+    }
     renderTplChip();
     bar.innerHTML = '';
     bar.classList.toggle('show', badges.length > 0);
@@ -448,6 +455,10 @@
       if (b.action) el.onclick = b.action;
       bar.appendChild(el);
     });
+  }
+  function renderHeaderTitle() {
+    const t = document.querySelector('.brand-title'); if (!t || !conv) return;
+    t.textContent = conv.personaName ? ((conv.personaEmoji ? conv.personaEmoji + ' ' : '') + conv.personaName) : 'AI Chat';
   }
   function renderHeader() {
     const p = getProvider(conv.providerId);
@@ -462,7 +473,9 @@
       if (ok && conv.model) sub.textContent = (p.name || '多模型') + ' · ' + conv.model;
       else if (ok) sub.textContent = (p.name || '多模型') + ' · 文字生成';
       else sub.textContent = '文字生成 · 多模型';
+      if (conv.templateName) sub.textContent = '预设：' + conv.templateName + (ok && conv.model ? ' · ' + conv.model : '');
     }
+    renderHeaderTitle();
     renderConvBar();
   }
   function dayGroup(t) {
@@ -1067,6 +1080,12 @@
     delete bot.pluginStatus;
     if (bot.stopped) { finish(); return; }
     if (rctx.plugins.length) bot.plugins = rctx.plugins;
+    if (lorebookActive(thisConv)) {
+      try {
+        const lb = Lorebook.inject(rctx.systemPrompt, lorebook, Lorebook.scanText(thisConv.messages.filter(m => m !== bot), 4));
+        if (lb.entries.length) { rctx.systemPrompt = lb.systemPrompt; bot.lorebook = lb.entries.map(e => e.title); }
+      } catch (e) { /* 世界书失败不影响发送 */ }
+    }
     const req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
     const parser = Providers.createStreamParser(p.type);
@@ -1497,6 +1516,7 @@
   function closeSettings() {
     readGeneral();
     $('#page-settings').classList.remove('show');
+    if (curTab === 'settings') setTimeout(renderSettingsTab, 0);
     const cur = getProvider(conv.providerId);
     if (!cur || !cur.apiKey) {
       const p = configured()[0]; if (p) { conv.providerId = p.id; conv.model = p.models[0] || ''; }
@@ -1642,7 +1662,8 @@
     const f = Personas.conversationFromPersona(ps, configured(), { providerId: conv.providerId, model: conv.model });
     Object.assign(conv, f, { title: '新对话' });
     if (conv.temperature === undefined) delete conv.temperature;
-    closePersonas(); closeDrawer();
+    if (ps.firstMes) conv.messages.push({ id: uid(), role: 'assistant', content: ps.firstMes, personaName: ps.name, personaEmoji: ps.emoji, createdAt: Date.now() });
+    closePersonas(); closeDrawer(); switchTab('chat');
     renderAll();
     toast('已切换到「' + ps.name + '」');
   }
@@ -1683,7 +1704,7 @@
   $('#ps-provider').onchange = () => { $('#ps-model').value = ''; renderPsModels(); };
   $('#ps-model').addEventListener('input', renderPsModels);
   $('#ps-emoji').addEventListener('input', () => { $('#ps-emoji-view').textContent = $('#ps-emoji').value.trim() || '🤖'; });
-  function closePersonaEdit() { $('#page-persona').classList.remove('show'); editingPersona = null; if ($('#page-personas').classList.contains('show')) renderPersonaGrid(); }
+  function closePersonaEdit() { $('#page-persona').classList.remove('show'); editingPersona = null; if ($('#page-personas').classList.contains('show')) renderPersonaGrid(); if (curTab === 'characters') renderCharacters(); }
   $('#ps-save').onclick = () => {
     const name = $('#ps-name').value.trim();
     if (!name) { toast('请填写助手名称'); return; }
@@ -2332,11 +2353,13 @@
     if (shown('#page-imagegen')) { closeImageGen(); return true; }
     if (shown('#page-usage')) { closeUsage(); return true; }
     if (shown('#page-plugins')) { closePlugins(); return true; }
+    if (shown('#page-lbentry')) { closeLbEntry(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
     if (shown('#page-personas')) { closePersonas(); return true; }
     if (shown('#page-provider')) { closeProviderEdit(); return true; }
     if (shown('#page-settings')) { closeSettings(); return true; }
     if (shown('#drawer')) { closeDrawer(); return true; }
+    if (curTab !== 'chat') { switchTab('chat'); return true; }
     return false;
   };
 
@@ -2895,6 +2918,210 @@
     ]);
   }
 
+
+  // ---------------- 底栏四 Tab：聊天 / 角色 / 世界书 / 设置 ----------------
+  function lorebookActive(c) { return !!(c && settings.lorebookOn !== false && !c.lorebookOff && lorebook.some(e => e.enabled)); }
+  function switchTab(t) {
+    curTab = t;
+    $('#app').dataset.tab = t;
+    document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+    document.querySelectorAll('.tabview').forEach(v => v.classList.toggle('show', v.id === 'tab-' + t));
+    if (t === 'characters') renderCharacters();
+    else if (t === 'lorebook') renderLorebook();
+    else if (t === 'settings') renderSettingsTab();
+    else if (conv) renderHeader();
+  }
+  document.querySelectorAll('#bottom-nav button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+  // 角色
+  function renderCharacters() {
+    const q = $('#ch-search').value.trim().toLowerCase();
+    const box = $('#ch-grid'); box.innerHTML = '';
+    const list = personas.filter(ps => !q || ps.name.toLowerCase().includes(q) || (ps.desc || '').toLowerCase().includes(q) || ps.systemPrompt.toLowerCase().includes(q));
+    if (!list.length) box.innerHTML = '<div class="empty-tip">没有找到角色</div>';
+    list.forEach(ps => {
+      const el = document.createElement('div'); el.className = 'persona-card ch-card';
+      const tags = [];
+      if (conv && conv.personaId === ps.id) tags.push('当前');
+      if (ps.tavern) tags.push('酒馆卡');
+      if (ps.builtin) tags.push('内置');
+      if (ps.model) tags.push(ps.model);
+      el.innerHTML = '<div class="pcard-top"><span class="ch-avatar">' + esc(ps.emoji) + '</span><button class="ci-more" aria-label="更多">' + ICON.more + '</button></div>' +
+        '<div class="pcard-name">' + esc(ps.name) + '</div><div class="pcard-desc">' + esc(ps.desc || ps.systemPrompt.slice(0, 40)) + '</div>' +
+        '<div class="pcard-tags">' + tags.map(x => '<span>' + esc(x) + '</span>').join('') + '</div>';
+      el.onclick = () => startFromPersona(ps);
+      el.querySelector('.ci-more').onclick = e => {
+        e.stopPropagation();
+        actionSheet(ps.emoji + ' ' + ps.name, [
+          { label: '开始对话', icon: ICON.chat, onClick: () => startFromPersona(ps) },
+          { label: '编辑', icon: ICON.edit, onClick: () => openPersonaEdit(ps.id) },
+          { label: '复制一份', icon: ICON.dup, onClick: () => { personas = Personas.duplicate(personas, ps.id); savePersonas(); renderCharacters(); toast('已复制'); } },
+          { label: '删除', icon: ICON.trash, danger: true, onClick: async () => { await deletePersona(ps); renderCharacters(); } },
+        ]);
+      };
+      box.appendChild(el);
+    });
+  }
+  $('#ch-search').addEventListener('input', renderCharacters);
+  $('#ch-new').onclick = $('#ch-new-top').onclick = () => openPersonaEdit(null);
+  $('#ch-import').onclick = () => $('#ch-file').click();
+  function pngCardText(buf) {
+    // 读取 PNG tEXt 块里的 chara（base64 JSON），即酒馆角色卡图片
+    const u = new Uint8Array(buf); let i = 8;
+    while (i + 8 < u.length) {
+      const len = (u[i] << 24 | u[i + 1] << 16 | u[i + 2] << 8 | u[i + 3]) >>> 0;
+      const type = String.fromCharCode(u[i + 4], u[i + 5], u[i + 6], u[i + 7]);
+      if (type === 'tEXt') {
+        let s = ''; for (let k = i + 8; k < i + 8 + len; k++) s += String.fromCharCode(u[k]);
+        const z = s.indexOf('\0');
+        if (z > 0 && /^(chara|ccv3)$/.test(s.slice(0, z))) {
+          const bin = atob(s.slice(z + 1)); const bytes = new Uint8Array(bin.length);
+          for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+          return new TextDecoder('utf-8').decode(bytes);
+        }
+      }
+      if (type === 'IEND') break;
+      i += 12 + len;
+    }
+    throw new Error('图片里没有角色卡数据');
+  }
+  $('#ch-file').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      const text = /\.png$/i.test(f.name) || f.type === 'image/png' ? pngCardText(await f.arrayBuffer()) : await f.text();
+      const data = JSON.parse(text.replace(/^\uFEFF/, ''));
+      const ps = Personas.fromCard(data);
+      personas = Personas.upsert(personas, ps); savePersonas();
+      const book = data.data && data.data.character_book;
+      let extra = '';
+      if (book && book.entries) { const r = Lorebook.importJSON(JSON.stringify(book), lorebook); lorebook = r.list; saveLorebook(); if (r.added) extra = '及 ' + r.added + ' 条世界书'; }
+      toast('已导入「' + ps.name + '」' + extra);
+      renderCharacters();
+    } catch (err) { dialog({ title: '导入失败', body: err.message || String(err), info: true }); }
+  };
+
+  // 世界书
+  let lbFilter = 'all';
+  let editingLb = null;
+  function renderLorebook() {
+    const list = Lorebook.filter(lorebook, lbFilter);
+    $('#lb-sub').textContent = lorebook.length + ' 条目 · ' + lorebook.filter(e => e.enabled).length + ' 已启用' + (settings.lorebookOn === false ? ' · 已全局停用' : '');
+    document.querySelectorAll('#lb-filters .fchip').forEach(b => b.classList.toggle('active', b.dataset.f === lbFilter));
+    const box = $('#lb-list'); box.innerHTML = '';
+    if (!list.length) {
+      box.innerHTML = '<div class="empty-tip">' + (lorebook.length ? '没有符合筛选的条目' : '还没有世界书条目。<br>点右上角「新建条目」添加设定，聊天中出现关键词时会自动注入给模型。') + '</div>';
+      return;
+    }
+    const hits = new Set(lorebookActive(conv) ? Lorebook.match(lorebook, Lorebook.scanText(conv.messages, 4)).map(e => e.id) : []);
+    list.forEach(en => {
+      const el = document.createElement('div'); el.className = 'lb-card' + (en.enabled ? '' : ' off');
+      el.innerHTML = '<div class="lb-row"><div class="lb-title">' + esc(en.title) + '</div>' +
+        (en.sticky ? '<span class="lb-tag sticky">常驻</span>' : '') + (hits.has(en.id) ? '<span class="lb-tag">已激活</span>' : '') +
+        '<input type="checkbox" class="switch lb-switch"' + (en.enabled ? ' checked' : '') + ' aria-label="启用"></div>' +
+        '<div class="lb-keys">' + (en.keywords.length ? esc(en.keywords.join(', ')) : (en.sticky ? '常驻 · 无需关键词' : '<span class="muted">未设置关键词</span>')) + '</div>' +
+        '<div class="lb-content">' + esc(en.content.slice(0, 120)) + '</div>';
+      el.onclick = ev => { if (ev.target.classList.contains('lb-switch')) return; openLbEntry(en.id); };
+      el.querySelector('.lb-switch').onchange = () => { lorebook = Lorebook.toggle(lorebook, en.id); saveLorebook(); renderLorebook(); renderConvBar(); };
+      box.appendChild(el);
+    });
+  }
+  document.querySelectorAll('#lb-filters .fchip').forEach(b => b.onclick = () => { lbFilter = b.dataset.f; renderLorebook(); });
+  $('#lb-new-top').onclick = () => openLbEntry(null);
+  $('#lb-more').onclick = () => actionSheet('世界书', [
+    { label: '导入 JSON（支持酒馆世界书）', icon: ICON.file, onClick: () => $('#lb-file').click() },
+    { label: '复制导出 JSON', icon: ICON.copy, onClick: () => copyText(Lorebook.exportJSON(lorebook)) },
+    { label: settings.lorebookOn === false ? '全局启用世界书' : '全局停用世界书', icon: ICON.tune, onClick: () => { settings.lorebookOn = settings.lorebookOn === false; saveSettings(); renderLorebook(); renderConvBar(); } },
+  ]);
+  $('#lb-file').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { const r = Lorebook.importJSON(await f.text(), lorebook); lorebook = r.list; saveLorebook(); renderLorebook(); toast('导入 ' + r.added + ' 条' + (r.skipped ? '，跳过 ' + r.skipped : '')); }
+    catch (err) { dialog({ title: '导入失败', body: err.message, info: true }); }
+  };
+  function openLbEntry(id) {
+    const en = id ? lorebook.find(x => x.id === id) : null;
+    editingLb = en ? Object.assign({}, en) : Lorebook.normalize({ title: '', enabled: true });
+    $('#lbe-title').textContent = en ? '编辑条目' : '新建条目';
+    $('#lbe-name').value = en ? en.title : '';
+    $('#lbe-keys').value = editingLb.keywords.join(', ');
+    $('#lbe-content').value = editingLb.content;
+    $('#lbe-sticky').checked = editingLb.sticky;
+    $('#lbe-enabled').checked = editingLb.enabled;
+    $('#lbe-delete').style.display = en ? '' : 'none';
+    $('#page-lbentry').classList.add('show');
+  }
+  function closeLbEntry() { $('#page-lbentry').classList.remove('show'); editingLb = null; renderLorebook(); renderConvBar(); }
+  $('#lbe-save').onclick = () => {
+    if (!editingLb) return;
+    const content = $('#lbe-content').value;
+    if (!content.trim()) { toast('请填写内容'); return; }
+    lorebook = Lorebook.upsert(lorebook, { id: editingLb.id, title: $('#lbe-name').value, keywords: $('#lbe-keys').value, content,
+      sticky: $('#lbe-sticky').checked, enabled: $('#lbe-enabled').checked });
+    saveLorebook(); closeLbEntry(); toast('已保存');
+  };
+  $('#lbe-delete').onclick = async () => {
+    if (!editingLb) return;
+    const ok = await dialog({ title: '删除条目？', body: '「' + editingLb.title + '」将被删除。', okText: '删除', danger: true });
+    if (!ok) return;
+    lorebook = Lorebook.remove(lorebook, editingLb.id); saveLorebook(); closeLbEntry(); toast('已删除');
+  };
+  function lorebookBadgeMenu() {
+    actionSheet('世界书', [
+      { label: '管理世界书', icon: ICON.edit, onClick: () => switchTab('lorebook') },
+      { label: conv.lorebookOff ? '本对话启用世界书' : '本对话停用世界书', icon: ICON.tune, onClick: () => { conv.lorebookOff = !conv.lorebookOff; saveConv(); renderConvBar(); toast(conv.lorebookOff ? '本对话已停用世界书' : '本对话已启用世界书'); } },
+    ]);
+  }
+
+  // 设置 Tab（对应设计稿 04：当前预设、模型、采样、开关、入口行）
+  function stRow(icon, name, sub, fn) {
+    const b = document.createElement('button'); b.className = 'prov-item st-row';
+    b.innerHTML = '<span class="avatar lg st-ic">' + icon + '</span><div class="pi-main"><div class="pi-name">' + esc(name) + '</div><div class="pi-sub">' + esc(sub || '') + '</div></div>' + ICON.chevR;
+    b.onclick = fn; return b;
+  }
+  function stSwitch(name, sub, checked, fn) {
+    const l = document.createElement('label'); l.className = 'field inline st-switch';
+    l.innerHTML = '<span>' + esc(name) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span><input type="checkbox" class="switch"' + (checked ? ' checked' : '') + '>';
+    l.querySelector('input').onchange = e => fn(e.target.checked); return l;
+  }
+  function renderSettingsTab() {
+    const body = $('#st-body'); body.innerHTML = '';
+    const p = conv && getProvider(conv.providerId);
+    const hero = document.createElement('div'); hero.className = 'st-hero';
+    hero.innerHTML = '<div class="st-label">当前预设</div><div class="st-preset">' + esc(conv && conv.templateName ? (conv.templateEmoji || '📋') + ' ' + conv.templateName : (conv && conv.systemPrompt ? '自定义系统提示词' : '无预设')) + '</div>' +
+      '<div class="st-meta">' + esc((conv && conv.personaName ? '角色：' + conv.personaName + ' · ' : '') + (p && p.apiKey ? p.name + ' · ' + (conv.model || '未设置模型') : '未配置服务商')) + '</div>';
+    const hb = document.createElement('div'); hb.className = 'btn-row';
+    const b1 = document.createElement('button'); b1.className = 'pill-btn primary'; b1.textContent = '切换预设'; b1.onclick = () => { switchTab('chat'); openTemplateSheet(); };
+    const b2 = document.createElement('button'); b2.className = 'pill-btn'; b2.textContent = '切换模型'; b2.onclick = () => { switchTab('chat'); openModelMenu(); };
+    hb.append(b1, b2); hero.appendChild(hb); body.appendChild(hero);
+
+    const t1 = document.createElement('div'); t1.className = 'group-title'; t1.textContent = '采样与开关'; body.appendChild(t1);
+    const g1 = document.createElement('div'); g1.className = 'group form';
+    g1.innerHTML = '<div class="field-row"><label class="field"><span>温度</span><input id="st-temp" type="number" inputmode="decimal" step="0.1" min="0" max="2" placeholder="默认"></label>' +
+      '<label class="field"><span>最大输出 tokens</span><input id="st-max" type="number" inputmode="numeric" min="1" placeholder="4096"></label></div>';
+    g1.querySelector('#st-temp').value = settings.temperature || '';
+    g1.querySelector('#st-max').value = settings.maxTokens || '';
+    g1.querySelector('#st-temp').onchange = e => { settings.temperature = e.target.value.trim(); saveSettings(); };
+    g1.querySelector('#st-max').onchange = e => { settings.maxTokens = e.target.value.trim(); saveSettings(); };
+    g1.appendChild(stSwitch('流式输出', '边生成边显示', settings.stream !== false, v => { settings.stream = v; saveSettings(); }));
+    g1.appendChild(stSwitch('世界书（全局）', '关键词命中或常驻条目注入系统提示词', settings.lorebookOn !== false, v => { settings.lorebookOn = v; saveSettings(); renderConvBar(); }));
+    g1.appendChild(stSwitch('本对话使用世界书', '仅影响当前对话', !(conv && conv.lorebookOff), v => { if (conv) { conv.lorebookOff = !v; saveConv(); renderConvBar(); } }));
+    body.appendChild(g1);
+
+    const t2 = document.createElement('div'); t2.className = 'group-title'; t2.textContent = '更多'; body.appendChild(t2);
+    const g2 = document.createElement('div'); g2.className = 'group';
+    g2.append(
+      stRow('🔑', '服务商与模型', configured().length + ' 个已配置 · API Key、联网搜索、默认提示词', openSettings),
+      stRow('📋', '预设（提示词模板）', templates.length + ' 个模板', openTemplates),
+      stRow('⚡', '提示词库', prompts.length + ' 条常用提示词', () => openPersonas('prompts')),
+      stRow('🧩', '插件', pluginSummary(), openPlugins),
+      stRow('🎨', '生图', '文字生成图片', () => openImageGen()),
+      stRow('📈', '用量统计', 'Token 与估算花费', openUsage),
+      stRow('💳', '账户余额', '各服务商余额', openBalance),
+    );
+    body.appendChild(g2);
+    const ab = document.createElement('div'); ab.className = 'about'; ab.innerHTML = '<img src="logo.svg" alt=""><div><b>AI Chat</b><br><small>v' + APP_VERSION + ' · 数据仅存储在本机</small></div>';
+    body.appendChild(ab);
+  }
+
   // ---------------- 启动 ----------------
   saveSettings();
   if (!Store.get('personas.json', null)) savePersonas();
@@ -2907,5 +3134,6 @@
   updateBalanceSubtitle();
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
+  switchTab('chat');
   updateSendState();
 })();
