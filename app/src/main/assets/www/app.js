@@ -2040,9 +2040,10 @@
     const box = $('#tv-fields'); box.innerHTML = '';
     vars.forEach(v => {
       const l = document.createElement('label'); l.className = 'field';
-      const long = /设定|背景|场景|信息|规则|禁止|风格/.test(v); // v0.7.6：长内容用多行输入
+      const long = /设定|背景|场景|信息|规则|禁止|风格|想法|重点|保留|要求|偏好/.test(v); // v0.7.6/0.7.7：长内容用多行输入
+      const ph = v === '模式' ? '一句话生成 或 逐步问答' : v === '想法' ? '一句话角色 / 故事想法，可留空后在聊天里说' : '填写' + v;
       l.innerHTML = '<span>' + esc(v) + (tpl.builtin ? '<small>可留空' + (long ? '，留空时整段省略' : '') + '</small>' : '') + '</span>' +
-        (long ? '<textarea rows="3" data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '"></textarea>' : '<input data-var="' + esc(v) + '" placeholder="填写' + esc(v) + '">');
+        (long ? '<textarea rows="3" data-var="' + esc(v) + '" placeholder="' + esc(ph) + '"></textarea>' : '<input data-var="' + esc(v) + '" placeholder="' + esc(ph) + '">');
       l.querySelector('[data-var]').value = last[v] || '';
       box.appendChild(l);
     });

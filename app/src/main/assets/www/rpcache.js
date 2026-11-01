@@ -881,26 +881,42 @@
   /** 各 L1 块的填写骨架（编辑页「从模板填充」） */
   const BLOCK_TEMPLATES = {
     world: '- 时代 / 地点：\n- 主要势力与关系：\n- 世界规则（魔法 / 科技 / 社会制度）：\n- 基调与氛围：\n- 重要地点：',
-    character: '- 姓名：\n- 年龄 / 外貌：\n- 身份与背景经历：\n- 性格（优点与缺点）：\n- 说话方式 / 口头禅：\n- 喜好与禁忌：\n- 与用户的关系：\n- 目标与秘密：',
+    character: '- 姓名：\n- 年龄 / 性别 / 外貌（身高、发色、穿着、标志性特征）：\n- 身份与背景经历（出身、关键转折）：\n- 性格优点：\n- 性格缺点 / 软肋：\n- 说话方式与口头禅：\n- 喜好：\n- 禁忌 / 雷区：\n- 人物关系（与用户、重要 NPC）：\n- 目标与动机：\n- 秘密：',
     rules: '- 始终以角色的视角和口吻回应，不跳出角色，不提及自己是 AI。\n- 只描写角色和 NPC 的言行，不替用户决定行动、台词或内心想法。\n- 角色只知道自己应该知道的信息；保持前后设定一致。\n- 主动推动剧情，给出细节与新的变化，避免重复句式。',
     format: '- 动作、神态与环境用 *斜体*，台词用「」。\n- 每次回复 150–300 字。\n- 第三人称 / 第一人称：\n- 结尾停在需要用户做出反应的时刻。',
-    fewshot: '用户：……\n角色：……\n\n用户：……\n角色：……',
-    prohibit: '- 不输出「（扮演开始）」「旁白：」等元信息。\n- 不总结剧情、不询问「接下来要做什么」。\n- ',
+    fewshot: '用户：……\n角色：……\n\n用户：……\n角色：……\n\n用户：……\n角色：……',
+    prohibit: '- 不输出「（扮演开始）」「旁白：」等元信息。\n- 不总结剧情、不询问「接下来要做什么」。\n- 角色绝不会做 / 说的事：\n- ',
     style: '- 文风：\n- 节奏：\n- 描写侧重（动作 / 心理 / 环境 / 对白）：\n- 参考作品或作者：',
   };
   const SECTION_ALIASES = { world: /^(世界观|世界背景|背景设定|世界设定)$/, character: /^(角色卡|角色设定|人物设定|角色)$/, rules: /^(RP ?规则|规则|扮演规则)$/i,
-    format: /^(输出格式|回复格式|格式)$/, fewshot: /^(示例对白|示例对话|对白示例)$/, prohibit: /^(禁止事项|禁止|禁忌)$/, style: /^(写作风格|文风|风格)$/ };
-  /** 解析「【世界观】……【角色卡】……」分段文本（角色卡生成助手的输出）→ { world, character, … }；少于 2 段返回 null */
+    format: /^(输出格式|回复格式|格式)$/, fewshot: /^(示例对白|示例对话|对白示例)$/, prohibit: /^(禁止事项|禁止)$/, style: /^(写作风格|文风|风格)$/, opening: /^(开场白|开场|开场旁白)$/ };
+  const SECTION_SKIP = /^(精修说明|说明|备注)$/; // 不会导入分层设定
+  /** 解析「【世界观】……【角色卡】……」分段文本 → { world, character, …, opening? }；少于 2 个可导入块返回 null */
   function parseSections(text) {
     const out = {}; let cur = null, n = 0;
     String(text || '').split('\n').forEach(line => {
-      const m = line.match(/^\s*(?:#+\s*)?【([^】]{1,12})】\s*(.*)$/);
-      if (m) { const name = m[1].trim(); cur = Object.keys(SECTION_ALIASES).find(k => SECTION_ALIASES[k].test(name)) || null;
-        if (cur) { n++; out[cur] = (out[cur] ? out[cur] + '\n' : '') + m[2]; } return; }
+      const m = line.match(/^\s*(?:#+\s*)?(?:\*\*)?【([^】]{1,12})】(?:\*\*)?\s*(.*)$/) || line.match(/^\s{0,3}#{1,3}\s+([^\n]{1,12})\s*$/);
+      if (m) {
+        const name = m[1].trim();
+        if (SECTION_SKIP.test(name)) { cur = null; return; }
+        cur = Object.keys(SECTION_ALIASES).find(k => SECTION_ALIASES[k].test(name)) || null;
+        if (cur) { n++; out[cur] = (out[cur] ? out[cur] + '\n' : '') + (m[2] || ''); }
+        return;
+      }
       if (cur) out[cur] += '\n' + line;
     });
     Object.keys(out).forEach(k => { out[k] = canonicalize(out[k]); if (!out[k]) delete out[k]; });
-    return n >= 2 && Object.keys(out).length ? out : null;
+    const keys = Object.keys(out).filter(k => k !== 'opening');
+    return keys.length >= 2 ? out : null;
+  }
+  /** 从对话消息里找最近一条含可导入分段的助手回复（最多往回看 limit 条） */
+  function findSectionMessage(messages, limit) {
+    const list = (messages || []).filter(m => m && m.role === 'assistant' && !m.error && m.content);
+    for (let i = list.length - 1, seen = 0; i >= 0 && seen < (limit || 8); i--, seen++) {
+      const fields = parseSections(list[i].content);
+      if (fields) return { msg: list[i], fields };
+    }
+    return null;
   }
   /** v0.7.5：自动触发门槛——首条消息足够长且像设定（手动提取不受限） */
   const EXTRACT_MIN = 80;
@@ -941,7 +957,7 @@
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
-    makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks };
+    makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

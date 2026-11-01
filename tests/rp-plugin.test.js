@@ -312,3 +312,17 @@ test('v0.7.6 从回复导入分段设定：只填空白块，可撤销', () => {
   host.toasts.actions[0].onClick();
   assert.strictEqual(R.getBlock(conv.plugins.rpcache.state, 'character').content, '');
 });
+
+test('v0.7.7 导入分段：跳过已有、覆盖、开场白不入库', () => {
+  const conv = mkConv('c77a'); const host = mkHost(conv, {}, '');
+  conv.plugins.rpcache.state = R.setBlock(R.normalizeState(null), 'world', '旧世界', 1).state;
+  const text = '【世界观】新世界\n【角色卡】莉亚\n【写作风格】冷峻\n【开场白】雨夜酒吧门一开……';
+  const filled = getPl()._internals.importSections(host, conv, text);
+  assert.deepStrictEqual(filled.sort(), ['character', 'style']);
+  assert.strictEqual(R.getBlock(conv.plugins.rpcache.state, 'world').content, '旧世界');
+  assert.ok(host.toasts.actions.some(a => a.label === '覆盖已有'));
+  assert.ok(host.toasts.actions.some(a => a.label === '复制开场白'));
+  assert.strictEqual(conv.plugins.rpcache.state.autoExtract.opening.slice(0, 2), '雨夜');
+  host.toasts.actions.find(a => a.label === '覆盖已有').onClick();
+  assert.strictEqual(R.getBlock(conv.plugins.rpcache.state, 'world').content, '新世界');
+});
