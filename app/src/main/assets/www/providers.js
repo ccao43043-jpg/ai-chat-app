@@ -298,6 +298,7 @@
       const gc = {};
       if (temp !== undefined) gc.temperature = temp;
       if (opts.maxTokens) gc.maxOutputTokens = opts.maxTokens;
+      if (opts.jsonMode) gc.responseMimeType = 'application/json';
       if (Object.keys(gc).length) body.generationConfig = gc;
       const path = stream ? ':streamGenerateContent?alt=sse' : ':generateContent';
       return {
@@ -333,11 +334,18 @@
     if (stream && streamUsageEnabled(provider)) body.stream_options = { include_usage: true };
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
+    if (opts.jsonMode && jsonModeSupported(provider)) body.response_format = { type: 'json_object' }; // v0.7.5：设定提取等结构化调用
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
     if (stream) headers['Accept'] = 'text/event-stream';
     return { url: base + '/chat/completions', method: 'POST', headers, body: JSON.stringify(body) };
   }
 
+  /** 已核实支持 response_format: json_object 的 OpenAI 兼容服务商 */
+  function jsonModeSupported(provider) {
+    const p = provider || {};
+    if (p.type !== 'openai') return false;
+    return ['openai', 'deepseek', 'qwen', 'qwen-intl', 'openrouter'].includes(p.presetId) || /\/\/api\.(deepseek|openai)\.com/i.test(p.baseUrl || '') || isQwenEndpoint(p);
+  }
   // 流式请求附带 usage（stream_options.include_usage）：已核实官方文档支持的预设默认开启，其他可在服务商设置里打开
   const STREAM_USAGE_PRESETS = ['openai', 'deepseek', 'qwen', 'qwen-intl', 'openrouter'];
   function streamUsageEnabled(provider) {
@@ -630,7 +638,7 @@
 
   const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
     isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

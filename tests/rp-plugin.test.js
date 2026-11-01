@@ -12,7 +12,7 @@ const ds = Object.assign({ apiKey: 'sk', id: 'p1' }, P.PRESETS.find(p => p.prese
 function mkHost(conv, settings, modelReply) {
   const store = {}; const calls = []; const toasts = [];
   return { calls, toasts, raw: store,
-    settings: () => settings, saveSettings() {}, conv: () => conv, saveConv() {}, refresh() {}, toast: t => toasts.push(t), esc: s => s, provider: () => ds,
+    settings: () => settings, saveSettings() {}, conv: () => conv, saveConv() {}, refresh() {}, toast: (t, a) => { toasts.push(t); if (a) toasts.actions = a; }, esc: s => s, provider: () => ds,
     store: { get: (k, d) => (k in store ? JSON.parse(store[k]) : d), set: (k, v) => { store[k] = JSON.stringify(v); } },
     openPanel() {},
     callModel: async (prompt, o) => { calls.push({ prompt, o }); if (o && o.setCancel) o.setCancel(() => {}); return typeof modelReply === 'function' ? modelReply(prompt) : modelReply; } };
@@ -197,6 +197,7 @@ test('RP + 版本：切换较早回复 → 下一轮 History CHANGED，原因写
 });
 
 // v0.7.4：首条消息自动提取设定
+const LONG_RP = '我们来角色扮演。世界观：赛博朋克都市新港，霓虹灯下的雨夜永不停歇，巨型企业控制着一切。你扮演艾琳，一名冷静而寡言的黑客，曾经在企业里工作，后来叛逃。我扮演一名刚到新港的雇佣兵，我们在酒吧第一次见面。';
 test('v0.7.4 首条消息自动提取：只填空白块，失败不影响', async () => {
   const conv = { id: 'cx', model: 'deepseek-flash', systemPrompt: '', messages: [] };
   const settings = {};
@@ -205,7 +206,7 @@ test('v0.7.4 首条消息自动提取：只填空白块，失败不影响', asyn
   const host = mkHost(conv, settings, reply);
   const R0 = R.normalizeState(null);
   conv.plugins.rpcache.state = R.setBlock(R0, 'character', '用户已写的角色卡', 1).state;
-  await send(conv, settings, host, '我们来角色扮演。世界观：赛博朋克都市新港。你扮演艾琳，冷静的黑客。');
+  await send(conv, settings, host, LONG_RP);
   const pl = reg.get ? reg.get('rpcache') : reg.all().find(p => p.id === 'rpcache');
   await pl._lastExtract;
   const st = conv.plugins.rpcache.state;
@@ -221,4 +222,83 @@ test('v0.7.4 首条消息自动提取：只填空白块，失败不影响', asyn
 test('v0.7.4 parseExtract 容错 / 可关闭', () => {
   assert.strictEqual(R.parseExtract('not json'), null);
   assert.deepStrictEqual(R.parseExtract('```json\n{"world":["a","b"],"rules":"无"}\n```'), { world: '- a\n- b' });
+});
+
+// v0.7.5
+const getPl = () => (reg.get ? reg.get('rpcache') : reg.all().find(p => p.id === 'rpcache'));
+const EX = JSON.stringify({ world: '新港', character: '艾琳', state: '雨夜' });
+function mkConv(id) { const c = { id, model: 'deepseek-flash', systemPrompt: '', messages: [] }; reg.setForConversation(c, 'rpcache', true); return c; }
+test('v0.7.5 自动触发门槛：短消息 / 不像设定不提取，手动可提取', async () => {
+  assert.strictEqual(R.shouldAutoExtract('你好，今天天气怎么样？'), false);
+  assert.strictEqual(R.shouldAutoExtract('x'.repeat(100)), false, '够长但没有设定关键词');
+  assert.strictEqual(R.shouldAutoExtract(LONG_RP), true);
+  const conv = mkConv('c75a'); const host = mkHost(conv, {}, EX);
+  getPl()._lastExtract = null;
+  await send(conv, {}, host, '扮演一个骑士，背景是中世纪。');
+  assert.strictEqual(getPl()._lastExtract, null); assert.strictEqual(host.calls.length, 0);
+  const filled = await getPl()._internals.autoExtract(host, conv, '扮演一个骑士，背景是中世纪。', true);
+  assert.deepStrictEqual(filled.sort(), ['character', 'state', 'world']);
+});
+test('v0.7.5 与首条回复并行、JSON 模式 + 60 秒超时、固定对话，撤销恢复整批', async () => {
+  const conv = mkConv('c75b'); const host = mkHost(conv, {}, EX);
+  const r = await send(conv, {}, host, LONG_RP);
+  assert.ok(getPl()._lastExtract, '在请求发出前就已开始');
+  await getPl()._lastExtract;
+  const o = host.calls[host.calls.length - 1].o;
+  assert.strictEqual(o.jsonMode, true); assert.strictEqual(o.timeoutMs, 60000); assert.strictEqual(o.conv, conv);
+  let st = conv.plugins.rpcache.state;
+  assert.strictEqual(R.getBlock(st, 'world').content, '新港');
+  assert.deepStrictEqual(host.toasts.actions.map(a => a.label), ['查看', '撤销']);
+  // 用户改了 character 后撤销：character 保留，其余恢复为空
+  conv.plugins.rpcache.state = R.setBlock(st, 'character', '我改过的', 5).state;
+  host.toasts.actions[1].onClick();
+  st = conv.plugins.rpcache.state;
+  assert.strictEqual(R.getBlock(st, 'world').content, ''); assert.strictEqual(R.getBlock(st, 'state').content, '');
+  assert.strictEqual(R.getBlock(st, 'character').content, '我改过的');
+  assert.strictEqual(st.autoExtract.status, 'undone');
+  const n = host.calls.length; await send(conv, {}, host, '继续'); assert.strictEqual(host.calls.length, n, '撤销后不会再次自动提取');
+});
+test('v0.7.5 解析失败重试一次；两次失败给出明确状态；跳过正在编辑的块', async () => {
+  const conv = mkConv('c75c'); let k = 0;
+  const host = mkHost(conv, {}, () => (++k === 1 ? '抱歉我不会' : EX));
+  getPl()._editing = { conv, id: 'world' };
+  const filled = await getPl()._internals.autoExtract(host, conv, LONG_RP, false);
+  getPl()._editing = null;
+  assert.strictEqual(host.calls.length, 2, '重试一次');
+  assert.ok(!filled.includes('world'), '正在编辑的块不填'); assert.deepStrictEqual(conv.plugins.rpcache.state.autoExtract.skipped, ['world']);
+  const conv2 = mkConv('c75d'); const h2 = mkHost(conv2, {}, 'nope');
+  assert.strictEqual(await getPl()._internals.autoExtract(h2, conv2, LONG_RP, false), null);
+  assert.strictEqual(h2.calls.length, 2);
+  assert.match(conv2.plugins.rpcache.state.autoExtract.error, /两次/);
+  const conv3 = mkConv('c75e'); const h3 = mkHost(conv3, {}, () => { throw new Error('请求超时'); });
+  await getPl()._internals.autoExtract(h3, conv3, LONG_RP, false);
+  assert.match(conv3.plugins.rpcache.state.autoExtract.error, /60 秒/);
+});
+test('v0.7.5 切换对话：提取结果写回发起的对话', async () => {
+  const a = mkConv('c75f'), b = mkConv('c75g'); let cur = a; let release;
+  const host = mkHost(a, {}, () => new Promise(r => { release = () => r(EX); }));
+  host.conv = () => cur;
+  const pr = getPl()._internals.autoExtract(host, a, LONG_RP, false);
+  cur = b; release(); await pr;
+  assert.strictEqual(R.getBlock(a.plugins.rpcache.state, 'world').content, '新港');
+  assert.ok(!b.plugins.rpcache.state || !b.plugins.rpcache.state.autoExtract);
+});
+test('v0.7.5 全局 / 本对话开关关闭时不自动提取', async () => {
+  const conv = mkConv('c75h'); const settings = {}; const host = mkHost(conv, settings, EX);
+  const st0 = R.normalizeState(null); st0.settings.auto_extract = false; conv.plugins.rpcache.state = st0;
+  getPl()._lastExtract = null; await send(conv, settings, host, LONG_RP);
+  assert.strictEqual(getPl()._lastExtract, null);
+  const c2 = mkConv('c75i'); const s2 = { plugins: { rpcache: { auto_extract: false } } };
+  getPl()._lastExtract = null; await send(c2, s2, mkHost(c2, s2, EX), LONG_RP);
+  assert.strictEqual(getPl()._lastExtract, null, '全局关闭');
+});
+test('v0.7.5 日志里的完整 prompt 只保留最近 20 条', () => {
+  let logs = []; for (let i = 0; i < 30; i++) logs = R.appendLog(logs, { i, prompt: 'p' + i });
+  assert.strictEqual(logs.filter(e => e.prompt).length, 20); assert.ok(!logs[0].prompt); assert.strictEqual(logs[29].prompt, 'p29');
+});
+test('v0.7.5 JSON 模式只对支持的服务商生效', () => {
+  const body = JSON.parse(P.buildChatRequest(ds, 'deepseek-chat', [{ role: 'user', content: 'json' }], '', { stream: false, jsonMode: true }).body);
+  assert.deepStrictEqual(body.response_format, { type: 'json_object' });
+  const other = Object.assign({}, ds, { presetId: 'custom', baseUrl: 'https://example.com/v1' });
+  assert.ok(!JSON.parse(P.buildChatRequest(other, 'm', [{ role: 'user', content: 'x' }], '', { stream: false, jsonMode: true }).body).response_format);
 });

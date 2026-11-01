@@ -131,10 +131,17 @@
     const meta = { id: c.id, title: c.title, providerId: c.providerId, model: c.model, updatedAt: c.updatedAt };
     if (c.personaName) { meta.personaName = c.personaName; meta.personaEmoji = c.personaEmoji; }
     const i = convIndex.findIndex(x => x.id === c.id);
+    if (i >= 0 && JSON.stringify(convIndex[i]) === JSON.stringify(meta)) return; // v0.7.5：索引没变化就不重写
     if (i >= 0) convIndex[i] = meta; else convIndex.unshift(meta);
     convIndex.sort((a, b) => b.updatedAt - a.updatedAt);
     saveIndex();
   }
+  /** v0.7.5：插件后台写入（提取设定、统计等）合并为约 500ms 一次；切到后台 / 关闭时立即写盘 */
+  const pendingSaves = new Map(); let saveTimer = null;
+  function flushSaves() { clearTimeout(saveTimer); saveTimer = null; const list = Array.from(pendingSaves.values()); pendingSaves.clear(); list.forEach(c => saveConv(c, false)); }
+  function saveConvSoon(c) { if (!c) return; pendingSaves.set(c.id, c); if (!saveTimer) saveTimer = setTimeout(flushSaves, 500); }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushSaves(); });
+  window.addEventListener('pagehide', flushSaves);
   const getProvider = id => settings.providers.find(p => p.id === id);
   const configured = () => settings.providers.filter(p => p.apiKey && p.apiKey.trim());
 
@@ -160,7 +167,16 @@
 
   // ---------------- 工具 ----------------
   let toastTimer;
-  function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1900); }
+  /** actions（v0.7.5）：[{ label, onClick }]，带按钮的提示停留更久 */
+  function toast(t, actions) {
+    const el = $('#toast'); el.textContent = t; el.classList.toggle('has-actions', !!(actions && actions.length));
+    (actions || []).forEach(a => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'toast-act'; b.textContent = a.label;
+      b.onclick = e => { e.stopPropagation(); el.classList.remove('show'); clearTimeout(toastTimer); try { a.onClick(); } catch (err) { console.error(err); } };
+      el.appendChild(b);
+    });
+    el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), actions && actions.length ? 6000 : 1900);
+  }
   function openUrl(u) {
     if (!/^https?:\/\//i.test(u || '')) return;
     if (bridge && bridge.openUrl) bridge.openUrl(u); else window.open(u, '_blank', 'noopener');
@@ -419,7 +435,7 @@
     const ok = await dialog({ title: '删除对话？', body: '「' + (meta ? meta.title : '') + '」将被永久删除。', okText: '删除', danger: true });
     if (!ok) return;
     if (running && conv && conv.id === id) stopGen();
-    Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json');
+    pendingSaves.delete(id); Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json');
     convIndex = convIndex.filter(x => x.id !== id); saveIndex();
     if (conv && conv.id === id) newConv(); else renderConvList();
     toast('已删除');
@@ -1525,6 +1541,7 @@
     const ok = await dialog({ title: '删除全部对话？', body: '将删除所有本地对话记录（服务商与 API Key 设置会保留）。', okText: '全部删除', danger: true });
     if (!ok) return;
     if (running) stopGen();
+    pendingSaves.clear();
     convIndex.forEach(m => { Store.del('conv_' + m.id + '.json'); Store.del('rplog_' + m.id + '.json'); });
     convIndex = []; saveIndex(); newConv(); toast('已删除全部对话');
   };
@@ -2202,9 +2219,11 @@
   // ---------------- 插件 ----------------
   const pluginHost = {
     settings: () => settings, saveSettings, conv: () => conv,
-    saveConv: c => saveConv(c || conv, false),
+    saveConv: c => saveConvSoon(c || conv),
     store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v) },
     toast, dialog, esc,
+    /** 当前打开的对话（插件判断后台任务完成时是否刷新界面） */
+    isCurrent: c => c === conv,
     refresh: () => { if (conv) { renderHeader(); renderMessages(); } },
     openPanel: (id, tab) => openPluginPanel(id, tab),
     expandTextarea: (ta, title, hint) => expandTextarea(ta, title, hint ? () => hint : null),
@@ -2215,18 +2234,19 @@
     /** 用当前对话的模型做一次非流式调用，返回文本 */
     async callModel(prompt, o) {
       o = o || {};
-      const p = getProvider(conv.providerId);
+      const cv = o.conv || conv; // v0.7.5：后台调用固定在发起时的对话（切换对话不串）
+      const p = getProvider(cv.providerId);
       if (!p || !p.apiKey) throw new Error('请先为本对话选择已配置 API Key 的服务商');
-      const model = o.model || conv.model;
+      const model = o.model || cv.model;
       // 摘要等后台调用：千问关闭思考模式（enable_thinking=false）省钱省时；其他服务商不受影响
-      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096, thinking: false });
-      const r = await requestText(req, o.setCancel || null, 180000);
+      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096, thinking: false, jsonMode: !!o.jsonMode });
+      const r = await requestText(req, o.setCancel || null, o.timeoutMs || 180000);
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       const ds = Providers.parseFullResponse(p.type, r.text);
       const err = ds.find(d => d.kind === 'error'); if (err) throw new Error(err.text);
       let usage = null;
       ds.forEach(d => { if (d.kind === 'usage') usage = Providers.mergeUsage(usage, d.usage); });
-      if (usage) recordUsage({ usage, type: o.usageType || 'summary', conv, provider: p, model, at: Date.now() });
+      if (usage) recordUsage({ usage, type: o.usageType || 'summary', conv: cv, provider: p, model, at: Date.now() });
       return ds.filter(d => d.kind === 'text').map(d => d.text).join('');
     },
   };

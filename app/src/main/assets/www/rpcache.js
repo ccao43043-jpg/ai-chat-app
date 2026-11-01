@@ -810,7 +810,13 @@
     if (o.savePrompt && o.prompt) e.prompt = o.prompt; // 调试：仅在用户开启 save_prompt 时保存
     return e;
   }
-  function appendLog(logs, e) { const out = (logs || []).concat([e]); while (out.length > LOG_LIMIT) out.shift(); return out; }
+  const PROMPT_KEEP = 20; // v0.7.5：完整 prompt（调试用，体积大）只保留最近 20 条
+  function appendLog(logs, e) {
+    const out = (logs || []).concat([e]); while (out.length > LOG_LIMIT) out.shift();
+    let kept = 0;
+    for (let i = out.length - 1; i >= 0; i--) if (out[i] && out[i].prompt) { if (++kept > PROMPT_KEEP) { out[i] = Object.assign({}, out[i]); delete out[i].prompt; } }
+    return out;
+  }
   const sameDay = (a, b) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
   function stats(logs, prices, mode, now, peak) {
     const all = logs || [];
@@ -871,6 +877,10 @@
       '要求：用简洁的中文条目（可用「- 」分行），尽量保留原文中的专有名词与关键细节；不要把用户本轮的行动或提问写进设定。\n\n=== 用户的第一条消息 ===\n' + String(text || '').slice(0, 12000);
   }
   /** 解析模型返回的 JSON（容忍代码块、前后多余文字）；失败返回 null */
+  /** v0.7.5：自动触发门槛——首条消息足够长且像设定（手动提取不受限） */
+  const EXTRACT_MIN = 80;
+  const EXTRACT_KW = /角色|世界观|你扮演|扮演|设定|人物|背景|人设|身份|性格|规则|character|setting|role ?play|persona|you are/i;
+  function shouldAutoExtract(text) { const t = String(text || '').trim(); return t.length >= EXTRACT_MIN && EXTRACT_KW.test(t); }
   function parseExtract(raw) {
     const t = String(raw || '').replace(/```(?:json)?/gi, '');
     const a = t.indexOf('{'), b = t.lastIndexOf('}');
@@ -906,7 +916,7 @@
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
-    makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, buildExtractPrompt, parseExtract, fillEmptyBlocks };
+    makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);
