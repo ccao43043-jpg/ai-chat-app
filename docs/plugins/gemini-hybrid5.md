@@ -1,0 +1,22 @@
+# Hybrid-5（gcache 1.2.0 / 应用 0.8.6）
+
+只在「OpenRouter + Gemini」请求上生效；其他请求逐字节不变。设置 → 插件 →「💎 Gemini 提示缓存」→「Hybrid-5 迟滞窗口」（默认开）。
+
+## 1. 严格分层（Doc1）
+- 固定层 A–D（协议锚点 / 世界 / 人物核心 / 玩法规则）留在 system，序列化不变，`static_hash` 稳定。
+- 动态层 E–G（【长期记忆】【近期剧情】【当前状态/场景】等）从 system 中移出，拼到**本轮 user 消息开头**；动态内容绝不进入固定前缀。
+- 日期只精确到天：system 与本轮输入里的 `YYYY-MM-DD HH:MM(:SS)` / `YYYY年M月D日 HH:MM` 归一为日期。
+- 本轮实际送出的 user 全文记录在 `convData.gcache.hybrid.sent`（按原文指纹索引，最多 120 条）；下一轮组装历史时用它替换原文，使「上一轮完整请求」= 「本轮前缀」。应用层消息本身不改，界面显示不受影响。
+
+## 2. Zip 迟滞窗口（`HybridWindow`）
+- `RAW_MIN=20`、`RAW_MAX=40`；一「轮」= 一条 user 及其后的回复。
+- 原文轮数达到 40 → 最早 20 轮压成一段摘要（本地启发式、离线、确定性），追加到 `hybrid.summaries` 并**冻结**；之后保留 20 轮原文，到第 60 轮再压下一批，以此类推。
+- 摘要以一条 `【前情提要（冻结摘要）】` system 消息放在固定 system 之后、历史之前；「摘要+窗口」前缀每 20 轮只变一次。
+- 冻结批次带原文指纹：用户编辑/删除了被压缩的历史时，从该批起作废重建（这是唯一会重新生成的情况）。
+
+## 3. 与 rpcache / gcache 协同（冲突策略 A）
+- 本对话「RP 缓存优化器（rpcache）」生效时，**不启用 Zip 窗口与动态层迁移**，历史与章节以 rpcache 为准，避免双重压缩导致前缀抖动；gcache 仍负责 session_id、auto 断点、static_hash 指纹与诊断。
+- 未走 rpcache 的 OpenRouter Gemini 对话默认启用 Hybrid-5。
+
+## 4. 不变项
+session_id（请求体顶层，不设 `provider.order`）、`mode:'auto'` 隐式优先 / 稳定且够长才打显式断点、真实 `cached_tokens` 统计、RP 协议锚点、不填充凑门槛。

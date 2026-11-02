@@ -8,8 +8,9 @@ AI Chat 从 v0.3.0 起提供一个 **内置插件框架**：插件可以在请�
 | `app/src/main/assets/www/plugins.js` | 插件注册表与钩子调度（纯 JS，可在 Node 中测试） |
 | `app/src/main/assets/www/rpcache.js` | DeepSeek RP 缓存优化器的 Context Builder 核心（纯函数） |
 | `app/src/main/assets/www/rp-plugin.js` | 两个内置插件：DeepSeek RP 缓存优化器、Token 用量显示 |
-| `app/src/main/assets/www/gcache.js` | 💎 Gemini 提示缓存（OpenRouter）插件 1.1.0：隐式优先 / 分层指纹 / 稳定 session_id / 诊断 |
+| `app/src/main/assets/www/gcache.js` | 💎 Gemini 提示缓存（OpenRouter）插件 1.2.0：Hybrid-5 迟滞窗口 / 隐式优先 / 分层指纹 / 稳定 session_id / 诊断 |
 | `docs/plugins/gemini-rp-cache-spec-v1.md` | Gemini RP 缓存算法规格 v1.0（gcache 以此为准） |
+| `docs/plugins/gemini-hybrid5.md` | Hybrid-5：严格固定前缀 + Zip 迟滞窗口（20–40 轮，冻结摘要）与 rpcache 冲突策略 |
 | `docs/plugins/deepseek-rp-cache-design-v1.md` | RP 插件的设计文档（当前版本，以此为准） |
 | `docs/plugins/deepseek-rp-cache-design-v0.md` | 早期设计文档（仅供参考） |
 

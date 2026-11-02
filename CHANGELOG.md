@@ -1,5 +1,16 @@
 # 更新日志
 
+**v0.8.6：Hybrid-5 迟滞窗口 + 严格固定前缀（Gemini 缓存）**
+
+- 「💎 Gemini 提示缓存（OpenRouter）」插件 1.2.0，新增 Hybrid-5（默认开，见 `docs/plugins/gemini-hybrid5.md`）：
+  - 严格分层：固定层 A–D 留在 system 且序列化不变；动态层 E–G 移到本轮 user 开头，动态内容不再进入固定前缀
+  - Zip 迟滞窗口：历史原文保留 20–40 轮，满 40 轮把最早 20 轮压成一段冻结摘要（只生成一次、持久化），前缀每 20 轮才变一次
+  - 历史使用「实际送出的完整 user 文本」，上一轮完整请求即本轮前缀；应用内消息显示不变
+  - 日期只精确到天（时间部分自动去掉）
+  - 冲突策略 A：本对话启用 RP 缓存优化器时不启用 Zip 窗口，以 rpcache 章节策略为准；gcache 仍负责 session_id / auto 断点 / 指纹 / 诊断
+  - 面板显示窗口轮数、冻结摘要段数、距下次压缩还剩几轮
+- 其他服务商 / 模型请求逐字节不变。Android `0.8.6`（versionCode 37）/ 桌面 / npm `0.8.6`
+
 **v0.8.5：Gemini RP 缓存优化（算法规格 v1.0）**
 
 - 「💎 Gemini 提示缓存（OpenRouter）」插件 1.1.0，按 `docs/plugins/gemini-rp-cache-spec-v1.md` 落地：

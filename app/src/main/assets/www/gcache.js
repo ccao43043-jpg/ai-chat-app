@@ -8,7 +8,7 @@
   'use strict';
   const ID = 'gcache';
   // v1.1.0（算法规格 v1.0）：mode 新增 auto（推荐默认：隐式优先，前缀够长且稳定才打显式断点）；rpGuardrails: auto|on|off；sessionId：稳定 session_id
-  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true };
+  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true, hybrid: true };
   /** 固定层版本：协议锚点文本 / 分层规则变更时必须 +1（变更会让 static_hash 变化，缓存需重新写入） */
   const STATIC_PROMPT_VERSION = 1;
   /** 诊断阈值：滚动命中率 <40% 触发诊断，≥70% 视为良好 */
@@ -153,6 +153,68 @@
     backupPointer(messages) { const m = messages || []; return { at: Date.now(), count: m.length, fp: hash(m.map(x => x && x.role + ':' + partsText(x.content)).join('\n')) }; },
   };
 
+
+  // ───────────────────────── HybridWindow（Hybrid-5：Zip 迟滞滑动窗口） ─────────────────────────
+  // 历史原文保留 RAW_MIN~RAW_MAX 轮：满 RAW_MAX 时把最早 (RAW_MAX-RAW_MIN) 轮压成一段摘要（只生成一次、持久化、冻结），之后保留 RAW_MIN 轮。
+  // 「摘要+窗口」前缀每 20 轮才变化一次。摘要为本地启发式（离线、确定性），不调用模型。
+  const RAW_MIN = 20, RAW_MAX = 40, SUM_HEAD = '【前情提要（冻结摘要）】';
+  const HW_SENT_MAX = 120;
+  /** 日期只精确到天：「2026-11-02 13:45(:10)」「2026年11月2日 13:45」→ 只保留日期部分 */
+  function normalizeDates(s) {
+    return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]?|\s*)\d{1,2}[:：]\d{2}(?:[:：]\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '$1');
+  }
+  /** 把历史消息切成轮：每条 user 开启一轮；首条 user 之前的消息（如开场白）并入第 0 轮 */
+  function splitTurns(hist) {
+    const turns = []; let cur = null;
+    hist.forEach(m => { if (m.role === 'user' || !cur) { cur = []; turns.push(cur); } cur.push(m); });
+    return turns;
+  }
+  const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
+  /** 默认离线摘要：逐轮「用户要点 / 回复要点」截断拼接（确定性，可测试） */
+  function summarizeTurns(turns, startNo) {
+    return turns.map((t, i) => '第' + (startNo + i + 1) + '轮：' + t.map(m => (m.role === 'user' ? '玩家' : m.role === 'assistant' ? '回复' : m.role) + '「' + clip(partsText(m.content), m.role === 'user' ? 60 : 90) + '」').join(' → ')).join('\n');
+  }
+  const batchFp = batch => hash(batch.flat().map(m => m.role + ':' + partsText(m.__orig != null ? m.__orig : m.content)).join('\n'));
+  function emptyHybrid() { return { v: 1, cut: 0, summaries: [], sent: {} }; }
+  /**
+   * apply(history, state) → { messagesForRequest, state, prefixChanged, summaryCreated, rawTurns, totalTurns, untilNext }
+   * history：不含开头 system 与本轮 user 的历史消息；state 原地更新（调用方负责持久化）。
+   */
+  function hwApply(history, state) {
+    state = state && state.v ? state : Object.assign(emptyHybrid(), state || {});
+    state.summaries = state.summaries || []; state.sent = state.sent || {};
+    const turns = splitTurns(history || []);
+    let prefixChanged = false, summaryCreated = false;
+    if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; } // 历史被删到摘要范围内：作废重来
+    // 已冻结批次被编辑：按指纹校验，不一致则从该批起作废
+    for (let i = 0; i < state.summaries.length; i++) {
+      const s = state.summaries[i], fp = batchFp(turns.slice(s.from, s.to));
+      if (fp !== s.fp) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
+    }
+    while (turns.length - state.cut >= RAW_MAX) {
+      const from = state.cut, to = from + (RAW_MAX - RAW_MIN), batch = turns.slice(from, to);
+      state.summaries.push({ from, to, fp: batchFp(batch), text: summarizeTurns(batch, from), at: new Date().toISOString().slice(0, 10) });
+      state.cut = to; summaryCreated = true; prefixChanged = true;
+    }
+    const raw = turns.slice(state.cut).flat();
+    const out = state.summaries.length ? [{ role: 'system', content: SUM_HEAD + '\n' + state.summaries.map(s => s.text).join('\n') }].concat(raw) : raw;
+    const rawTurns = turns.length - state.cut;
+    return { messagesForRequest: out, state, prefixChanged, summaryCreated, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
+  }
+  /** 记录本轮实际送出的 user 文本（含当轮动态块），键为原始 user 文本指纹；下一轮拼历史时替换回去 */
+  function hwRecordSent(state, original, sent) {
+    if (original === sent) return;
+    state.sent[hash(partsText(original))] = sent;
+    const ks = Object.keys(state.sent); if (ks.length > HW_SENT_MAX) ks.slice(0, ks.length - HW_SENT_MAX).forEach(k => delete state.sent[k]);
+  }
+  function hwOutbound(state, m) {
+    if (m.role !== 'user' || typeof m.content !== 'string') return m;
+    const s = state.sent && state.sent[hash(m.content)];
+    if (s == null) return m;
+    const o = Object.assign({}, m, { content: s }); Object.defineProperty(o, '__orig', { value: m.content, enumerable: false }); return o;
+  }
+  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, empty: emptyHybrid };
+
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */
   function rollingRate(samples) { const k = (samples || []).filter(x => x && x.known); if (!k.length) return null; const p = k.reduce((a, x) => a + x.prompt, 0), h = k.reduce((a, x) => a + x.hit, 0); return p ? Math.round(h / p * 100) : null; }
@@ -201,6 +263,29 @@
       if (k > 0 && typeof msgs[0].content === 'string') { if (msgs[0].content.indexOf(RP_ANCHOR) < 0) msgs[0].content = RP_ANCHOR + '\n\n' + msgs[0].content; }
       else if (k === 0) { msgs.unshift({ role: 'system', content: RP_ANCHOR }); k = 1; }
     }
+    // 2.5 Hybrid-5（仅调用方传入 extra.hybrid 状态时）：日期归一到天；动态层 E–G 从 system 移到本轮 user 尾部；历史走迟滞窗口
+    let hybrid = null;
+    if (extra.hybrid && cfg.hybrid !== false) {
+      const st = extra.hybrid;
+      for (let i = 0; i < k; i++) if (typeof msgs[i].content === 'string') msgs[i].content = normalizeDates(msgs[i].content);
+      let lastUser = msgs.length - 1; if (lastUser < k || msgs[lastUser].role !== 'user') lastUser = -1;
+      let dyn = '';
+      if (k === 1 && typeof msgs[0].content === 'string') {
+        const la = analyzeLayers(msgs[0].content);
+        if (la.dynamicText && lastUser > 0) { dyn = la.dynamicText; msgs[0].content = la.blocks.filter(b => b.kind === 'static').map(b => b.text).join('\n').replace(/\s+$/, ''); }
+      }
+      const tail = lastUser > 0 ? msgs[lastUser] : null;
+      const hist = msgs.slice(k, lastUser > 0 ? lastUser : msgs.length).map(m => hwOutbound(st, m));
+      const w = hwApply(hist, st);
+      let sentUser = null;
+      if (tail) {
+        const orig = tail.content;
+        if (typeof orig === 'string') { sentUser = Object.assign({}, tail, { content: normalizeDates(dyn ? dyn.replace(/\s+$/, '') + '\n\n' + orig : orig) }); hwRecordSent(st, orig, sentUser.content); }
+        else sentUser = tail;
+      }
+      msgs.splice(k, msgs.length - k, ...w.messagesForRequest.concat(sentUser ? [sentUser] : []));
+      hybrid = { prefixChanged: w.prefixChanged, summaryCreated: w.summaryCreated, rawTurns: w.rawTurns, totalTurns: w.totalTurns, untilNext: w.untilNext, summaries: st.summaries.length, movedDynamic: !!dyn };
+    }
     const prefix = msgs.slice(0, k).map(m => partsText(m.content)).join('\n\0\n');
     const layers = analyzeLayers(prefix);
     const decision = decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash });
@@ -233,7 +318,7 @@
     const sid = cfg.sessionId !== false && extra.sessionId ? extra.sessionId : '';
     if (sid) OpenRouterAdapter.applySession(body, sid);
     const route = OpenRouterAdapter.routeOf(body);
-    return { req: Object.assign({}, req, { headers, body: JSON.stringify(body) }), applied, prefix, layers, decision, session_id: body.session_id || '', route };
+    return { req: Object.assign({}, req, { headers, body: JSON.stringify(body) }), applied, prefix, layers, decision, session_id: body.session_id || '', route, hybrid };
   }
 
   /** 从统一 usage（providers.normalizeUsage）取缓存信息；服务商未返回 hit 字段时 known=false、pct=null（标「未知」，不冒充 0%） */
@@ -263,7 +348,7 @@
     return !!(conv && analyzeLayers(conv.systemPrompt || '').layered);
   }
 
-  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv };
+  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   root.GeminiCache = api;
 
@@ -280,13 +365,14 @@
   const LV = { good: '良好 ✅', ok: '一般', low: '偏低 ⚠️（已诊断）', unknown: '未知' };
 
   reg.register({
-    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.1.0', perConversation: false, defaultEnabled: true,
+    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.2.0', perConversation: false, defaultEnabled: true,
     desc: '只对 OpenRouter 上的 Gemini 模型生效（算法规格 v1.0）：隐式缓存优先，固定前缀够长且稳定时才打 cache_control 显式断点；系统提示分层指纹（static_hash）、每个对话稳定 session_id（sticky routing）、RP 协议锚点、L0 核心记忆保护、按真实 cached_tokens 统计命中与成本并在命中率 <40% 时自动诊断。其他服务商 / 模型的请求完全不变。',
     hooks: {
       onBeforeRequest(ctx, host) {
         if (!isOpenRouterGemini(ctx.provider, ctx.model)) return ctx;
         ctx.opts = Object.assign({}, ctx.opts, { orGemini: cfgOf(host) });
-        ctx.meta = Object.assign({}, ctx.meta, { gcacheRp: isRpConv(ctx.conv, rpActive(host, ctx.conv)) });
+        const rpa = rpActive(host, ctx.conv);
+        ctx.meta = Object.assign({}, ctx.meta, { gcacheRp: isRpConv(ctx.conv, rpa), gcacheRpcache: rpa });
         return ctx;
       },
       onAfterResponse(result, ctx, host) {
@@ -315,7 +401,12 @@
     transformRequest(req, ctx) {
       const o = ctx.opts && ctx.opts.orGemini; if (!o) return req;
       const s = statOf(ctx.conv);
-      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash });
+      // Hybrid-5 冲突策略（A）：RP 缓存优化器对本对话生效时不启用 Zip 窗口（以 rpcache 的章节策略为准），gcache 仍负责 session_id / auto 断点 / 指纹 / 诊断
+      const hyOn = o.hybrid !== false && !(ctx.meta && ctx.meta.gcacheRpcache) && ctx.conv;
+      const hd = ctx.conv && reg.convData(ctx.conv, ID);
+      if (hyOn) hd.hybrid = hd.hybrid && hd.hybrid.v ? hd.hybrid : HybridWindow.empty();
+      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null });
+      s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
       if (s.prefix != null && s.prefix !== r.prefix) { s.prefixChanges++; s.lastDiff = firstDiff(s.prefix, r.prefix); }
       s.prefix = r.prefix; s.prefixLen = r.prefix.length;
@@ -337,6 +428,7 @@
       box.innerHTML =
         sel('gc-mode', '缓存策略', '「自动」隐式缓存优先：固定前缀达到 Gemini 门槛且连续稳定时才打显式断点（不填充凑门槛）；OpenRouter 对 Gemini 只用最后一个断点', [['auto', '自动（推荐）'], ['off', '关闭（仅依赖 Gemini 隐式缓存）'], ['prefix', '系统前缀'], ['history', '前缀+历史']], c.mode) +
         sw('gc-merge', '合并开头 system 消息', '把开头连续的多条 system 消息合并为一条（顺序不变），保证断点覆盖完整固定前缀', c.mergeSystem) +
+        sw('gc-hy', 'Hybrid-5 迟滞窗口', '严格固定前缀（动态层 E–G 移到本轮输入尾部，日期只到天）+ 历史原文保留 20–40 轮：满 40 轮把最早 20 轮压成一段冻结摘要（只生成一次）。与「RP 缓存优化器」同开的对话以 rpcache 的章节策略为准，此项不生效', c.hybrid) +
         sw('gc-sid', '稳定 session_id', '每个对话固定一个 session_id，OpenRouter 从首轮起就把请求粘到同一供应商，缓存更稳', c.sessionId) +
         sel('gc-guard', 'RP 协议锚点', '在固定层开头注入简短规则：不替玩家说话/决定、NPC 猜测不写成事实、核心性格与临时状态分离', [['auto', '仅 RP 对话（推荐）'], ['on', '总是'], ['off', '关闭']], c.rpGuardrails) +
         sel('gc-ttl', '缓存 TTL', '写入 cache_control.ttl = "1h"（服务商不支持时会被忽略）', [['', '默认（5 分钟）'], ['1h', '1 小时']], c.ttl) +
@@ -348,6 +440,7 @@
       box.querySelector('#gc-guard').onchange = e => save({ rpGuardrails: e.target.value });
       box.querySelector('#gc-ttl').onchange = e => save({ ttl: e.target.value });
       box.querySelector('#gc-merge').onchange = e => save({ mergeSystem: e.target.checked });
+      box.querySelector('#gc-hy').onchange = e => save({ hybrid: e.target.checked });
       box.querySelector('#gc-sid').onchange = e => save({ sessionId: e.target.checked });
       box.querySelector('#gc-resp').onchange = e => save({ responseCache: e.target.checked });
       box.querySelector('#gc-toast').onchange = e => save({ toast: e.target.checked });
@@ -372,6 +465,8 @@
         L.push('滚动命中率（近 ' + ROLL_N + ' 次）：' + (d.rate == null ? '未知' : d.rate + '%') + ' · ' + LV[d.level]);
         if (d.level === 'low' || d.level === 'unknown') d.issues.forEach(x => L.push('　· ' + e(x)));
         L.push('static_hash：' + e(s.static_hash || '-') + '（v' + (s.static_prompt_version || STATIC_PROMPT_VERSION) + (s.layered ? '，已识别分层设定' : '') + '）　session_id：' + e(s.session_id || '未发送'));
+        const hy = s.hybridInfo;
+        if (hy) L.push('Hybrid-5：' + (hy.off ? (hy.off === 'rpcache' ? '本对话由 RP 缓存优化器管理历史（不启用 Zip 窗口）' : '已关闭') : '窗口原文 ' + hy.rawTurns + ' 轮 / 共 ' + hy.totalTurns + ' 轮　冻结摘要：' + (hy.summaries ? hy.summaries + ' 段' : '无') + '　下次压缩还剩 ' + hy.untilNext + ' 轮' + (hy.movedDynamic ? '　动态层已移到尾部' : '')));
         if (s.decision) L.push('本轮缓存决策：' + e(s.decision));
         L.push('固定前缀长度：约 ' + s.prefixLen + ' 字符（Gemini 显式缓存通常需 ≥1024~4096 Token）　前缀变化次数：' + s.prefixChanges);
         const mem = reg.convData(conv, ID).memory;

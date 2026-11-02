@@ -126,3 +126,64 @@ test('MemoryManager：L0 抽取、检索评分、误压缩检测', () => {
 test('非 OpenRouter Gemini 不识别（请求不经过 transform）', () => {
   assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'deepseek', baseUrl: 'https://api.deepseek.com' }, 'deepseek-chat'));
 });
+
+// ── v1.2.0 Hybrid-5 ──
+const H = G.HybridWindow;
+const mkHist = n => { const a = []; for (let i = 1; i <= n; i++) a.push({ role: 'user', content: '第' + i + '句' }, { role: 'assistant', content: '回' + i }); return a; };
+test('Hybrid-5：20/39 轮不摘要，40 轮压一次，41–59 不再生成，60 轮再压一批', () => {
+  let st = H.empty();
+  assert.strictEqual(H.apply(mkHist(20), st).summaryCreated, false);
+  assert.strictEqual(H.apply(mkHist(39), st).summaryCreated, false);
+  const r40 = H.apply(mkHist(40), st);
+  assert.ok(r40.summaryCreated && r40.prefixChanged);
+  assert.strictEqual(st.summaries.length, 1); assert.strictEqual(st.cut, 20); assert.strictEqual(r40.rawTurns, 20);
+  assert.strictEqual(r40.messagesForRequest[0].role, 'system'); assert.ok(r40.messagesForRequest[0].content.startsWith(H.SUM_HEAD));
+  assert.strictEqual(r40.messagesForRequest.length, 1 + 40);
+  st = JSON.parse(JSON.stringify(st)); // 持久化往返
+  const frozen = st.summaries[0].text;
+  for (let n = 41; n < 60; n++) { const r = H.apply(mkHist(n), st); assert.strictEqual(r.summaryCreated, false); assert.strictEqual(r.prefixChanged, false); assert.strictEqual(r.untilNext, 60 - n); }
+  const r60 = H.apply(mkHist(60), st);
+  assert.ok(r60.summaryCreated); assert.strictEqual(st.summaries.length, 2); assert.strictEqual(st.cut, 40);
+  assert.strictEqual(st.summaries[0].text, frozen);
+  assert.strictEqual(H.apply(mkHist(60), st).messagesForRequest[0].content, r60.messagesForRequest[0].content);
+});
+test('Hybrid-5：前缀（摘要+窗口头）在 41–59 轮之间稳定', () => {
+  const st = H.empty(); H.apply(mkHist(40), st);
+  const a = JSON.stringify(H.apply(mkHist(45), st).messagesForRequest.slice(0, 30)), b = JSON.stringify(H.apply(mkHist(50), st).messagesForRequest.slice(0, 30));
+  assert.strictEqual(a, b);
+});
+test('Hybrid-5：动态层移到本轮 user 尾部、固定层 hash 不变、日期只到天、session_id 保留', () => {
+  const st = H.empty();
+  const sys = d => longWorld + '\n【当前状态】\n' + d;
+  const r1 = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs, sys('2026-11-02 13:45 雨'), {}), {}, { hybrid: st, sessionId: 'sid1' });
+  const b1 = JSON.parse(r1.req.body);
+  assert.ok(!/当前状态/.test(b1.messages[0].content));
+  const last = b1.messages[b1.messages.length - 1];
+  assert.ok(last.content.startsWith('【当前状态】\n2026-11-02 雨') && last.content.endsWith('继续'));
+  assert.strictEqual(b1.session_id, 'sid1'); assert.ok(!b1.provider);
+  const msgs2 = msgs.concat([{ role: 'assistant', content: '好' }, { role: 'user', content: '再来' }]);
+  const r2 = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs2, sys('2026-11-03 08:00 晴'), {}), {}, { hybrid: st, prevStaticHash: r1.layers.static_hash });
+  assert.strictEqual(r1.layers.static_hash, r2.layers.static_hash);
+  const b2 = JSON.parse(r2.req.body);
+  // 上一轮完整请求 == 本轮前缀（system + 历史，其中上一轮 user 为实际送出的完整文本）
+  assert.deepStrictEqual(b2.messages.slice(0, b1.messages.length).map(m => typeof m.content === 'string' ? m.content : m.content.map(x => x.text).join('')), b1.messages.map(m => m.content));
+  assert.ok(r2.applied); // 固定层稳定且够长 → auto 断点
+});
+test('Hybrid-5：未传 hybrid 状态时行为与 1.1.0 完全一致；日期归一', () => {
+  const req = P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs, '短设定 2026-11-02 13:45', {});
+  assert.strictEqual(G.applyToRequest(req, {}).req.body, req.body);
+  assert.strictEqual(G.normalizeDates('2026年11月2日 13:45:10 / 2026-11-02T13:45Z'), '2026年11月2日 / 2026-11-02');
+});
+test('Hybrid-5：非 OpenRouter+Gemini 不识别（插件不改请求）；冲突策略 A：rpcache 同开不启用 Zip', () => {
+  assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'openai', baseUrl: 'https://api.openai.com/v1' }, 'gpt-4o'));
+  assert.ok(!G.isOpenRouterGemini(OR, 'openai/gpt-4o'));
+  const src = require('fs').readFileSync(require.resolve('../app/src/main/assets/www/gcache.js'), 'utf8');
+  assert.match(src, /hyOn = o\.hybrid !== false && !\(ctx\.meta && ctx\.meta\.gcacheRpcache\)/);
+  assert.strictEqual(G.DEFAULTS.hybrid, true);
+});
+test('Hybrid-5：编辑已冻结批次 → 作废并重建，历史删短 → 重置', () => {
+  const st = H.empty(); H.apply(mkHist(40), st);
+  const h = mkHist(40); h[0].content = '改过';
+  const r = H.apply(h, st); assert.ok(r.summaryCreated); assert.ok(/改过/.test(st.summaries[0].text));
+  const r2 = H.apply(mkHist(10), st); assert.strictEqual(st.summaries.length, 0); assert.strictEqual(r2.rawTurns, 10);
+});

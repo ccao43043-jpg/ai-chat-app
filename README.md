@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.8.6：Gemini 缓存 Hybrid-5**
+
+- 严格固定前缀（动态层移到本轮输入尾部，日期只到天）+ Zip 迟滞窗口（历史原文 20–40 轮，满 40 轮压最早 20 轮为冻结摘要），前缀每 20 轮才变一次；与 RP 缓存优化器同开时以 rpcache 为准。详见 `docs/plugins/gemini-hybrid5.md`
+- 其他服务商 / 模型请求逐字节不变。Android `0.8.6`（versionCode 37）/ 桌面 / npm `0.8.6`
+
 **v0.8.5：Gemini RP 缓存优化（算法规格 v1.0）**
 
 - 「💎 Gemini 提示缓存（OpenRouter）」插件 1.1.0，按 `docs/plugins/gemini-rp-cache-spec-v1.md` 落地：
