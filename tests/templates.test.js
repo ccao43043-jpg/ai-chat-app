@@ -7,7 +7,7 @@ const R = require('../app/src/main/assets/www/rpcache.js');
 test('内置模板与合并', () => {
   const d = T.defaultTemplates();
   assert.ok(d.length >= 6);
-  ['通用助手', '简洁回答', '中英互译', '润色改写', 'RP 叙事风格'].forEach(n => assert.ok(d.some(t => t.name === n), n));
+  ['通用助手', '简洁回答', '中英互译', '润色改写', '沉浸式 RP（全自动）'].forEach(n => assert.ok(d.some(t => t.name === n), n));
   assert.ok(d.every(t => t.builtin && t.id.startsWith('t-')));
   // 旧数据只有部分模板 + 用户删除了一个内置模板
   const merged = T.mergeBuiltins([{ id: 'mine', name: '我的', content: 'X' }], ['t-coder']);
@@ -45,9 +45,9 @@ test('增删改、复制、排序、收藏', () => {
 test('搜索与标签筛选：收藏在前', () => {
   const l = T.defaultTemplates();
   const all = T.filter(l, {});
-  assert.deepStrictEqual(all.filter(t => t.pinned).slice(0, 3).map(t => t.name), ['通用助手', '简洁回答', '沉浸式角色扮演'], '内置收藏在前');
+  assert.deepStrictEqual(all.filter(t => t.pinned).slice(0, 3).map(t => t.name), ['通用助手', '简洁回答', '沉浸式 RP（全自动）'], '内置收藏在前');
   assert.deepStrictEqual(T.filter(l, { query: '翻译' }).map(t => t.id), ['t-translate']);
-  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-cardgen', 't-rp-narrator', 't-rp-longform'], '按标签搜索');
+  assert.deepStrictEqual(T.filter(l, { query: '角色扮演' }).map(t => t.id), ['t-rp-immersive', 't-rp-cardgen', 't-rp-longform'], '按标签搜索');
   assert.ok(T.filter(l, { tag: '常用' }).every(t => t.tags.includes('常用')));
   assert.ok(T.allTags(l).includes('写作'));
 });
@@ -129,21 +129,25 @@ test('自动宏：time/date/时间/日期 自动替换且不进入变量表单',
 // v0.7.6：RP 模板
 test('v0.7.6 RP 模板：变量完整、支持 date/time、留空省略、旧内置原文升级', () => {
   const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
-  ['沉浸式角色扮演', 'RP 叙事风格', '长篇续写', '角色卡 Skill'].forEach(n => assert.ok(d.some(t => t.name === n), n));
+  ['沉浸式 RP（全自动）', '长篇续写', '角色卡 Skill'].forEach(n => assert.ok(d.some(t => t.name === n), n));
+  assert.ok(!d.some(t => t.id === 't-rp-narrator'), 'v0.8.4 叙事风格已合并');
   const imm = by('t-rp-immersive');
-  ['角色名', '用户名', '角色设定', '性格', '世界背景', '场景', '规则', '禁止事项'].forEach(v => assert.ok(T.variables(imm.content).includes(v), v));
+  assert.deepStrictEqual(T.variables(imm.content), [], 'v0.8.4 全自动模板无需手填变量');
   assert.ok(!T.variables(imm.content).includes('回复长度')); assert.ok(!T.variables(by('t-rp-longform').content).includes('字数'));
   assert.ok(/\{\{date\}\}/.test(imm.content) && /\{\{time\}\}/.test(imm.content));
   const out = T.fill(imm.content, { 角色名: '艾琳', 用户名: '阿杰' }, { dropEmpty: true });
   assert.ok(!/\{\{/.test(out), '留空的变量行被省略、默认值生效'); assert.ok(out.includes('自然决定'));
   assert.ok(!out.includes('【世界背景】'), '空分段标题也省略');
   assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out));
-  assert.ok(out.includes('艾琳') && out.includes('【规则】'));
+  assert.ok(out.includes('【扮演规则】') && out.includes('分层设定'));
   assert.ok(T.fill('- {{x}}', {}).includes('{{x}}'), '默认仍保留原样');
   // 旧版内置原文（用户没改过）升级为新内容；改过的保留
   const oldNar = '你是一名沉浸式角色扮演的叙事者，扮演{{角色名}}，世界背景：{{世界背景}}。\n- 以第三人称描写环境、动作与神态，对话用引号；\n- 只描写{{角色名}}和 NPC 的言行，绝不替玩家决定行动或心理；\n- NPC 只知道自己应该知道的信息；\n- 每次回复 150–300 字，结尾留下可以继续互动的钩子。';
   const m = T.mergeBuiltins([{ id: 't-rp-narrator', name: 'RP 叙事风格', content: oldNar, builtin: true }, { id: 't-rp-immersive', name: 'x', content: '我改过', builtin: true }], []);
-  assert.strictEqual(m.find(t => t.id === 't-rp-narrator').content, by('t-rp-narrator').content);
+  assert.ok(!m.some(t => t.id === 't-rp-narrator'), '未改过的旧叙事模板退役（并入全自动模板）');
+  const m2 = T.mergeBuiltins([{ id: 't-rp-narrator', name: 'RP 叙事风格', content: '我改过的叙事', builtin: true }], []);
+  const kept = m2.find(t => t.id === 't-rp-narrator'); assert.ok(kept && !kept.builtin, '改过的保留为自定义');
+  assert.ok(m2.some(t => t.id === 't-rp-immersive'));
   assert.strictEqual(m.find(t => t.id === 't-rp-immersive').content, '我改过');
 });
 test('v0.7.6 分段设定解析与块模板', () => {
@@ -197,7 +201,7 @@ test('v0.7.8 角色卡 Skill：无变量、skill 标记、八段齐全、旧文�
 // v0.7.9：去掉字数限制 + 详细人物介绍
 test('v0.7.9 RP 模板与 Skill：无硬性字数、人物字段更细、旧文升级', () => {
   const d = T.defaultTemplates(); const by = id => d.find(t => t.id === id);
-  ['t-rp-immersive','t-rp-narrator','t-rp-longform','t-rp-cardgen'].forEach(id => {
+  ['t-rp-immersive','t-rp-longform','t-rp-cardgen'].forEach(id => {
     const t = by(id); assert.ok(t.content.includes('自然决定'), id);
     assert.ok(!/150–300|100–200|200–400|约 \{\{字数/.test(t.content), 'no hard length ' + id);
   });

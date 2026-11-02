@@ -7,6 +7,8 @@ const SET = { providers: [{ id: 'deepseek', presetId: 'deepseek', name: 'DeepSee
   systemPrompt: '', stream: true, lastProviderId: 'deepseek', lastModel: 'deepseek-chat' };
 const CARD = '1. 世界观\n- 雨夜的古堡\n2. **角色卡**\n- **姓名**：艾琳\n- 性格：冷淡、骄傲\n3. RP规则\n- 不替用户行动\n4. 开场白\n*烛火摇曳*「你终于来了。」';
 async function run(browser, mode) {
+  const ask = mode === 'ask'; if (ask) mode = 'ok'; // v0.8.4：默认直接生成；ask 场景显式设置「先询问」
+  const set = ask ? Object.assign({}, SET, { autoCharMode: 'ask', autoCharV084: true }) : SET;
   const page = await browser.newPage(); const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   const conv = { id: 'c1', title: '新对话', providerId: 'deepseek', model: 'deepseek-chat', templateId: 't-rp-immersive',
@@ -25,13 +27,13 @@ async function run(browser, mode) {
         }
         setTimeout(() => { H.onStart(id, 200); H.onChunk(id, 'data: ' + JSON.stringify({ choices: [{ delta: { content: '「欢迎。」' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n'); H.onEnd(id); }, 50);
       } };
-  }, { 'settings.json': JSON.stringify(SET), 'convs.json': JSON.stringify([{ id: 'c1', title: '新对话', updatedAt: conv.updatedAt }]), 'conv_c1.json': JSON.stringify(conv) }, mode, CARD);
+  }, { 'settings.json': JSON.stringify(set), 'convs.json': JSON.stringify([{ id: 'c1', title: '新对话', updatedAt: conv.updatedAt }]), 'conv_c1.json': JSON.stringify(conv) }, mode, CARD);
   await page.goto(PAGE); await sleep(800);
   await page.evaluate(() => { const i = document.querySelector('.conv-item'); if (i) i.click(); }); await sleep(300);
   await page.type('#input', '我想和吸血鬼伯爵在雨夜古堡相遇'); await page.click('#btn-send'); await sleep(300);
   const dlg = await page.evaluate(() => document.querySelector('#dialog-mask').classList.contains('show') && document.querySelector('#dialog-title').textContent);
-  assert.equal(dlg, '生成角色卡？', mode + ': 应弹出询问');
-  await page.click('#dialog-ok'); await sleep(200);
+  if (ask) { assert.equal(dlg, '生成角色卡？', '先询问模式应弹出询问'); await page.click('#dialog-ok'); await sleep(200); }
+  else assert.ok(!dlg, mode + ': 默认直接生成，不弹询问');
   if (mode === 'cancel') {
     assert.ok(await page.evaluate(() => document.querySelector('#btn-send').classList.contains('stop')), '生成中显示停止键');
     await page.click('#btn-send'); await sleep(200);
@@ -39,7 +41,7 @@ async function run(browser, mode) {
   await sleep(900);
   const c = await page.evaluate(() => JSON.parse(window.__mem['conv_c1.json']));
   const toast = await page.evaluate(() => document.querySelector('#toast').textContent);
-  const r = { mode, status: c.autoChar && c.autoChar.status, name: c.autoChar && c.autoChar.name, replies: c.messages.filter(m => m.role === 'assistant').length, toast, errors };
+  const r = { mode: ask ? 'ask' : mode, status: c.autoChar && c.autoChar.status, name: c.autoChar && c.autoChar.name, replies: c.messages.filter(m => m.role === 'assistant').length, toast, errors };
   if (mode === 'ok') { r.sp = c.systemPrompt; assert.equal(r.status, 'done'); assert.equal(r.name, '艾琳'); assert.ok(r.sp.includes('请以 艾琳 的身份') && !/\{\{/.test(r.sp) && (c.autoChar.target === 'system' ? r.sp.includes('【角色卡】') : (c.plugins.rpcache.state.blocks.find(b => b.id === 'character') || {}).content.includes('艾琳')), r.sp); r.target = c.autoChar.target; }
   if (mode === 'cancel') assert.equal(r.status, 'cancelled');
   if (mode === 'fail') assert.equal(r.status, 'error');
@@ -50,6 +52,6 @@ async function run(browser, mode) {
 }
 (async () => {
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--allow-file-access-from-files'] });
-  try { for (const m of ['ok', 'cancel', 'fail']) console.log(JSON.stringify(await run(browser, m))); console.log('AUTOCHAR E2E OK'); }
+  try { for (const m of ['ok', 'ask', 'cancel', 'fail']) console.log(JSON.stringify(await run(browser, m))); console.log('AUTOCHAR E2E OK'); }
   catch (e) { console.error('AUTOCHAR E2E FAILED:', e); process.exitCode = 1; } finally { await browser.close(); }
 })();

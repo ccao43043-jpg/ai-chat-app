@@ -97,6 +97,8 @@
   function defaultSearch() { return { provider: 'tavily', keys: {}, urls: {}, count: 5, rewrite: false }; }
   const stored = Store.get('settings.json', null);
   let settings = stored ? Object.assign(defaultSettings(), { settingsVersion: 1 }, stored) : defaultSettings();
+  // v0.8.4：首条消息自动生成角色卡默认改为「直接生成」；旧版默认的「先询问」迁移一次（关闭的保持关闭）
+  if (!settings.autoCharV084) { if (!settings.autoCharMode || settings.autoCharMode === 'ask') settings.autoCharMode = 'auto'; settings.autoCharV084 = true; }
   let convIndex = Store.get('convs.json', []); // [{id,title,providerId,model,updatedAt}]
   let conv = null;
   let attachments = [];   // 图片 data URL
@@ -1563,7 +1565,7 @@
     $('#set-system').value = settings.systemPrompt || '';
     renderDefaultTplSelect();
     $('#set-stream').checked = settings.stream !== false;
-    if ($('#set-autochar')) $('#set-autochar').value = window.AutoChar ? AutoChar.mode(settings) : 'ask';
+    if ($('#set-autochar')) $('#set-autochar').value = window.AutoChar ? AutoChar.mode(settings) : 'auto';
     $('#set-temp').value = settings.temperature || '';
     $('#set-maxtokens').value = settings.maxTokens || '';
     $('#set-imgsize').value = settings.imageSize || '';

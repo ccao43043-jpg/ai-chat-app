@@ -30,11 +30,11 @@
     if ((m = sp.match(/【(?:角色设定|人物设定|人设)】\s*\n([^\n【]+)/)) && filled(m[1])) return true;
     return false;
   }
-  /** 设置：autoCharMode = ask（默认）| auto（不询问直接生成）| off；兼容旧 autoCharGen=false */
+  /** 设置：autoCharMode = auto（v0.8.4 起默认，直接生成）| ask（先询问）| off；兼容旧 autoCharGen=false */
   function mode(settings) {
-    if (!settings) return 'ask';
+    if (!settings) return 'auto';
     if (settings.autoCharGen === false) return 'off';
-    return ['ask', 'auto', 'off'].indexOf(settings.autoCharMode) >= 0 ? settings.autoCharMode : 'ask';
+    return ['ask', 'auto', 'off'].indexOf(settings.autoCharMode) >= 0 ? settings.autoCharMode : 'auto';
   }
   /** 是否在这次发送前询问 / 生成：首条用户消息 + RP 模板 + 尚无角色卡 + 本对话没问过 */
   function shouldOffer(conv, templates, settings) {
@@ -52,16 +52,20 @@
   function buildPrompt(firstText, systemPrompt, skillContent) {
     const rules = skillContent && String(skillContent).trim() ? String(skillContent).trim()
       : '你是角色卡生成器。把用户的想法整理成可直接角色扮演的完整设定，信息不足时合理补全，角色卡写具体可扮演的细节（姓名、年龄性别、外貌、身份、背景经历、性格优缺点、说话方式、喜好禁忌、秘密、人物关系、与用户的关系、目标动机）。';
-    return rules + '\n\n---\n下面是一场角色扮演的设定上下文，请据此直接输出完整 8 段设定。\n硬性要求：\n1. 每段以单独一行的【标题】开头，标题字面与下列完全一致，按顺序输出，不要加序号、不要用 Markdown 标题或代码块；\n2. 段内用「- 」列表；【角色卡】第一行写「- 姓名：xxx」；\n3. 用户首条消息里已经给出的名字、身份、关系、场景必须原样保留，只补全缺失部分，不要改写用户的设定；\n4. 【开场白】写一段符合当前 RP 模板文风、以角色口吻展开的开场；\n5. 不要寒暄、不要解释、不要提问，直接从【世界观】开始输出。\n' + FORMAT +
+    const story = '\n6. 一次到位：【世界观】除了时代、地点、势力与规则，还要写「- 主线剧情：」（核心冲突、阶段走向、伏笔）和「- 当前局势：」（故事从哪里开始）；【角色卡】写主角之外再列出 2–4 个重要配角 / NPC（姓名、身份、与主角关系、动机）；【RP规则】写明用户扮演的身份；所有内容写成成品，不留任何 {{变量}}、「待定」或需要用户填写的空位。';
+    return rules + '\n\n---\n下面是一场角色扮演的设定上下文，请据此直接输出完整 8 段设定。\n硬性要求：\n1. 每段以单独一行的【标题】开头，标题字面与下列完全一致，按顺序输出，不要加序号、不要用 Markdown 标题或代码块；\n2. 段内用「- 」列表；【角色卡】第一行写「- 姓名：xxx」；\n3. 用户首条消息里已经给出的名字、身份、关系、场景必须原样保留，只补全缺失部分，不要改写用户的设定；\n4. 【开场白】写一段符合当前 RP 模板文风、以角色口吻展开的开场；\n5. 不要寒暄、不要解释、不要提问，直接从【世界观】开始输出。' + story + '\n' + FORMAT +
       (systemPrompt ? '\n\n【当前 RP 模板（系统提示词，供参考，保持一致）】\n' + String(systemPrompt).slice(0, 6000) : '') +
       '\n\n【用户首条消息】\n' + String(firstText || '').slice(0, 6000);
   }
   const HEAD_WORDS = '世界观|世界背景|背景设定|世界设定|角色卡|角色设定|人物设定|RP ?规则|扮演规则|规则|输出格式|回复格式|示例对白|示例对话|对白示例|禁止事项|写作风格|文风|开场白|开场';
   /** 把模型常见的“变体标题”统一成【标题】：`1. 世界观`、`一、角色卡`、`**角色卡**`、`[角色卡]`、`角色卡：`、`### 【角色卡】` 等；去掉思考块和代码围栏 */
+  const PLOT_HEAD = /^\s{0,3}(?:#{1,4}\s*)?(?:\*\*)?\s*[【\[［]\s*(?:主线)?(?:剧情|剧情大纲|故事大纲|主线|故事线)\s*[】\]］]\s*(?:\*\*)?\s*$/;
   function normalize(raw) {
     let t = String(raw || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^[\s\S]*?<\/think>/i, '');
     t = t.replace(/\r\n?/g, '\n').replace(/^\s*```[a-z0-9]*\s*$/gim, '');
     const re = new RegExp('^\\s{0,3}(?:#{1,4}\\s*)?(?:(?:\\d{1,2}|[一二三四五六七八九十]{1,2})\\s*[.、)）．]\\s*)?(?:\\*\\*|__)?\\s*[【\\[［〔]?\\s*(' + HEAD_WORDS + ')\\s*[】\\]］〕]?\\s*(?:\\*\\*|__)?\\s*(?:[：:]\\s*(?:\\*\\*)?)?\\s*(.*)$', 'i');
+    // 【剧情】段没有单独的分层块：并入【世界观】（parseSections 会把重名段拼接）
+    t = t.split('\n').map(line => (PLOT_HEAD.test(line) ? '【世界观】\n- 主线剧情：' : line)).join('\n');
     return t.split('\n').map(line => {
       const m = line.match(re); if (!m) return line;
       const rest = (m[2] || '').replace(/^\*\*\s*/, '');

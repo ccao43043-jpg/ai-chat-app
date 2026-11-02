@@ -23,15 +23,18 @@ test('解析 8 段输出', () => {
 const T = require('../app/src/main/assets/www/templates.js');
 const tpl = id => T.BUILTIN_TEMPLATES.find(t => t.id === id).content;
 const filledConv = (id, vals) => conv({ templateId: id, systemPrompt: T.fill(tpl(id), vals, { dropEmpty: true }) });
-test('三套内置模板：填了角色设定 → 不问；没填 → 问', () => {
-  ['t-rp-immersive', 't-rp-narrator', 't-rp-longform'].forEach(id => {
+test('内置模板：填了角色设定 → 不问；没填 → 问；合并后的全自动模板无变量 → 问', () => {
+  assert.deepStrictEqual(T.variables(tpl('t-rp-immersive')), []);
+  assert.ok(A.shouldOffer(filledConv('t-rp-immersive', {}), [], {}), 'merged');
+  assert.ok(A.shouldOffer(conv({ templateId: 't-rp-narrator' }), [], {}), '旧叙事模板 id 仍识别');
+  ['t-rp-longform'].forEach(id => {
     assert.ok(!A.shouldOffer(filledConv(id, { 角色名: '艾琳', 角色设定: '冷淡的吸血鬼伯爵' }), [], {}), id + ' filled');
     assert.ok(A.shouldOffer(filledConv(id, {}), [], {}), id + ' empty');
   });
 });
 test('设置 autoCharMode：off 不问；旧 autoCharGen=false 兼容；auto 仍触发', () => {
   assert.ok(!A.shouldOffer(conv(), [], { autoCharMode: 'off' }));
-  assert.equal(A.mode({ autoCharGen: false }), 'off'); assert.equal(A.mode({ autoCharMode: 'auto' }), 'auto'); assert.equal(A.mode({}), 'ask');
+  assert.equal(A.mode({ autoCharGen: false }), 'off'); assert.equal(A.mode({ autoCharMode: 'auto' }), 'auto'); assert.equal(A.mode({}), 'auto'); assert.equal(A.mode({ autoCharMode: 'ask' }), 'ask');
   assert.ok(A.shouldOffer(conv(), [], { autoCharMode: 'auto' }));
 });
 test('已有助手开场白 → 不问', () => {
@@ -59,7 +62,7 @@ test('首条消息就是分段角色卡 → 直接识别', () => {
   assert.equal(A.fromUserText('我想玩吸血鬼故事'), null);
 });
 test('fillLeftovers：{{角色名}}→名字，空变量行与空分段删掉', () => {
-  const sp = T.fill(tpl('t-rp-immersive'), {}, { dropEmpty: true });
+  const sp = T.fill('请以 {{角色名}} 的身份，与 {{用户名}} 进行扮演。\n\n【世界背景】\n{{世界背景}}\n\n【规则】\n- 不 OOC\n- {{规则}}', {}, { dropEmpty: true });
   const out = A.fillLeftovers(sp, { character: '- 姓名：艾琳' });
   assert.ok(!/\{\{/.test(out), out); assert.ok(out.includes('请以 艾琳 的身份')); assert.ok(out.includes('与 你 进行'));
   assert.ok(!/【规则】\n- \n/.test(out));
@@ -67,4 +70,12 @@ test('fillLeftovers：{{角色名}}→名字，空变量行与空分段删掉', 
 test('提示词包含硬性格式要求和用户首条消息', () => {
   const p = A.buildPrompt('我叫小林，想和吸血鬼伯爵谈恋爱', '', '');
   assert.ok(p.includes('硬性要求') && p.includes('小林') && p.includes('【开场白】'));
+});
+// v0.8.4：合并后的全自动模板 + 剧情一次到位
+test('v0.8.4 提示词要求主线剧情 / 配角 / 不留变量；【剧情】段并入世界观', () => {
+  const p = A.buildPrompt('想玩末日废土求生', '', '');
+  assert.ok(p.includes('主线剧情') && p.includes('配角') && p.includes('不留任何'));
+  const f = A.parse('【世界观】\n- 废土\n【剧情】\n- 寻找净水厂\n【角色卡】\n- 姓名：灰鸦\n【开场白】\n风沙很大。');
+  assert.ok(f.world.includes('废土') && f.world.includes('主线剧情') && f.world.includes('净水厂'), f.world);
+  assert.equal(A.charName(f), '灰鸦');
 });
