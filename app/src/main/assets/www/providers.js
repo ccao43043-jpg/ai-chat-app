@@ -396,6 +396,8 @@
       } else if (num(det.cached_tokens) !== undefined) { // OpenAI 等
         out.hit = det.cached_tokens; out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'openai';
       }
+      // OpenRouter（Gemini / Claude 等）：缓存写入 Token
+      if (num(det.cache_write_tokens) !== undefined && det.cache_write_tokens > 0 && out.cacheWrite === undefined) out.cacheWrite = det.cache_write_tokens;
       // 千问显式缓存：创建缓存的 Token（按输入价 125% 计费）
       if (num(det.cache_creation_input_tokens) !== undefined) {
         out.cacheWrite = det.cache_creation_input_tokens;

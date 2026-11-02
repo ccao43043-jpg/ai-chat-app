@@ -1119,7 +1119,9 @@
     delete bot.pluginStatus;
     if (bot.stopped) { finish(); return; }
     if (rctx.plugins.length) bot.plugins = rctx.plugins;
-    const req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
+    let req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
+    const gcp = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache'); // v0.8.2：OpenRouter Gemini 提示缓存
+    if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
     const parser = Providers.createStreamParser(p.type);
     let status = 0, raw = '', gotDelta = false;

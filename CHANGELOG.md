@@ -1,5 +1,14 @@
 # 更新日志
 
+**v0.8.2：OpenRouter Gemini 角色扮演提示缓存优化**
+
+- 新增内置插件「💎 Gemini 提示缓存（OpenRouter）」（移植自 fork ai-chat 4.1.3），默认开启，只对 OpenRouter 上的 Gemini 模型（`google/gemini-*`）生效，其他服务商 / 模型请求逐字节不变
+- 合并开头连续的 system 消息，在稳定前缀末尾加 `cache_control` 显式缓存断点；可选「关闭 / 系统前缀（默认）/ 前缀+历史」，可选 1 小时 TTL
+- 可选 OpenRouter 响应缓存（`X-OpenRouter-Cache: true`，重新生成会得到相同回复，默认关闭）
+- 回复上显示「💎 缓存 xx%」徽章，可选命中提示；插件「当前对话」页查看命中统计、固定前缀长度与最近一次前缀变化位置（对应 fork 的 /gcache）
+- 用量统计识别 OpenRouter 的 `cache_write_tokens`；与 RP 缓存优化器 / 分层设定 / RP 模板 / 自动角色卡兼容（OpenRouter Gemini 只保留最后一个断点）
+- Android `0.8.2`（versionCode 33）/ 桌面 / npm `0.8.2`
+
 **v0.8.1：RP 模板首条消息自动生成角色卡**
 
 - 套用 RP 模板（沉浸式角色扮演 / RP 叙事风格 / 长篇续写，或标签含「角色扮演」的自定义模板）、尚无角色卡时，发送首条消息会弹出「是否按照当前信息去生成角色卡？」
