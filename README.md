@@ -48,6 +48,13 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.8.7：Markdown 渲染 LRU 缓存 + 版本一致性校验**
+
+- `renderMarkdown` 新增 LRU：`mdHtmlCache`（marked + DOMPurify 结果，80 条）、`hlCache`（highlight.js 结果，300 条）；超 20000 字符不缓存
+- 流式输出（pending 消息）不读写缓存、不做 highlightAuto，减少卡顿
+- 修正关于页 / APP_VERSION 漂移（原为 0.6.1）；新增 `tests/version-sync.test.js` 校验各处版本一致
+- Android `0.8.7`（versionCode 38）/ 桌面 / npm `0.8.7`
+
 **v0.8.6：Gemini 缓存 Hybrid-5**
 
 - 严格固定前缀（动态层移到本轮输入尾部，日期只到天）+ Zip 迟滞窗口（历史原文 20–40 轮，满 40 轮压最早 20 轮为冻结摘要），前缀每 20 轮才变一次；与 RP 缓存优化器同开时以 rpcache 为准。详见 `docs/plugins/gemini-hybrid5.md`

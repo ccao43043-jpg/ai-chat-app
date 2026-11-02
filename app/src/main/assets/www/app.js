@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.6.1';
+  const APP_VERSION = '0.8.7';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -388,10 +388,20 @@
       node.replaceWith(frag);
     });
   }
-  function renderMarkdown(text, sources) {
+  // Markdown 渲染 LRU 缓存（流式输出不读写缓存）
+  const MD_CACHE_MAX = 80, HL_CACHE_MAX = 300, MD_CACHE_TEXT_MAX = 20000;
+  const mdHtmlCache = new Map(), hlCache = new Map();
+  function lruGet(map, k) { if (!map.has(k)) return undefined; const v = map.get(k); map.delete(k); map.set(k, v); return v; }
+  function lruSet(map, k, v, max) { if (map.has(k)) map.delete(k); map.set(k, v); while (map.size > max) map.delete(map.keys().next().value); }
+  function renderMarkdown(text, sources, opts) {
+    const streaming = !!(opts && opts.streaming);
+    const src = text || '';
+    const cacheable = !streaming && src.length <= MD_CACHE_TEXT_MAX;
     const div = document.createElement('div');
     div.className = 'md';
-    div.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
+    let html = cacheable ? lruGet(mdHtmlCache, src) : undefined;
+    if (html === undefined) { html = DOMPurify.sanitize(marked.parse(src)); if (cacheable) lruSet(mdHtmlCache, src, html, MD_CACHE_MAX); }
+    div.innerHTML = html;
     linkCitations(div, sources);
     div.querySelectorAll('pre > code').forEach(code => {
       const pre = code.parentElement;
@@ -399,9 +409,16 @@
       const lang = m ? m[1] : '';
       const raw = code.textContent;
       try {
-        if (lang && hljs.getLanguage(lang)) code.innerHTML = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
-        else if (raw.length < 20000) code.innerHTML = hljs.highlightAuto(raw).value;
-        code.classList.add('hljs');
+        const known = !!(lang && hljs.getLanguage(lang));
+        const hk = cacheable && raw.length <= MD_CACHE_TEXT_MAX ? (lang || '') + '\u0000' + raw : null;
+        let hl = hk ? lruGet(hlCache, hk) : undefined;
+        if (hl === undefined) {
+          if (known) hl = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
+          else if (!streaming && raw.length < 20000) hl = hljs.highlightAuto(raw).value;
+          else hl = null;
+          if (hk && hl !== null) lruSet(hlCache, hk, hl, HL_CACHE_MAX);
+        }
+        if (hl !== null) { code.innerHTML = hl; code.classList.add('hljs'); }
       } catch (e) { /* ignore */ }
       const wrap = document.createElement('div'); wrap.className = 'code-block';
       const head = document.createElement('div'); head.className = 'code-head';
@@ -635,7 +652,7 @@
         d.querySelector('.r-text').textContent = m.reasoning;
         body.appendChild(d);
       }
-      if (m.content) { const md = renderMarkdown(m.content, m.sources); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
+      if (m.content) { const md = renderMarkdown(m.content, m.sources, { streaming: !!m.pending }); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
       if (m.error) { const e = document.createElement('div'); e.className = 'err'; e.textContent = m.error; body.appendChild(e); }
       if (m.pending && m.imageGen && !m.error) {
         const st = document.createElement('div'); st.className = 'gen-status';

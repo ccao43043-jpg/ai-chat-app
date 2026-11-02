@@ -1,5 +1,12 @@
 # 更新日志
 
+**v0.8.7：Markdown 渲染 LRU 缓存 + 版本一致性校验**
+
+- `renderMarkdown` 新增 LRU：`mdHtmlCache`（marked + DOMPurify 结果，80 条）、`hlCache`（highlight.js 结果，300 条）；超 20000 字符不缓存
+- 流式输出（pending 消息）不读写缓存、不做 highlightAuto，减少卡顿
+- 修正关于页 / APP_VERSION 漂移（原为 0.6.1）；新增 `tests/version-sync.test.js` 校验各处版本一致
+- Android `0.8.7`（versionCode 38）/ 桌面 / npm `0.8.7`
+
 **v0.8.6：Hybrid-5 迟滞窗口 + 严格固定前缀（Gemini 缓存）**
 
 - 「💎 Gemini 提示缓存（OpenRouter）」插件 1.2.0，新增 Hybrid-5（默认开，见 `docs/plugins/gemini-hybrid5.md`）：
