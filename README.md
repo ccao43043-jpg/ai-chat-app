@@ -48,6 +48,18 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.8.5：Gemini RP 缓存优化（算法规格 v1.0）**
+
+- 「💎 Gemini 提示缓存（OpenRouter）」插件 1.1.0，按 `docs/plugins/gemini-rp-cache-spec-v1.md` 落地：
+  - 新默认策略「自动」：隐式缓存优先；固定前缀达到 Gemini 门槛（Flash 1024 / Pro 4096 Token）且连续稳定时才打 `cache_control` 显式断点，不再为短前缀付写入成本，也不填充文本凑门槛；原「关闭 / 系统前缀 / 前缀+历史」保留
+  - 系统提示分层指纹：识别【世界观】【角色卡】【规则】（固定层 A–D）与【长期记忆】【近期剧情】【当前状态】（动态层 E–G），计算 `static_hash` + `static_prompt_version`；动态层在尾部时只缓存固定层
+  - 每个对话稳定 `session_id`（OpenRouter sticky routing），不改模型与供应商偏好
+  - RP 对话在固定层开头注入简短「RP 协议锚点」（不替玩家说话/决定、NPC 猜测不写成事实、核心性格与临时状态分离），普通聊天不注入，可在设置里关闭
+  - L0 核心设定指纹：检测核心设定是否被压缩丢失；关键词检索评分
+  - 命中率只用真实 `cached_tokens`；服务商未返回缓存字段显示「未知」而不是 0%；成本按价目表估算并标注
+  - 滚动命中率 <40% 自动诊断（static_hash、模型、供应商偏好、session_id、请求间隔、前缀长度与变化位置），≥70% 显示良好
+- 其他服务商 / 模型请求逐字节不变。Android `0.8.5`（versionCode 36）/ 桌面 / npm `0.8.5`
+
 **v0.7.9：角色卡更详细，去掉字数硬限制**
 
 - RP 模板与「角色卡 Skill」不再写死「150–300 字」「约 1500 字」「100–200 字」等上限，改为「根据剧情需要自然决定长度，不要刻意控制字数」
@@ -168,6 +180,7 @@ Base URL 填到 `/v1` 这一级即可（程序自动拼接 `/chat/completions`�
   - `plugins.js`：插件注册表
   - `rpcache.js`：RP 缓存优化器的 Context Builder
   - `rp-plugin.js`：插件的界面
+  - `gcache.js`：OpenRouter Gemini 提示缓存插件（PromptBuilder / CachePolicyEngine / MemoryManager / ProviderAdapters，规格见 `docs/plugins/gemini-rp-cache-spec-v1.md`）
 - pdf.js 按需加载、在主线程运行（WebView 中不使用 Worker）；中文 CMap 通过 `NativeBridge.readAsset` 从 APK 内读取
 
 ## 图标
