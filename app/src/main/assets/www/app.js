@@ -887,8 +887,38 @@
     if (!conv.model) { toast('请填写模型名称'); openSheet(); return null; }
     return p;
   }
+  let autoCharBusy = false;
+  /** v0.8.1：RP 模板首条消息 → 询问是否生成角色卡；同意则生成、绑定到本对话，再继续正常回复。拒绝 / 失败都不阻塞 */
+  async function maybeAutoChar(c) {
+    if (!window.AutoChar || !AutoChar.shouldOffer(c, templates, settings)) return;
+    c.autoChar = { asked: true, at: Date.now() };
+    const ok = await dialog({ title: '生成角色卡？', body: '是否按照当前信息去生成角色卡？\n\n会根据当前 RP 模板和你的首条消息额外调用一次模型，生成角色卡、世界观等设定并绑定到本对话，然后继续回复。', okText: '生成' });
+    if (!ok) { c.autoChar.status = 'declined'; saveConv(c); return; }
+    autoCharBusy = true; c.autoChar.status = 'running';
+    toast('正在生成角色卡…（完成后自动继续回复）');
+    try {
+      const first = c.messages.find(m => m.role === 'user' && !m.error && !m.imageGen);
+      const skill = templates.find(t => t.id === Templates.CARD_SKILL_ID);
+      const prompt = AutoChar.buildPrompt(first ? first.content : '', c.systemPrompt, skill && skill.content);
+      const o = { conv: c, maxTokens: 4096, timeoutMs: 120000, usageType: 'extract' };
+      let fields = AutoChar.parse(await pluginHost.callModel(prompt, o));
+      if (!fields) fields = AutoChar.parse(await pluginHost.callModel(prompt + '\n\n注意：上次输出缺少【角色卡】等分段标题。这次严格按 8 段标题输出。', o));
+      if (!fields) throw new Error('模型没有按分段格式输出角色卡');
+      const rp = Plugins.registry.get('rpcache');
+      if (rpOn(c) && rp && rp._internals && rp._internals.importSections) {
+        rp._internals.importSections(pluginHost, c, fields); c.autoChar.target = 'blocks';
+      } else {
+        c.systemPrompt = String(c.systemPrompt || '') + AutoChar.toPromptAppend(fields); c.autoChar.target = 'system';
+        toast('已生成角色卡' + (AutoChar.charName(fields) ? '「' + AutoChar.charName(fields) + '」' : '') + '并写入本对话系统提示词');
+      }
+      c.autoChar.status = 'done'; c.autoChar.name = AutoChar.charName(fields); c.autoChar.opening = fields.opening || '';
+    } catch (e) {
+      c.autoChar.status = 'error'; c.autoChar.error = String(e && e.message || e).slice(0, 120);
+      toast('角色卡生成失败：' + c.autoChar.error + '，已按原设定继续回复');
+    } finally { autoCharBusy = false; saveConv(c); }
+  }
   function send() {
-    if (running) return;
+    if (running || autoCharBusy) return;
     const text = input.value.trim();
     if (!text && !attachments.length && !docs.length) return;
     if (docs.some(d => d.status === 'loading')) { toast('文件仍在读取，请稍候'); return; }
@@ -908,6 +938,12 @@
       if (t) conv.title = (conv.personaEmoji && text ? conv.personaEmoji + ' ' : '') + t.replace(/\s+/g, ' ').slice(0, 24);
     }
     input.value = ''; autosize(); attachments = []; docs = []; renderAttachments();
+    const c0 = conv;
+    if (window.AutoChar && AutoChar.shouldOffer(c0, templates, settings)) {
+      renderMessages(); saveConv(c0);
+      maybeAutoChar(c0).catch(() => {}).then(() => { if (conv === c0 && !running) runChat(getProvider(c0.providerId) || p); });
+      return;
+    }
     runChat(p);
   }
   /** 重新生成：保留旧回复为一个版本（‹ 1/2 ›）。较早的回复也可以重新生成，后面的对话保留在旧版本的分支里 */
