@@ -8,7 +8,7 @@
   'use strict';
   const ID = 'gcache';
   // v1.1.0（算法规格 v1.0）：mode 新增 auto（推荐默认：隐式优先，前缀够长且稳定才打显式断点）；rpGuardrails: auto|on|off；sessionId：稳定 session_id
-  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true, hybrid: true };
+  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true, hybrid: true, autoTarget: 'history', writePrice: 1.0, keepaliveMaxPings: 3, missAlert: true };
   /** 固定层版本：协议锚点文本 / 分层规则变更时必须 +1（变更会让 static_hash 变化，缓存需重新写入） */
   const STATIC_PROMPT_VERSION = 1;
   /** 诊断阈值：滚动命中率 <40% 触发诊断，≥70% 视为良好 */
@@ -113,7 +113,15 @@
     if (info.prevStaticHash !== info.static_hash) return { explicit: false, reason: '固定层刚发生变化，本轮不写显式缓存' };
     return { explicit: true, reason: '固定前缀约 ' + have + ' Token 且稳定，启用显式断点' };
   }
-  const CachePolicyEngine = { decide, minCacheTokens, estTokens, DIAG_LOW, DIAG_GOOD };
+  /** v1.3：auto + Hybrid 时断点放到「本轮 user 之前」（等价 history），门槛按「固定前缀+历史」估算，仍要求固定层稳定 */
+  function decideHistory(cfg, info) {
+    const need = minCacheTokens(info.model), have = estTokens(info.cacheText);
+    if (have < need) return { explicit: false, reason: '固定前缀+历史约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存' };
+    if (!info.prevStaticHash) return { explicit: false, reason: '首轮先走隐式缓存，确认前缀稳定后再写显式缓存' };
+    if (info.prevStaticHash !== info.static_hash) return { explicit: false, reason: '固定层刚发生变化，本轮不写显式缓存' };
+    return { explicit: true, history: true, reason: '固定前缀+历史约 ' + have + ' Token 且固定层稳定，断点放在本轮 user 之前（历史进缓存）' };
+  }
+  const CachePolicyEngine = { decide, decideHistory, minCacheTokens, estTokens, DIAG_LOW, DIAG_GOOD };
 
   // ───────────────────────── ProviderAdapters：OpenRouter ─────────────────────────
   /** 由对话 id 生成稳定 session_id（≤256 字符，UUID 形状）；同一对话恒定，换对话即换 */
@@ -288,13 +296,17 @@
     }
     const prefix = msgs.slice(0, k).map(m => partsText(m.content)).join('\n\0\n');
     const layers = analyzeLayers(prefix);
-    const decision = decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash });
+    let lastU = -1; for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { lastU = i; break; }
+    const autoHist = cfg.mode === 'auto' && hybrid && cfg.autoTarget !== 'prefix' && lastU > k;
+    const decision = autoHist
+      ? decideHistory(cfg, { model: body.model, cacheText: msgs.slice(0, lastU).map(m => partsText(m.content)).join('\n'), static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash })
+      : decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash });
     // 3. 断点：OpenRouter 对 Gemini 只用最后一个断点，先清掉其他插件（RP 缓存优化器强制模式）加的断点
     if (cfg.mode !== 'off' && msgs.length) {
       msgs.forEach(stripCC);
       if (decision.explicit) {
         let target = -1;
-        if (cfg.mode === 'history') {
+        if (cfg.mode === 'history' || decision.history) {
           let lastUser = -1; for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { lastUser = i; break; }
           for (let i = (lastUser > 0 ? lastUser : msgs.length) - 1; i >= 0; i--) if (hasText(msgs[i].content)) { target = i; break; }
         }
@@ -309,7 +321,7 @@
         }
         if (!applied) {
           if (target < 0 && k > 0) target = k - 1;
-          if (target >= 0 && addBreakpoint(msgs[target], cfg.ttl || undefined)) applied = { index: target, mode: cfg.mode };
+          if (target >= 0 && addBreakpoint(msgs[target], cfg.ttl || undefined)) { applied = { index: target, mode: cfg.mode }; if (decision.history) applied.history = true; }
         }
       }
     }
@@ -334,12 +346,35 @@
       : 'Gemini 缓存未命中（输入 ' + i.prompt + ' Token' + (i.write ? '，写入 ' + i.write : '') + '）';
   }
   /** 成本（按价目表估算，单位：「普通输入 Token 等价」）：token 数取真实 usage，倍率取 PRICE。返回 { equiv, saved, pctSaved } */
-  function estimateCost(i) {
+  function estimateCost(i, price) {
     if (!i || i.known === false) return null;
+    const P = Object.assign({}, PRICE, price || {});
     const miss = Math.max(0, i.prompt - i.hit - i.write);
-    const equiv = miss + i.hit * PRICE.read + i.write * PRICE.write;
+    const equiv = miss + i.hit * P.read + i.write * P.write;
     return { equiv: Math.round(equiv), saved: Math.round(i.prompt - equiv), pctSaved: i.prompt ? Math.round((i.prompt - equiv) / i.prompt * 100) : 0 };
   }
+  // ───────────────────────── KeepAlive：保活收益分析（只分析，不自动 ping） ─────────────────────────
+  // 以前缀 L 为单位：命中 0.25L，未命中 1L；一次 ping（max_tokens=1）≈ 0.25L。仅当间隔 > TTL 且 ping 能覆盖到回复时有收益。
+  // 前提：ping 会刷新 TTL（OpenRouter 未写明，需实测）。
+  function pingsForGap(gap, interval, maxP) { return gap <= interval ? 0 : Math.min(Math.ceil(gap / interval) - 1, maxP); }
+  function netForGap(gap, ttl, interval, maxP, read) {
+    read = read == null ? PRICE.read : read;
+    const cost = pingsForGap(gap, interval, maxP) * read, covered = gap <= maxP * interval + ttl;
+    return (gap > ttl && covered ? 1 - read : 0) - cost;
+  }
+  function keepaliveRecommend(gaps, ttl, interval, maxP, read) {
+    gaps = (gaps || []).filter(g => g > 0);
+    if (!gaps.length) return { samples: 0, median: null, net: 0, enable: false, overTtl: 0 };
+    const net = gaps.reduce((a, g) => a + netForGap(g, ttl, interval, maxP, read), 0) / gaps.length;
+    const so = gaps.slice().sort((a, b) => a - b), mid = so.length >> 1;
+    const median = so.length % 2 ? so[mid] : (so[mid - 1] + so[mid]) / 2;
+    return { samples: gaps.length, median: Math.round(median * 10) / 10, net: Math.round(net * 10000) / 10000, enable: net > 0, overTtl: gaps.filter(g => g > ttl).length };
+  }
+  const ttlSec = cfg => cfg && cfg.ttl === '1h' ? 3600 : 300;
+  const KeepAlive = { pingsForGap, netForGap, recommend: keepaliveRecommend, ttlSec };
+  /** 「应命中却未命中」：上一轮已打显式断点、本轮前缀未变、间隔 < TTL，但 cached_tokens=0 */
+  function expectedHit(prev, cur, ttl) { return !!(prev && prev.explicit && cur && cur.prefix_hash === prev.prefix_hash && cur.t - prev.t < ttl * 1000); }
+
   /** 是否 RP 对话：rpcache 插件对本对话生效 / 存有分层设定 / 系统提示识别到 ≥2 个分层标题 */
   function isRpConv(conv, rpActive) {
     if (rpActive) return true;
@@ -348,7 +383,7 @@
     return !!(conv && analyzeLayers(conv.systemPrompt || '').layered);
   }
 
-  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates };
+  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates, KeepAlive, expectedHit };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   root.GeminiCache = api;
 
@@ -365,7 +400,7 @@
   const LV = { good: '良好 ✅', ok: '一般', low: '偏低 ⚠️（已诊断）', unknown: '未知' };
 
   reg.register({
-    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.2.0', perConversation: false, defaultEnabled: true,
+    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.3.0', perConversation: false, defaultEnabled: true,
     desc: '只对 OpenRouter 上的 Gemini 模型生效（算法规格 v1.0）：隐式缓存优先，固定前缀够长且稳定时才打 cache_control 显式断点；系统提示分层指纹（static_hash）、每个对话稳定 session_id（sticky routing）、RP 协议锚点、L0 核心记忆保护、按真实 cached_tokens 统计命中与成本并在命中率 <40% 时自动诊断。其他服务商 / 模型的请求完全不变。',
     hooks: {
       onBeforeRequest(ctx, host) {
@@ -386,6 +421,10 @@
           result.bot.gcache = i;
           const prev = s.diag && s.diag.level;
           s.diag = diagnose(s);
+          if (i.known !== false && s.expect) {
+            s.missStreak = i.hit ? 0 : (s.missStreak | 0) + 1;
+            if (s.missStreak === 2 && ctx.opts.orGemini.missAlert !== false) host.toast('💎 连续 2 轮应命中却未命中：前缀未变且在 TTL 内，可能被路由到不同供应商或缓存被驱逐');
+          } else if (i.hit) s.missStreak = 0;
           if (ctx.opts.orGemini.toast) host.toast(usageText(i));
           if (ctx.opts.orGemini.diagToast && s.diag.level === 'low' && prev !== 'low') host.toast('💎 缓存命中率 ' + s.diag.rate + '%：' + s.diag.issues[0]);
         }
@@ -408,6 +447,12 @@
       const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
+      const now = Date.now();
+      if (s.lastT) s.gaps = (s.gaps || []).concat([Math.round((now - s.lastT) / 100) / 10]).slice(-50);
+      s.lastT = now;
+      s.expect = expectedHit(s.lastReq, { prefix_hash: hash(r.prefix), t: now }, ttlSec(o));
+      s.lastReq = { explicit: !!r.applied, prefix_hash: hash(r.prefix), t: now };
+      s.applied = r.applied;
       if (s.prefix != null && s.prefix !== r.prefix) { s.prefixChanges++; s.lastDiff = firstDiff(s.prefix, r.prefix); }
       s.prefix = r.prefix; s.prefixLen = r.prefix.length;
       if (r.layers) {
@@ -427,6 +472,7 @@
       const sw = (id, label, hint, v) => '<label class="field inline"><span>' + label + '<small>' + hint + '</small></span><input type="checkbox" class="switch" id="' + id + '"' + (v ? ' checked' : '') + '></label>';
       box.innerHTML =
         sel('gc-mode', '缓存策略', '「自动」隐式缓存优先：固定前缀达到 Gemini 门槛且连续稳定时才打显式断点（不填充凑门槛）；OpenRouter 对 Gemini 只用最后一个断点', [['auto', '自动（推荐）'], ['off', '关闭（仅依赖 Gemini 隐式缓存）'], ['prefix', '系统前缀'], ['history', '前缀+历史']], c.mode) +
+        sel('gc-at', '自动模式断点位置', 'Hybrid 开启时：「历史」把断点放到本轮 user 之前，历史也进缓存（推荐）；「固定前缀」只盖 system 固定层', [['history', '历史（本轮 user 之前）'], ['prefix', '只盖固定前缀']], c.autoTarget) +
         sw('gc-merge', '合并开头 system 消息', '把开头连续的多条 system 消息合并为一条（顺序不变），保证断点覆盖完整固定前缀', c.mergeSystem) +
         sw('gc-hy', 'Hybrid-5 迟滞窗口', '严格固定前缀（动态层 E–G 移到本轮输入尾部，日期只到天）+ 历史原文保留 20–40 轮：满 40 轮把最早 20 轮压成一段冻结摘要（只生成一次）。与「RP 缓存优化器」同开的对话以 rpcache 的章节策略为准，此项不生效', c.hybrid) +
         sw('gc-sid', '稳定 session_id', '每个对话固定一个 session_id，OpenRouter 从首轮起就把请求粘到同一供应商，缓存更稳', c.sessionId) +
@@ -434,7 +480,10 @@
         sel('gc-ttl', '缓存 TTL', '写入 cache_control.ttl = "1h"（服务商不支持时会被忽略）', [['', '默认（5 分钟）'], ['1h', '1 小时']], c.ttl) +
         sw('gc-resp', 'OpenRouter 响应缓存', '发送 X-OpenRouter-Cache: true，完全相同的请求直接返回缓存的回复（重新生成会得到同样结果！）', c.responseCache) +
         sw('gc-toast', '命中提示', '每次回复结束后弹出提示显示缓存命中 Token 数', c.toast) +
-        sw('gc-dtoast', '诊断提示', '滚动命中率跌破 40% 时弹出诊断结论', c.diagToast);
+        sw('gc-dtoast', '诊断提示', '滚动命中率跌破 40% 时弹出诊断结论', c.diagToast) +
+        sw('gc-miss', '未命中告警', '已打断点、前缀未变且在 TTL 内却连续 2 轮未命中时提示', c.missAlert) +
+        '<label class="field"><span>缓存写入价倍率<small>相对普通输入价，用于成本估算（OpenRouter Gemini 约 1.0，含存储费可调高）</small></span><input type="number" step="0.05" min="0" id="gc-wp" value="' + c.writePrice + '"></label>' +
+        '<label class="field"><span>保活分析：最多 ping 次数<small>只用于计算建议，不会自动发送 ping</small></span><input type="number" step="1" min="0" max="20" id="gc-kp" value="' + c.keepaliveMaxPings + '"></label>';
       const save = patch => { Object.assign(reg.config(host.settings(), ID), patch); host.saveSettings(); };
       box.querySelector('#gc-mode').onchange = e => save({ mode: e.target.value });
       box.querySelector('#gc-guard').onchange = e => save({ rpGuardrails: e.target.value });
@@ -445,6 +494,10 @@
       box.querySelector('#gc-resp').onchange = e => save({ responseCache: e.target.checked });
       box.querySelector('#gc-toast').onchange = e => save({ toast: e.target.checked });
       box.querySelector('#gc-dtoast').onchange = e => save({ diagToast: e.target.checked });
+      box.querySelector('#gc-at').onchange = e => save({ autoTarget: e.target.value });
+      box.querySelector('#gc-miss').onchange = e => save({ missAlert: e.target.checked });
+      box.querySelector('#gc-wp').onchange = e => { const v = parseFloat(e.target.value); if (v >= 0) save({ writePrice: v }); };
+      box.querySelector('#gc-kp').onchange = e => { const v = parseInt(e.target.value, 10); if (v >= 0) save({ keepaliveMaxPings: Math.min(20, v) }); };
     },
     renderPanel(box, host) {
       const conv = host.conv(), e = host.esc;
@@ -459,14 +512,18 @@
         const known = s.prompt > 0;
         L.push('<br>请求数：' + s.requests + '　命中次数：' + s.hits + (s.unknown ? '　未返回缓存字段：' + s.unknown + ' 次' : ''));
         L.push('累计输入（真实 usage）：' + s.prompt + '　cached_tokens：' + s.cached + '（' + (known ? Math.round(s.cached / s.prompt * 100) + '%' : '未知') + '）　缓存写入：' + s.write);
-        const cost = known && estimateCost({ prompt: s.prompt, hit: s.cached, write: s.write });
-        if (cost) L.push('成本（按价目表估算：读 ' + PRICE.read + 'x / 写 ' + PRICE.write + 'x 输入价）：≈ ' + cost.equiv + ' 输入 Token 等价，节省约 ' + cost.pctSaved + '%');
+        const wp = Number(c.writePrice) >= 0 ? Number(c.writePrice) : PRICE.write;
+        const cost = known && estimateCost({ prompt: s.prompt, hit: s.cached, write: s.write }, { write: wp });
+        if (cost) L.push('成本（按价目表估算：读 ' + PRICE.read + 'x / 写 ' + wp + 'x 输入价）：≈ ' + cost.equiv + ' 输入 Token 等价，节省约 ' + cost.pctSaved + '%');
         const d = s.diag || diagnose(s);
         L.push('滚动命中率（近 ' + ROLL_N + ' 次）：' + (d.rate == null ? '未知' : d.rate + '%') + ' · ' + LV[d.level]);
         if (d.level === 'low' || d.level === 'unknown') d.issues.forEach(x => L.push('　· ' + e(x)));
         L.push('static_hash：' + e(s.static_hash || '-') + '（v' + (s.static_prompt_version || STATIC_PROMPT_VERSION) + (s.layered ? '，已识别分层设定' : '') + '）　session_id：' + e(s.session_id || '未发送'));
         const hy = s.hybridInfo;
         if (hy) L.push('Hybrid-5：' + (hy.off ? (hy.off === 'rpcache' ? '本对话由 RP 缓存优化器管理历史（不启用 Zip 窗口）' : '已关闭') : '窗口原文 ' + hy.rawTurns + ' 轮 / 共 ' + hy.totalTurns + ' 轮　冻结摘要：' + (hy.summaries ? hy.summaries + ' 段' : '无') + '　下次压缩还剩 ' + hy.untilNext + ' 轮' + (hy.movedDynamic ? '　动态层已移到尾部' : '')));
+        const ttl = ttlSec(c), ka = keepaliveRecommend(s.gaps, ttl, Math.max(30, ttl - 30), c.keepaliveMaxPings | 0);
+        L.push('保活分析（TTL ' + ttl + 's，间隔 ' + Math.max(30, ttl - 30) + 's，最多 ' + (c.keepaliveMaxPings | 0) + ' 次 ping）：' + (ka.samples < 3 ? '样本不足（' + ka.samples + ' 个间隔）' : '中位间隔 ' + ka.median + 's，超 TTL ' + ka.overTtl + '/' + ka.samples + '，每轮净收益 ' + ka.net + ' L → ' + (ka.enable ? '建议保活（本插件不自动 ping）' : '不建议保活')));
+        if (s.missStreak >= 2) L.push('⚠️ 连续 ' + s.missStreak + ' 轮应命中却未命中');
         if (s.decision) L.push('本轮缓存决策：' + e(s.decision));
         L.push('固定前缀长度：约 ' + s.prefixLen + ' 字符（Gemini 显式缓存通常需 ≥1024~4096 Token）　前缀变化次数：' + s.prefixChanges);
         const mem = reg.convData(conv, ID).memory;

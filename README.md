@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.8.8：Gemini 缓存 auto 断点覆盖历史 + 保活分析**
+
+- 自动模式在 Hybrid-5 下把断点放到本轮 user 之前，历史进缓存（可切回只盖固定前缀）；保活收益分析（不自动 ping）；连续应命中却未命中告警；写入价倍率可配置
+- Android `0.8.8`（versionCode 39）/ 桌面 / npm `0.8.8`
+
 **v0.8.7：Markdown 渲染 LRU 缓存 + 版本一致性校验**
 
 - `renderMarkdown` 新增 LRU：`mdHtmlCache`（marked + DOMPurify 结果，80 条）、`hlCache`（highlight.js 结果，300 条）；超 20000 字符不缓存

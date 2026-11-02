@@ -187,3 +187,36 @@ test('Hybrid-5：编辑已冻结批次 → 作废并重建，历史删短 → �
   const r = H.apply(h, st); assert.ok(r.summaryCreated); assert.ok(/改过/.test(st.summaries[0].text));
   const r2 = H.apply(mkHist(10), st); assert.strictEqual(st.summaries.length, 0); assert.strictEqual(r2.rawTurns, 10);
 });
+
+// ── v0.8.8：auto+Hybrid 断点放到本轮 user 之前 / 保活分析 / 写入价 ──
+test('auto+Hybrid：断点在本轮 user 之前，历史进缓存；autoTarget=prefix 可切回', () => {
+  const G = require('../app/src/main/assets/www/gcache.js');
+  const sys = '【世界观】\n' + '世界'.repeat(700);
+  const msgs = [{ role: 'system', content: sys }, { role: 'user', content: '你好' }, { role: 'assistant', content: '嗨' }, { role: 'user', content: '继续' }];
+  const req = { url: 'x', headers: {}, body: JSON.stringify({ model: 'google/gemini-2.5-flash', messages: msgs }) };
+  const first = G.applyToRequest(req, { mode: 'auto' }, { hybrid: G.HybridWindow.empty() });
+  const r = G.applyToRequest(req, { mode: 'auto' }, { hybrid: G.HybridWindow.empty(), prevStaticHash: first.layers.static_hash });
+  const b = JSON.parse(r.req.body).messages;
+  assert.ok(r.decision.history && r.applied.history);
+  assert.equal(b[2].role, 'assistant'); assert.ok(b[2].content[0].cache_control);
+  assert.equal(typeof b[3].content, 'string');
+  const p = G.applyToRequest(req, { mode: 'auto', autoTarget: 'prefix' }, { hybrid: G.HybridWindow.empty(), prevStaticHash: first.layers.static_hash });
+  const pb = JSON.parse(p.req.body).messages;
+  assert.ok(pb[0].content[0].cache_control); assert.equal(typeof pb[2].content, 'string');
+  // 不带 hybrid 时行为不变（只盖固定前缀）
+  const n = G.applyToRequest(req, { mode: 'auto' }, { prevStaticHash: first.layers.static_hash });
+  assert.ok(!n.decision.history);
+});
+test('保活分析与写入价', () => {
+  const G = require('../app/src/main/assets/www/gcache.js'), K = G.KeepAlive;
+  assert.equal(K.pingsForGap(100, 270, 3), 0);
+  assert.equal(K.pingsForGap(600, 270, 3), 2);
+  assert.ok(K.recommend([600, 700, 500], 300, 270, 3).enable);
+  assert.ok(!K.recommend([30, 40, 60], 300, 270, 3).enable);
+  assert.ok(!K.recommend([5000, 6000], 300, 270, 3).enable);
+  assert.equal(K.recommend([], 300, 270, 3).samples, 0);
+  const c1 = G.estimateCost({ prompt: 1000, hit: 0, write: 1000 }), c2 = G.estimateCost({ prompt: 1000, hit: 0, write: 1000 }, { write: 1.5 });
+  assert.equal(c1.equiv, 1000); assert.equal(c2.equiv, 1500);
+  assert.ok(G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'a', t: 1000 }, 300));
+  assert.ok(!G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'b', t: 1000 }, 300));
+});
