@@ -209,6 +209,8 @@
       <label class="field" id="set-system-row"><span>默认系统提示词</span>
         <textarea id="set-system" rows="3" placeholder="例如：你是一个乐于助人的助手，请用中文回答。"></textarea></label>
       <label class="field inline"><span>流式输出<small>边生成边显示</small></span><input type="checkbox" id="set-stream" class="switch"></label>
+      <label class="field"><span>RP 首条消息自动生成角色卡<small>套用角色扮演模板、还没有角色卡时，第一条消息前先生成角色卡并绑定到本对话</small></span>
+        <select id="set-autochar"><option value="ask">先询问（默认）</option><option value="auto">直接生成，不询问</option><option value="off">关闭</option></select></label>
       <div class="field-row">
         <label class="field"><span>温度</span><input id="set-temp" type="number" inputmode="decimal" step="0.1" min="0" max="2" placeholder="默认"></label>
         <label class="field"><span>最大输出 tokens</span><input id="set-maxtokens" type="number" inputmode="numeric" step="1" min="1" placeholder="4096"></label>

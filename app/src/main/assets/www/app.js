@@ -888,34 +888,67 @@
     return p;
   }
   let autoCharBusy = false;
-  /** v0.8.1：RP 模板首条消息 → 询问是否生成角色卡；同意则生成、绑定到本对话，再继续正常回复。拒绝 / 失败都不阻塞 */
+  /** v0.8.3：RP 模板首条消息 → 询问（或按设置直接）生成角色卡，绑定到本对话，再继续正常回复。
+   * 拒绝 / 失败 / 取消都不阻塞回复；生成中发送键变「停止」可取消；首条消息本身是分段角色卡时直接导入，不调用模型。 */
   async function maybeAutoChar(c) {
     if (!window.AutoChar || !AutoChar.shouldOffer(c, templates, settings)) return;
     c.autoChar = { asked: true, at: Date.now() };
-    const ok = await dialog({ title: '生成角色卡？', body: '是否按照当前信息去生成角色卡？\n\n会根据当前 RP 模板和你的首条消息额外调用一次模型，生成角色卡、世界观等设定并绑定到本对话，然后继续回复。', okText: '生成' });
-    if (!ok) { c.autoChar.status = 'declined'; saveConv(c); return; }
+    const first = c.messages.find(m => m.role === 'user' && !m.error && !m.imageGen);
+    const firstText = first ? String(first.content || '') : '';
+    let fields = AutoChar.fromUserText(firstText), fromUser = !!fields;
+    if (!fromUser && AutoChar.mode(settings) !== 'auto') {
+      const ok = await dialog({ title: '生成角色卡？', body: '当前是角色扮演模板，但本对话还没有角色卡。\n\n是否根据 RP 模板和你的首条消息先生成角色卡（世界观、人物、规则、开场白），绑定到本对话后再回复？\n\n会额外调用一次模型；生成中可点「停止」跳过。可在 设置 → 对话 里改为「直接生成」或「关闭」。', okText: '生成' });
+      if (!ok) {
+        c.autoChar.status = 'declined'; saveConv(c);
+        toast('已跳过角色卡，按原设定回复', [{ label: '不再询问', onClick: () => { settings.autoCharMode = 'off'; saveSettings(); toast('已关闭自动生成角色卡（设置 → 对话 可重新打开）'); } }]);
+        return;
+      }
+    }
     autoCharBusy = true; c.autoChar.status = 'running';
-    toast('正在生成角色卡…（完成后自动继续回复）');
+    let cancelFn = null, cancelled = false;
+    const cancel = () => { cancelled = true; if (cancelFn) cancelFn(); };
+    if (!fromUser) {
+      setRunning({ msg: {}, cancel, autoChar: true });
+      const tip = $('#input'); if (tip) { c.autoChar.ph = tip.placeholder; tip.placeholder = '正在生成角色卡…点「停止」可跳过'; }
+      toast('正在生成角色卡…（完成后自动继续回复，点「停止」跳过）');
+    }
     try {
-      const first = c.messages.find(m => m.role === 'user' && !m.error && !m.imageGen);
-      const skill = templates.find(t => t.id === Templates.CARD_SKILL_ID);
-      const prompt = AutoChar.buildPrompt(first ? first.content : '', c.systemPrompt, skill && skill.content);
-      const o = { conv: c, maxTokens: 4096, timeoutMs: 120000, usageType: 'extract' };
-      let fields = AutoChar.parse(await pluginHost.callModel(prompt, o));
-      if (!fields) fields = AutoChar.parse(await pluginHost.callModel(prompt + '\n\n注意：上次输出缺少【角色卡】等分段标题。这次严格按 8 段标题输出。', o));
-      if (!fields) throw new Error('模型没有按分段格式输出角色卡');
+      if (!fromUser) {
+        const skill = templates.find(t => t.id === Templates.CARD_SKILL_ID);
+        const prompt = AutoChar.buildPrompt(firstText, c.systemPrompt, skill && skill.content);
+        const o = { conv: c, maxTokens: Math.max(4096, +settings.maxTokens || 0), timeoutMs: 150000, usageType: 'extract', setCancel: f => { cancelFn = f; } };
+        const raw = await pluginHost.callModel(prompt, o);
+        fields = AutoChar.parse(raw);
+        if (!fields && !cancelled && String(raw || '').trim()) {
+          // 只重试一次：把上次输出交给模型按格式整理（比整段重新生成快，也不丢内容）
+          fields = AutoChar.parse(await pluginHost.callModel('把下面这段角色设定原样整理成 8 段格式输出，每段单独一行【标题】开头，标题依次为：\n' +
+            '【世界观】【角色卡】【RP规则】【输出格式】【示例对白】【禁止事项】【写作风格】【开场白】\n不要序号、不要 Markdown 标题、不要代码块、不要解释。\n\n---\n' + String(raw).slice(0, 12000), o));
+        }
+        if (!fields) throw new Error(String(raw || '').trim() ? '模型没有按分段格式输出角色卡' : '模型返回为空');
+      }
+      const name = AutoChar.charName(fields);
       const rp = Plugins.registry.get('rpcache');
+      c.systemPrompt = AutoChar.fillLeftovers(c.systemPrompt, fields); // 模板里没填的 {{角色名}} 等变量 → 用生成的名字 / 去掉
       if (rpOn(c) && rp && rp._internals && rp._internals.importSections) {
         rp._internals.importSections(pluginHost, c, fields); c.autoChar.target = 'blocks';
       } else {
-        c.systemPrompt = String(c.systemPrompt || '') + AutoChar.toPromptAppend(fields); c.autoChar.target = 'system';
-        toast('已生成角色卡' + (AutoChar.charName(fields) ? '「' + AutoChar.charName(fields) + '」' : '') + '并写入本对话系统提示词');
+        c.systemPrompt = String(c.systemPrompt || '').trimEnd() + AutoChar.toPromptAppend(fields); c.autoChar.target = 'system';
+        toast((fromUser ? '已识别首条消息里的角色卡' : '已生成角色卡') + (name ? '「' + name + '」' : '') + '，写入本对话系统提示词',
+          fields.opening ? [{ label: '复制开场白', onClick: () => { try { navigator.clipboard.writeText(fields.opening); toast('开场白已复制'); } catch (e) { toast(fields.opening.slice(0, 80)); } } }] : null);
       }
-      c.autoChar.status = 'done'; c.autoChar.name = AutoChar.charName(fields); c.autoChar.opening = fields.opening || '';
+      c.autoChar.status = 'done'; c.autoChar.name = name; c.autoChar.opening = fields.opening || ''; c.autoChar.fromUser = fromUser || undefined;
     } catch (e) {
-      c.autoChar.status = 'error'; c.autoChar.error = String(e && e.message || e).slice(0, 120);
-      toast('角色卡生成失败：' + c.autoChar.error + '，已按原设定继续回复');
-    } finally { autoCharBusy = false; saveConv(c); }
+      if (cancelled) { c.autoChar.status = 'cancelled'; toast('已跳过角色卡生成，按原设定回复'); }
+      else {
+        c.autoChar.status = 'error'; c.autoChar.error = String(e && e.message || e).slice(0, 120);
+        toast('角色卡生成失败：' + c.autoChar.error + '。已按原设定继续回复', [{ label: '用 Skill 手动生成', onClick: () => { const t = templates.find(x => x.id === Templates.CARD_SKILL_ID); if (t) toast('新建对话 → 模板选「' + t.name + '」，把想法发给它即可'); } }]);
+      }
+    } finally {
+      autoCharBusy = false;
+      const tip = $('#input'); if (tip && c.autoChar.ph != null) { tip.placeholder = c.autoChar.ph; delete c.autoChar.ph; }
+      if (running && running.autoChar) setRunning(false);
+      saveConv(c); if (conv === c) renderMessages();
+    }
   }
   function send() {
     if (running || autoCharBusy) return;
@@ -1530,6 +1563,7 @@
     $('#set-system').value = settings.systemPrompt || '';
     renderDefaultTplSelect();
     $('#set-stream').checked = settings.stream !== false;
+    if ($('#set-autochar')) $('#set-autochar').value = window.AutoChar ? AutoChar.mode(settings) : 'ask';
     $('#set-temp').value = settings.temperature || '';
     $('#set-maxtokens').value = settings.maxTokens || '';
     $('#set-imgsize').value = settings.imageSize || '';
@@ -1542,6 +1576,7 @@
     settings.systemPrompt = $('#set-system').value;
     settings.defaultTemplateId = $('#set-deftpl').value || null;
     settings.stream = $('#set-stream').checked;
+    if ($('#set-autochar')) { settings.autoCharMode = $('#set-autochar').value; delete settings.autoCharGen; }
     settings.temperature = $('#set-temp').value.trim();
     settings.maxTokens = $('#set-maxtokens').value.trim();
     settings.imageSize = $('#set-imgsize').value.trim() || '1024x1024';
@@ -1559,6 +1594,7 @@
   }
   ['#set-system', '#set-temp', '#set-maxtokens', '#set-imgsize'].forEach(s => $(s).addEventListener('change', readGeneral));
   $('#set-stream').onchange = readGeneral;
+  if ($('#set-autochar')) $('#set-autochar').onchange = readGeneral;
   function renderProviderList() {
     const box = $('#provider-list'); box.innerHTML = '';
     const sorted = settings.providers.slice().sort((a, b) => (b.apiKey ? 1 : 0) - (a.apiKey ? 1 : 0));
