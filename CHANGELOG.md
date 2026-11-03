@@ -1,5 +1,13 @@
 # 更新日志
 
+**v0.12.0：Character Card V2 + 世界书 ST 语义 + 消息虚拟滚动**
+
+- **Character Card V2 导入 / 导出**：独立模块 `charcard.js` 解析 PNG tEXt/zTXt `chara`（及 JSON），映射到助手 persona + 世界书文本；可从助手库导入 PNG/JSON、导出 PNG；开场白可作为首条助手消息，世界书写入 RP 状态。配套 `tests/charcard.test.js`
+- **世界书升级到 ST 语义**（默认行为兼容旧版）：`scanDepth` / `secondaryKeys` / 递归 / 触发与常驻预算 / 概率 / 优先级；**双轨**—热路径继续冻结追加保缓存，冷路径（章节边界、手动重建、`rebuildOnEdit`）完整重排；常驻条目按预算兜底。诊断增加 `loreEditedButFrozen` 说明。RP 面板可调扫描/预算与「修改设定后立即重建上下文」
+- **`renderMessages` 虚拟滚动**：长列表只渲染可视区（短列表仍全量）；流式更新走 `updateMsg` 定点 patch，避免全量重建
+- 保留 v0.10/v0.11 活人感与结构化记忆，无回退；未引入 SQLite、未大拆 `app.js`
+- Android `0.12.0`（versionCode 47）/ 桌面 / npm `0.12.0`
+
 **v0.11.0：结构化记忆（自动摘录关键信息）**
 
 - **新增内置插件「🧠 结构化记忆」**（默认关闭，插件页开启；独立于 RP 缓存 / 活人感，可单独开关）：每 N 轮（默认 20，可在插件「设置」调 5–200）后台用当前模型从最近对话提取 事实 / 事件 / 关系变化 / 细节，JSON 宽松解析（容忍代码块、对象包裹、「- [类型] 文本」行格式）

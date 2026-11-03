@@ -51,6 +51,14 @@
     auto_budget: true,        // V3：按模型上下文窗口 / 价格阶梯自动推导预算（手动修改任一预算数值即关闭）
     auto_summary: true,       // V3：自适应摘要时机（成本回本 + 缓存冷却），关闭则只按固定阈值
     cache_mode: 'auto',       // V3：auto | explicit | implicit —— 支持显式缓存的模型（千问）用哪种缓存
+    // v0.12：世界书 ST 语义（默认保持 v0.9.3 行为：scanDepth=2、无递归、概率 100）
+    lore: {
+      scanDepth: 2,           // 扫描最近 N 条消息（含本轮用户）；2 ≈ 旧「本轮+上一条回复」
+      recursionDepth: 0,      // 0=关闭；>0 时被激活条目的 content 再参与扫描
+      budgetPct: 0.25,        // 触发条目单轮预算（相对 max_context）
+      constantBudgetPct: 0.15,// 常驻条目预算兜底
+      rebuildOnEdit: false,   // 修改世界书后立即重建上下文（清空冻结并冷路径重排）
+    },
   };
   const DEFAULT_PEAK = { windows: '09:00-12:00,14:00-18:00', tz: 8, weekdays: true, off_factor: 0.5 };
   // DeepSeek 官方价格（美元 / 百万 tokens，高峰时段；非高峰为一半）—— 2026-10 核对 api-docs.deepseek.com/quick_start/pricing
@@ -179,7 +187,10 @@
         restoredFrom: b.restoredFrom };
     });
     const ss = st.settings || {};
-    const settings = Object.assign({}, DEFAULT_SETTINGS, ss, { summary: Object.assign({}, DEFAULT_SETTINGS.summary, ss.summary || {}) });
+    const settings = Object.assign({}, DEFAULT_SETTINGS, ss, {
+      summary: Object.assign({}, DEFAULT_SETTINGS.summary, ss.summary || {}),
+      lore: Object.assign({}, DEFAULT_SETTINGS.lore, ss.lore || {}),
+    });
     // 旧版（v0.4 及以前）保存的设置没有 auto_budget：数值仍是默认值 → 自动；用户改过 → 保持手动
     if (ss.max_context != null && ss.auto_budget == null) settings.auto_budget = budgetIsDefault(settings);
     let chapters = Array.isArray(st.chapters) ? st.chapters : null;
@@ -314,14 +325,44 @@
     return addChapter(st, Object.assign({}, o, { coveredIds: (o.coveredIds || []).filter(id => !had.has(id)) }));
   }
 
-  // ---------------- v0.9.3：世界书（常驻 / 触发分层 + 触发内容冻结进历史） ----------------
+  // ---------------- v0.9.3+v0.12：世界书（ST 语义 + 双轨冻结） ----------------
   /**
    * 文本格式（一段一条）：
-   *   ## 名称 | 关键词1, 关键词2      → 触发条目：本轮输入或上一条回复出现关键词时触发
-   *   ## 名称 | *                     → 常驻条目：放进 L1 固定设定（与角色核心一起缓存）
-   * 触发条目第一次触发时冻结到「触发它的那条用户消息」末尾（只追加，永不移动 / 改写）；
-   * 该消息被章节摘要覆盖后，记录失效，条目可再次触发（重新冻结到新的位置）。
+   *   ## 名称 | 关键词1, 关键词2      → 触发条目
+   *   ## 名称 | *                     → 常驻条目（进 L1，带预算兜底）
+   *   ## 名称 | keys | priority=10;prob=80;sec=a,b;secLogic=AND_ANY;depth=4
+   * 热路径：新触发只冻结追加到锚点消息（前缀稳定）。
+   * 冷路径：rebuildLore / 设定「修改后立即重建」时完整重排。
    */
+  const LORE_DEFAULT_ATTRS = {
+    secondaryKeys: [], secondaryLogic: 'AND_ANY', probability: 100, priority: 100, order: 100,
+    scanDepth: null, caseSensitive: false, matchWholeWords: false, useRegex: false,
+    sticky: 0, cooldown: 0, delay: 0, inclusionGroup: '',
+  };
+  function parseLoreAttrs(raw) {
+    const a = Object.assign({}, LORE_DEFAULT_ATTRS);
+    String(raw || '').split(/[;；]/).map(s => s.trim()).filter(Boolean).forEach(pair => {
+      const eq = pair.indexOf('=');
+      const k = (eq < 0 ? pair : pair.slice(0, eq)).trim().toLowerCase();
+      const v = (eq < 0 ? '1' : pair.slice(eq + 1)).trim();
+      if (k === 'priority' || k === 'prio') a.priority = parseInt(v, 10) || 0;
+      else if (k === 'order') a.order = parseInt(v, 10) || 0;
+      else if (k === 'prob' || k === 'probability') a.probability = Math.max(0, Math.min(100, parseFloat(v) || 0));
+      else if (k === 'depth' || k === 'scandepth') a.scanDepth = Math.max(1, parseInt(v, 10) || 1);
+      else if (k === 'sec' || k === 'secondary' || k === 'secondarykeys') a.secondaryKeys = v.split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+      else if (k === 'seclogic' || k === 'logic') {
+        const m = String(v).toUpperCase();
+        a.secondaryLogic = ['AND_ANY', 'AND_ALL', 'NOT_ANY', 'NOT_ALL'].includes(m) ? m : 'AND_ANY';
+      } else if (k === 'regex') a.useRegex = v !== '0' && v !== 'false';
+      else if (k === 'case' || k === 'casesensitive') a.caseSensitive = v !== '0' && v !== 'false';
+      else if (k === 'whole' || k === 'wholeword') a.matchWholeWords = v !== '0' && v !== 'false';
+      else if (k === 'sticky') a.sticky = Math.max(0, parseInt(v, 10) || 0);
+      else if (k === 'cooldown') a.cooldown = Math.max(0, parseInt(v, 10) || 0);
+      else if (k === 'delay') a.delay = Math.max(0, parseInt(v, 10) || 0);
+      else if (k === 'group' || k === 'inclusiongroup') a.inclusionGroup = v;
+    });
+    return a;
+  }
   function parseLore(text) {
     const out = []; let cur = null;
     String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach(line => {
@@ -329,49 +370,206 @@
       if (m) { cur = { name: m[1].trim(), keysRaw: (m[2] || '').trim(), lines: [] }; out.push(cur); }
       else if (cur) cur.lines.push(line);
     });
-    return out.map(e => {
-      const constant = e.keysRaw === '*' || e.keysRaw === '';
-      const keys = constant ? [] : e.keysRaw.split(/[,，、]/).map(k => k.trim()).filter(Boolean);
+    return out.map((e, idx) => {
+      // keysRaw 可能含第二段 attrs：`keys | attrs` 或仅 `*`
+      let keysPart = e.keysRaw, attrsPart = '';
+      const pipe = e.keysRaw.indexOf('|');
+      if (pipe >= 0) { keysPart = e.keysRaw.slice(0, pipe).trim(); attrsPart = e.keysRaw.slice(pipe + 1).trim(); }
+      const constant = keysPart === '*' || keysPart === '';
+      const keys = constant ? [] : keysPart.split(/[,，、]/).map(k => k.trim()).filter(Boolean);
       const content = canonicalize(e.lines.join('\n'));
-      return { id: sha256(e.name).slice(0, 12), name: e.name, mode: constant ? 'constant' : 'trigger', keys, content };
+      const attrs = parseLoreAttrs(attrsPart);
+      return Object.assign({
+        id: sha256(e.name + '\0' + keysPart).slice(0, 12),
+        name: e.name, mode: constant ? 'constant' : 'trigger', keys, content,
+      }, attrs, { order: attrs.order !== 100 ? attrs.order : idx });
     }).filter(e => e.content);
   }
   function loreToText(list) {
-    return (list || []).map(e => '## ' + e.name + ' | ' + (e.mode === 'constant' ? '*' : e.keys.join(', ')) + '\n' + e.content).join('\n\n');
+    return (list || []).map(e => {
+      let head = '## ' + e.name + ' | ' + (e.mode === 'constant' ? '*' : (e.keys || []).join(', '));
+      const attrs = [];
+      if (e.priority != null && e.priority !== 100) attrs.push('priority=' + e.priority);
+      if (e.order != null && e.order !== 100) attrs.push('order=' + e.order);
+      if (e.probability != null && e.probability !== 100) attrs.push('prob=' + e.probability);
+      if (e.scanDepth != null) attrs.push('depth=' + e.scanDepth);
+      if (e.secondaryKeys && e.secondaryKeys.length) {
+        attrs.push('sec=' + e.secondaryKeys.join(','));
+        if (e.secondaryLogic && e.secondaryLogic !== 'AND_ANY') attrs.push('secLogic=' + e.secondaryLogic);
+      }
+      if (e.useRegex) attrs.push('regex=1');
+      if (e.caseSensitive) attrs.push('case=1');
+      if (e.matchWholeWords) attrs.push('whole=1');
+      if (e.sticky) attrs.push('sticky=' + e.sticky);
+      if (e.cooldown) attrs.push('cooldown=' + e.cooldown);
+      if (e.delay) attrs.push('delay=' + e.delay);
+      if (e.inclusionGroup) attrs.push('group=' + e.inclusionGroup);
+      if (attrs.length) head += ' | ' + attrs.join(';');
+      return head + '\n' + e.content;
+    }).join('\n\n');
   }
   function loreOf(st) { return Array.isArray(st && st.lore) ? st.lore : []; }
   function firedOf(st) { return Array.isArray(st && st.loreFired) ? st.loreFired : []; }
-  function setLore(st, text) {
+  function loreSettings(st) {
+    const d = DEFAULT_SETTINGS.lore || {};
+    return Object.assign({}, d, (st && st.settings && st.settings.lore) || {});
+  }
+  function setLore(st, text, at) {
     const lore = parseLore(text);
-    return Object.assign({}, st, { lore, loreText: String(text || '') });
+    const prevHash = st && st.loreTextHash;
+    const loreText = String(text || '');
+    const loreTextHash = sha256(loreText);
+    let next = Object.assign({}, st, { lore, loreText, loreTextHash });
+    if (prevHash && prevHash !== loreTextHash && firedOf(st).length) next = Object.assign(next, { loreEditedWhileFrozen: true });
+    const ls = loreSettings(next);
+    if (ls.rebuildOnEdit && prevHash && prevHash !== loreTextHash) {
+      next = Object.assign(next, { loreFired: [], loreEditedWhileFrozen: false, loreNeedsRebuild: true });
+    }
+    return next;
+  }
+  function estimateLoreTokens(e) { return estimateTokens((e.name || '') + '\n' + (e.content || '')); }
+  /** 常驻条目按 priority 贪心填入预算，防止撑爆 static */
+  function selectConstantLore(st, ctxTokens) {
+    const ls = loreSettings(st);
+    const all = loreOf(st).filter(e => e.mode === 'constant');
+    if (!all.length) return [];
+    const ctx = ctxTokens || (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
+    const budget = Math.max(200, Math.floor(ctx * (ls.constantBudgetPct != null ? ls.constantBudgetPct : 0.15)));
+    const sorted = all.slice().sort((a, b) => (b.priority - a.priority) || (a.order - b.order));
+    const out = []; let used = 0;
+    for (const e of sorted) {
+      const t = estimateLoreTokens(e);
+      if (out.length && used + t > budget) break;
+      out.push(e); used += t;
+    }
+    return out;
   }
   function constantLoreText(st) {
-    const c = loreOf(st).filter(e => e.mode === 'constant');
+    const c = selectConstantLore(st);
     return c.length ? '[LOREBOOK]\n' + c.map(e => '# ' + e.name + '\n' + e.content).join('\n\n') : '';
   }
   const loreBlockText = r => '[LORE_TRIGGERED ' + r.name + ']\n' + r.content;
-  /** 冻结记录是否仍有效：锚点消息在本次请求里、且没有被章节覆盖 */
   function activeFired(st, items) {
     const covered = new Set(coveredIds(st)); const ids = new Set((items || []).map(m => m.id));
     return firedOf(st).filter(r => ids.has(r.anchorId) && !covered.has(r.anchorId));
   }
-  /**
-   * 扫描本轮输入（+ 上一条回复）触发条目，把新触发的冻结到本轮输入消息上。
-   * 已冻结的内容只存一份快照，之后即使编辑世界书也不会改写历史里的那段（保持前缀稳定）。
-   */
-  function fireLore(st, items, at) {
-    const lore = loreOf(st).filter(e => e.mode === 'trigger' && e.keys.length);
-    const last = items[items.length - 1];
-    if (!lore.length || !last || last.role !== 'user' || !last.id) return { state: st, fired: [] };
-    const active = activeFired(st, items);
-    const live = new Set(active.map(r => r.entryId));
-    if (active.some(r => r.anchorId === last.id)) { // 重新生成：已在这条消息上冻结过，不再追加
-      return { state: st, fired: [] };
+  function matchKey(scan, key, e) {
+    if (!key) return false;
+    if (e.useRegex) {
+      try {
+        const re = new RegExp(key, e.caseSensitive ? '' : 'i');
+        return re.test(scan);
+      } catch (_) { return false; }
     }
-    const prev = items.length > 1 && items[items.length - 2].role === 'assistant' ? items[items.length - 2].content || '' : '';
-    const scan = String(last.content || '') + '\n' + prev;
-    const fired = lore.filter(e => !live.has(e.id) && e.keys.some(k => scan.includes(k)))
-      .map(e => ({ entryId: e.id, name: e.name, anchorId: last.id, content: e.content, hash: sha256(e.content), at: at || 0 }));
+    const hay = e.caseSensitive ? scan : scan.toLowerCase();
+    const needle = e.caseSensitive ? key : key.toLowerCase();
+    if (e.matchWholeWords) {
+      const re = new RegExp('(?:^|[^\\w\\u4e00-\\u9fff])' + needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:$|[^\\w\\u4e00-\\u9fff])', e.caseSensitive ? '' : 'i');
+      return re.test(scan);
+    }
+    return hay.includes(needle);
+  }
+  function matchPrimary(scan, e) {
+    return (e.keys || []).some(k => matchKey(scan, k, e));
+  }
+  function matchSecondary(scan, e) {
+    const keys = e.secondaryKeys || [];
+    if (!keys.length) return true;
+    const hits = keys.map(k => matchKey(scan, k, e));
+    const logic = e.secondaryLogic || 'AND_ANY';
+    if (logic === 'AND_ALL') return hits.every(Boolean);
+    if (logic === 'NOT_ANY') return hits.every(h => !h);
+    if (logic === 'NOT_ALL') return !hits.every(Boolean);
+    return hits.some(Boolean); // AND_ANY
+  }
+  function scanWindow(items, depth) {
+    const n = Math.max(1, depth | 0);
+    const slice = (items || []).slice(-n);
+    return slice.map(m => String(m.content || '')).join('\n');
+  }
+  function rollProbability(p, rng) {
+    const prob = p == null ? 100 : Number(p);
+    if (!(prob < 100)) return true;
+    const r = typeof rng === 'function' ? rng() : Math.random();
+    return r * 100 < prob;
+  }
+  /**
+   * 激活条目（ST 语义核心）。opts.mode: 'hot'|'cold'
+   * 返回按 priority/order 排序后、已过预算裁剪的条目列表（不含已 live 的）。
+   */
+  function activateLore(st, items, opts) {
+    opts = opts || {};
+    const ls = loreSettings(st);
+    const lore = loreOf(st).filter(e => e.mode === 'trigger' && e.keys && e.keys.length);
+    if (!lore.length || !(items || []).length) return [];
+    const live = new Set(opts.excludeIds || []);
+    const depth0 = ls.scanDepth | 0 || 2;
+    let scan = scanWindow(items, depth0);
+    // 条目级 depth：取最大窗口再扫一次（热路径仍基于同一 messages 后缀）
+    const maxDepth = Math.max(depth0, ...lore.map(e => e.scanDepth || 0));
+    if (maxDepth > depth0) scan = scanWindow(items, maxDepth);
+    const rng = opts.rng;
+    let activated = [];
+    function runPass(scanText) {
+      const hit = [];
+      for (const e of lore) {
+        if (live.has(e.id) || activated.some(x => x.id === e.id)) continue;
+        const depth = e.scanDepth || depth0;
+        const localScan = depth === maxDepth ? scanText : scanWindow(items, depth);
+        if (!matchPrimary(localScan, e)) continue;
+        if (!matchSecondary(localScan, e)) continue;
+        if (!rollProbability(e.probability, rng)) continue;
+        hit.push(e);
+      }
+      return hit;
+    }
+    activated = activated.concat(runPass(scan));
+    const recMax = opts.recursionDepth != null ? opts.recursionDepth : (ls.recursionDepth | 0);
+    for (let d = 0; d < recMax; d++) {
+      if (!activated.length) break;
+      const extra = activated.map(e => e.content).join('\n');
+      scan = scan + '\n' + extra;
+      const more = runPass(scan);
+      if (!more.length) break;
+      activated = activated.concat(more);
+    }
+    // inclusionGroup：同组只取 priority 最高的一条
+    const byGroup = {};
+    const ung = [];
+    activated.forEach(e => {
+      if (e.inclusionGroup) {
+        const g = e.inclusionGroup;
+        if (!byGroup[g] || e.priority > byGroup[g].priority) byGroup[g] = e;
+      } else ung.push(e);
+    });
+    activated = ung.concat(Object.keys(byGroup).map(k => byGroup[k]));
+    activated.sort((a, b) => (b.priority - a.priority) || (a.order - b.order));
+    const ctx = opts.ctxTokens || (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
+    const budget = Math.max(200, Math.floor(ctx * (ls.budgetPct != null ? ls.budgetPct : 0.25)));
+    const out = []; let used = 0;
+    for (const e of activated) {
+      const t = estimateLoreTokens(e);
+      if (out.length && used + t > budget) break;
+      out.push(e); used += t;
+    }
+    return out;
+  }
+  /**
+   * 热路径：扫描本轮输入窗口触发条目，把新触发的冻结到本轮用户消息上（只追加）。
+   * 默认 scanDepth=2、无递归时行为与 v0.9.3 兼容。
+   */
+  function fireLore(st, items, at, opts) {
+    opts = opts || {};
+    const last = items[items.length - 1];
+    if (!last || last.role !== 'user' || !last.id) return { state: st, fired: [] };
+    const active = activeFired(st, items);
+    if (active.some(r => r.anchorId === last.id)) return { state: st, fired: [] };
+    const live = new Set(active.map(r => r.entryId));
+    const picked = activateLore(st, items, Object.assign({ excludeIds: [...live] }, opts));
+    const fired = picked.map(e => ({
+      entryId: e.id, name: e.name, anchorId: last.id, content: e.content,
+      hash: sha256(e.content), at: at || 0, priority: e.priority | 0,
+    }));
     if (!fired.length) return { state: st, fired };
     const old = firedOf(st).slice(-200);
     return { state: Object.assign({}, st, { loreFired: old.concat(fired) }), fired };
@@ -382,7 +580,35 @@
     const by = {}; act.forEach(r => { (by[r.anchorId] = by[r.anchorId] || []).push(r); });
     return items.map(m => by[m.id] ? Object.assign({}, m, { content: [m.content || ''].filter(Boolean).concat(by[m.id].map(loreBlockText)).join('\n\n') }) : m);
   }
-  /** 摘要勘误：不改写已冻结章节，而是写进「记忆增量」（放在历史之后，不破坏缓存），下次合并时并入 */
+  /**
+   * 冷路径：清空冻结记录，按时间顺序完整重跑激活并重新冻结（章节边界 / 用户点重建 / rebuildOnEdit）。
+   * 会改变历史前缀 → 调用方应预期缓存未命中一次。
+   */
+  function rebuildLore(st, items, at, opts) {
+    opts = opts || {};
+    let state = Object.assign({}, st, { loreFired: [], loreNeedsRebuild: false, loreEditedWhileFrozen: false });
+    const list = items || [];
+    const allFired = [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].role !== 'user' || !list[i].id) continue;
+      const prefix = list.slice(0, i + 1);
+      const live = new Set(allFired.filter(r => {
+        const covered = new Set(coveredIds(state));
+        return !covered.has(r.anchorId);
+      }).map(r => r.entryId));
+      // 临时 state 供 activate 读 lore；用 prefix 作扫描窗口
+      const picked = activateLore(state, prefix, Object.assign({ excludeIds: [...live], recursionDepth: loreSettings(state).recursionDepth }, opts));
+      picked.forEach(e => {
+        allFired.push({
+          entryId: e.id, name: e.name, anchorId: list[i].id, content: e.content,
+          hash: sha256(e.content), at: at || 0, priority: e.priority | 0, rebuilt: true,
+        });
+      });
+    }
+    state = Object.assign(state, { loreFired: allFired.slice(-200) });
+    return { state, fired: allFired };
+  }
+  /** 摘要勘误：不改写已冻结章节，而是写进「记忆增量」 */
   function addErratum(st, no, text, at) {
     const t = canonicalize(text); if (!t) throw new Error('勘误内容不能为空');
     const cur = getBlock(st, 'delta').content;
@@ -755,6 +981,7 @@
     if (entry.summary_happened) out.push(entry.summary_merged ? '章节总量超过上限，已合并为 ' + slabel(entry.summary_no) + '，章节及之后的缓存重建一次'
       : ({ budget: '超出预算，追加了章节 ', cold: '缓存已过期（空闲较久），趁重建顺便追加了章节 ', adaptive: '按成本估算提前摘要（几轮即可回本），追加了章节 ' }[entry.summary_reason] || '历史达到摘要阈值，追加了章节 ') + slabel(entry.summary_no) + '：之前的章节保持命中，从新章节处重新建立');
     if (d.static === 'CHANGED') out.push(STATIC_CAUSE(entry.static_cause) || '角色卡 / 世界观等永久锚点被修改');
+    if (entry.lore_edited_frozen || entry.loreEditedButFrozen) out.push('世界书已修改但历史中仍保留旧的冻结片段（loreEditedButFrozen）；可开启「修改设定后立即重建上下文」或手动重建');
     if (d.memory === 'CHANGED') out.push('长期记忆已更新（建议改用「记忆增量」，不破坏前缀）');
     if (d.summary === 'CHANGED' && !entry.summary_happened) out.push('章节摘要刚更新（编辑、撤销或合并）');
     if (d.summary === 'APPEND' && !entry.summary_happened) out.push('手动追加了新章节，之前的章节保持命中');
@@ -924,6 +1151,7 @@
       input_hash: fp.input_hash, full_prefix_hash: fp.full_prefix_hash, history_count: fp.history_count | 0, versions: fp.versions || {},
       layer_tokens: o.tokens || {}, diag: o.diag || {}, summary_happened: !!o.summaryNo, summary_no: o.summaryNo || 0, summary_reason: o.summaryReason || null,
       summary_error: o.summaryError || null, static_cause: o.staticCause || null, history_cause: o.historyCause || null, over_budget: !!o.overBudget, trimmed: !!o.trimmed, msg_id: o.msgId || '',
+      loreEditedButFrozen: !!(o.loreEditedButFrozen || (o.state && o.state.loreEditedWhileFrozen)),
     };
     e.reasons = reasons(e, o.prev || null);
     e.reason = e.reasons[0];
@@ -1078,7 +1306,7 @@
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
-    parseLore, loreToText, setLore, constantLoreText, activeFired, fireLore, applyFrozenLore, addErratum };
+    parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

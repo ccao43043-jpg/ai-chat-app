@@ -285,7 +285,7 @@
   }
 
   const plugin = reg.register({
-    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.5.0', perConversation: true, defaultEnabled: true, autoActive,
+    id: ID, icon: '🎭', name: 'RP 缓存优化器（DeepSeek / 千问）', version: '3.6.0', perConversation: true, defaultEnabled: true, autoActive,
     desc: '长篇角色扮演专用的上下文构建器（默认对 DeepSeek、千问生效，RP 类对话自动启用；千问自动加显式缓存断点，预算按模型自动推导）：固定设定 → 长期记忆 → 冻结章节（只追加）→ 对话历史 → 记忆增量 → 当前状态 → 本轮输入；超出阈值自动追加章节，逐层指纹诊断与缓存命中监控。',
     hooks: {
       async onBeforeRequest(ctx, host) {
@@ -300,8 +300,14 @@
         const base = ctx.systemPrompt;
         let st = R.syncBase(d.state, base);
         const ti = toItems(ctx, st.settings.refresh_on_regen);
-        const items = ti.items;
-        // v0.9.3：世界书触发条目首次触发 → 冻结到本轮用户消息末尾（之后作为历史原样发送，不再移动）
+        let items = ti.items;
+        // v0.12：冷路径 — 修改世界书后勾选「立即重建」时完整重排冻结
+        if (st.loreNeedsRebuild && typeof R.rebuildLore === 'function') {
+          const rb = R.rebuildLore(st, items, Date.now());
+          st = rb.state || rb;
+          host.toast('世界书已按新设定重建冻结片段（缓存可能未命中一次）');
+        }
+        // 热路径：触发条目首次触发 → 冻结到本轮用户消息末尾（不重排已冻结）
         const fl = R.fireLore(st, items, Date.now());
         if (fl.fired.length) { st = fl.state; host.toast('世界书触发：' + fl.fired.map(r => r.name).join('、') + '（已冻结进本轮消息，之后位置固定）'); }
         if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
@@ -364,7 +370,8 @@
           provider: ctx.provider.presetId || ctx.provider.id, fp: info.fp, diag: info.diag, tokens: info.tokens, summaryNo: info.summaryNo, summaryReason: info.summaryReason,
           summaryError: info.summaryError, summaryMerged: info.summaryMerged, summaryCost: info.summaryCost,
           staticCause: info.diag.static === 'CHANGED' ? info.staticCause : null, historyCause: info.diag.history === 'CHANGED' ? info.historyCause : null, overBudget: info.overBudget, trimmed: info.trimmed, msgId: result.bot && result.bot.id, prev: logs0[logs0.length - 1] || null,
-          savePrompt: d.state.settings.save_prompt, prompt: info.prompt, cacheMode: info.cacheMode, autoInfo: info.autoInfo });
+          savePrompt: d.state.settings.save_prompt, prompt: info.prompt, cacheMode: info.cacheMode, autoInfo: info.autoInfo,
+          loreEditedButFrozen: !!(d.state && d.state.loreEditedWhileFrozen) });
         let st = d.state;
         if (st.pendingStaticCause || st.pendingHistoryCause) st = Object.assign({}, st, { pendingStaticCause: null, pendingHistoryCause: null });
         // V2：用真实输入 Token 校准本地估算
@@ -627,19 +634,51 @@
 
     _editLore(box, conv, host) {
       const d = data(conv);
-      box.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="lo-back">‹ 返回</button><span class="rb-title">世界书（常驻 / 触发分层）</span></div>' +
-        '<div class="hint">每条以「## 名称 | 关键词1, 关键词2」开头，下一行起是内容。关键词写 * 表示<b>常驻</b>：放进最前面的固定设定，与角色核心一起长期缓存。' +
-        '其余为<b>触发</b>条目：本轮输入或上一条回复出现关键词时，第一次触发就冻结到这条用户消息末尾（位于最近对话之后），之后位置与内容固定，不会打断前面的缓存；' +
-        '这条消息被章节摘要覆盖后可再次触发。修改世界书不会改写已冻结的历史片段。</div>' +
-        '<div class="group form"><textarea id="lo-text" rows="16" placeholder="## 王都 | 王都, 王城\n王都位于……\n\n## 世界基本法则 | *\n魔法需要代价……"></textarea>' +
-        '<div class="btn-row"><button class="pill-btn" id="lo-cancel">关闭</button><button class="pill-btn primary" id="lo-save">保存</button></div></div>';
+      const ls = (d.state.settings && d.state.settings.lore) || (R.DEFAULT_SETTINGS.lore) || {};
+      box.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="lo-back">‹ 返回</button><span class="rb-title">世界书（ST 语义）</span></div>' +
+        '<div class="hint">每条以「## 名称 | 关键词1, 关键词2」开头，下一行起是内容。可选行内标记：<code>*</code> 常驻、<code>key2:副键</code>、<code>depth:N</code>、<code>prob:0-100</code>、<code>prio:N</code>、<code>norec</code>。<br>' +
+        '<b>常驻</b>进 L1 固定设定（有预算兜底）；<b>触发</b>按 scanDepth 扫描，首次命中冻结到用户消息末尾（热路径不重排）。冷路径（章节边界 / 手动重建 / 下方开关）可完整重排。</div>' +
+        '<div class="group form"><textarea id="lo-text" rows="14" placeholder="## 王都 | 王都, 王城\n王都位于……\n\n## 世界基本法则 | *\n魔法需要代价……\n\n## 暗线 | 密谋 key2:密室 depth:4 prob:80\n……"></textarea>' +
+        '<label class="field inline"><span>修改设定后立即重建上下文<small>清空已冻结的世界书片段并冷路径重排；关闭则保持缓存，诊断会提示 loreEditedButFrozen</small></span><input type="checkbox" class="switch" id="lo-rebuild"' + (ls.rebuildOnEdit ? ' checked' : '') + '></label>' +
+        '<div class="btn-row"><button class="pill-btn" id="lo-cancel">关闭</button><button class="pill-btn primary" id="lo-save">保存</button></div></div>' +
+        '<div class="group-title">扫描与预算</div><div class="group form">' +
+        '<label class="field"><span>扫描深度 scanDepth<small>最近 N 条消息（含本轮）；默认 2 ≈ 旧「本轮+上一条」</small></span><input id="lo-depth" type="number" min="1" max="50" value="' + (ls.scanDepth != null ? ls.scanDepth : 2) + '"></label>' +
+        '<label class="field"><span>递归深度<small>0=关闭；被激活条目的内容再参与扫描</small></span><input id="lo-rec" type="number" min="0" max="10" value="' + (ls.recursionDepth != null ? ls.recursionDepth : 0) + '"></label>' +
+        '<label class="field"><span>触发预算占比<small>相对上下文上限，默认 0.25</small></span><input id="lo-bp" type="number" min="0.05" max="0.8" step="0.05" value="' + (ls.budgetPct != null ? ls.budgetPct : 0.25) + '"></label>' +
+        '<label class="field"><span>常驻预算占比<small>兜底防撑爆，默认 0.15</small></span><input id="lo-cbp" type="number" min="0.05" max="0.5" step="0.05" value="' + (ls.constantBudgetPct != null ? ls.constantBudgetPct : 0.15) + '"></label>' +
+        '<div class="btn-row"><button class="chip-btn" id="lo-rebuild-now" type="button">立即重建世界书冻结</button></div></div>';
       const ta = box.querySelector('#lo-text'); ta.value = d.state.loreText || '';
       const back = () => { this.panel.view = null; this._render(); };
       box.querySelector('#lo-back').onclick = back; box.querySelector('#lo-cancel').onclick = back;
+      const applyLoreSettings = () => {
+        const st0 = d.state.settings || (d.state.settings = {});
+        const lore = Object.assign({}, st0.lore || R.DEFAULT_SETTINGS.lore);
+        lore.rebuildOnEdit = box.querySelector('#lo-rebuild').checked;
+        lore.scanDepth = Math.max(1, parseInt(box.querySelector('#lo-depth').value, 10) || 2);
+        lore.recursionDepth = Math.max(0, parseInt(box.querySelector('#lo-rec').value, 10) || 0);
+        lore.budgetPct = Math.min(0.8, Math.max(0.05, parseFloat(box.querySelector('#lo-bp').value) || 0.25));
+        lore.constantBudgetPct = Math.min(0.5, Math.max(0.05, parseFloat(box.querySelector('#lo-cbp').value) || 0.15));
+        st0.lore = lore;
+      };
       box.querySelector('#lo-save').onclick = () => {
-        const st = R.setLore(d.state, ta.value);
+        applyLoreSettings();
+        let st = R.setLore(d.state, ta.value);
+        if (st.settings && st.settings.lore && st.settings.lore.rebuildOnEdit && typeof R.rebuildLore === 'function') {
+          // setLore 已按开关处理；此处再确保标志清晰
+        }
         d.state = st; normalized.add(st); host.saveConv(conv); host.refresh();
-        host.toast('世界书已保存：' + st.lore.length + ' 条' + (st.lore.some(e => e.mode === 'constant') ? '（常驻条目改动会让固定设定缓存重建一次）' : '')); back();
+        const tip = st.loreNeedsRebuild ? '（将在下轮冷路径重建）' : (st.loreEditedWhileFrozen ? '（历史冻结保留，诊断可见）' : '');
+        host.toast('世界书已保存：' + st.lore.length + ' 条' + tip); back();
+      };
+      box.querySelector('#lo-rebuild-now').onclick = () => {
+        applyLoreSettings();
+        let st = R.setLore(d.state, ta.value);
+        if (typeof R.rebuildLore === 'function') {
+          const r = R.rebuildLore(st, conv.messages || [], Date.now());
+          st = r.state || r;
+        }
+        d.state = st; normalized.add(st); host.saveConv(conv); host.refresh();
+        host.toast('已重建世界书冻结片段'); back();
       };
     },
     _editBlock(box, conv, host, id) {
@@ -908,6 +947,7 @@
         '<label class="field inline"><span>首条消息自动提取设定<small>首轮发送时并行提取（首条消息 ≥80 字且含角色 / 世界观 / 设定等词），把首条消息里的角色 / 世界观 / 规则填进空白的分层设定</small></span><input type="checkbox" class="switch" id="rp-extract-on"' + (s0.auto_extract !== false ? ' checked' : '') + '></label></div>' +
         '<div class="group-title">冻结与估算</div><div class="group form">' +
         '<label class="field inline"><span>重新生成时刷新冻结的用户消息<small>默认关闭：重新生成最后一条回复时沿用首次发送的原文（含当时的联网 / 文件内容），保持缓存</small></span><input type="checkbox" class="switch" id="rp-refresh"' + (s.refresh_on_regen ? ' checked' : '') + '></label>' +
+        '<label class="field inline"><span>修改世界书后立即重建上下文<small>与世界书编辑页同一开关；开启后清空冻结并冷路径重排</small></span><input type="checkbox" class="switch" id="rp-lore-rebuild"' + ((s.lore && s.lore.rebuildOnEdit) ? ' checked' : '') + '></label>' +
         '<div class="kv"><span>Token 估算校准系数</span><b>× ' + (d.state.calib || 1).toFixed(2) + (d.state.calibN ? '（已按 ' + d.state.calibN + ' 次真实用量校准）' : '（尚未校准）') + '</b></div>' +
         '<button class="chip-btn" id="rp-calib-reset" type="button">重置校准</button></div>' +
         '<div class="group-title">调试</div><div class="group form">' +
@@ -946,6 +986,7 @@
         s.summary = { enabled: body.querySelector('#rp-sum-on').checked, trigger_tokens: keepAuto ? old.trigger_tokens : g('#rp-trigger', 1000, 30000), min_new_turns: g('#rp-minnew', 1, 15), keep_recent_turns: g('#rp-keep', 1, 20),
           min_interval_turns: g('#rp-mingap', 0, 10), chapter_cap_tokens: keepAuto ? old.chapter_cap_tokens : g('#rp-cap', 1000, 12000) };
         s.refresh_on_regen = body.querySelector('#rp-refresh').checked;
+        s.lore = Object.assign({}, s.lore || R.DEFAULT_SETTINGS.lore, { rebuildOnEdit: body.querySelector('#rp-lore-rebuild').checked });
         s.summary_model = body.querySelector('#rp-summodel').value.trim();
         host.saveConv(conv); host.refresh();
       };

@@ -38,18 +38,29 @@
   /** 规范化（容错旧数据/用户输入） */
   function normalizePersona(p) {
     const t = parseFloat(p.temperature);
-    return {
+    const base = {
       id: p.id || 'p-' + uid(), emoji: String(p.emoji || '🤖').trim().slice(0, 4) || '🤖', name: String(p.name || '').trim() || '未命名助手',
       desc: String(p.desc || '').trim(), systemPrompt: String(p.systemPrompt || ''),
       providerId: p.providerId || '', model: String(p.model || '').trim(),
       temperature: isNaN(t) ? '' : Math.max(0, Math.min(2, t)), builtin: !!p.builtin,
     };
+    // Character Card / 世界书扩展（normalize 不丢字段）
+    if (p.loreText) base.loreText = String(p.loreText);
+    if (p.firstMes) base.firstMes = String(p.firstMes);
+    if (p.mesExample) base.mesExample = String(p.mesExample);
+    if (Array.isArray(p.alternateGreetings) && p.alternateGreetings.length) base.alternateGreetings = p.alternateGreetings.slice();
+    if (p.cardSpec) base.cardSpec = p.cardSpec;
+    if (p.cardRaw) base.cardRaw = p.cardRaw;
+    return base;
   }
   function upsert(list, item) {
     const n = normalizePersona(item);
     const i = list.findIndex(x => x.id === n.id);
     const out = list.slice();
-    if (i >= 0) out[i] = n; else out.push(n);
+    if (i >= 0) {
+      // 合并：保留未在表单里编辑的扩展字段
+      out[i] = Object.assign({}, list[i], n);
+    } else out.push(n);
     return out;
   }
   function duplicate(list, id) {

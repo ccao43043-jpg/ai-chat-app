@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.11.0';
+  const APP_VERSION = '0.12.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -705,48 +705,138 @@
     { t: '翻译成英文', d: '自然、地道的英文表达', p: '把下面内容翻译成自然、地道的英文，保留专业术语：' },
     { t: '旅行规划', d: '制定三天两晚的行程', p: '帮我规划一个杭州三天两晚的旅行行程，包含美食推荐。' },
   ];
-  function renderMessages() {
-    const box = $('#messages');
-    box.innerHTML = '';
-    if (!conv.messages.length) {
-      const has = configured().length > 0;
-      const empty = document.createElement('div'); empty.className = 'empty';
-      if (conv.personaName && has) {
-        const ps = personas.find(x => x.id === conv.personaId);
-        empty.innerHTML = '<div class="hero-emoji">' + esc(conv.personaEmoji) + '</div><h1>' + esc(conv.personaName) + '</h1>' +
-          '<p class="sub">' + esc((ps && ps.desc) || '已加载助手设定') + '</p>' +
-          '<div class="persona-note">' + ICON.chat + '<span>已载入「' + esc(conv.personaName) + '」的系统提示词，直接发消息即可开始。</span></div>' +
-          '<button class="link-btn" id="empty-switch">换一个助手</button>';
-        box.appendChild(empty);
-        $('#empty-switch').onclick = () => openPersonas();
-        return;
-      }
-      empty.innerHTML = '<div class="hero-icon"><img class="hero-logo" src="logo.svg" alt=""></div><h1>你好，我是 AI Chat</h1>' +
-        (has ? '<p class="sub">专注高质量文字生成。支持插件扩展能力。</p><div class="suggest"></div>' +
-          '<div class="persona-strip-head"><span>从助手开始</span><button class="link-btn" id="empty-all-personas">全部 ›</button></div><div class="persona-strip"></div>'
-             : '<p class="sub">一个应用，连接多家 AI 服务。支持插件扩展能力。</p><div class="setup-card"><b>开始之前</b><ol><li>打开设置，选择一个服务商</li><li>粘贴你的 API Key 并保存</li><li>回到这里，点顶部切换模型即可聊天</li></ol><button class="pill-btn primary" id="empty-setup" style="width:100%">去设置 API Key</button></div>');
+  // ---- 虚拟滚动：长列表只渲染可视区；流式仍走 updateMsg 定点 patch ----
+  const VS_EST = 140;           // 未实测前的预估高度
+  const VS_OVERSCAN = 2;        // 上下各多渲几条
+  const vsHeight = new Map();   // msgId → 实测高度
+  let vsScrollBound = false;
+  let vsRaf = 0;
+  let vsLastRange = { start: -1, end: -1, empty: true };
+  function vsEstimate(m) {
+    if (m && m.id && vsHeight.has(m.id)) return vsHeight.get(m.id);
+    const len = ((m && m.content) || '').length + ((m && m.reasoning) || '').length;
+    return Math.min(1200, Math.max(72, VS_EST + Math.floor(len / 80) * 18));
+  }
+  function vsMeasure(el, m) {
+    if (!el || !m || !m.id) return;
+    const h = el.offsetHeight;
+    if (h > 0) vsHeight.set(m.id, h);
+  }
+  function vsTotalHeight(list) {
+    let t = 0; for (let i = 0; i < list.length; i++) t += vsEstimate(list[i]); return t;
+  }
+  function vsFindStart(list, scrollTop) {
+    let acc = 0;
+    for (let i = 0; i < list.length; i++) {
+      const h = vsEstimate(list[i]);
+      if (acc + h > scrollTop) return i;
+      acc += h;
+    }
+    return Math.max(0, list.length - 1);
+  }
+  function renderEmptyState(box) {
+    const has = configured().length > 0;
+    const empty = document.createElement('div'); empty.className = 'empty';
+    if (conv.personaName && has) {
+      const ps = personas.find(x => x.id === conv.personaId);
+      empty.innerHTML = '<div class="hero-emoji">' + esc(conv.personaEmoji) + '</div><h1>' + esc(conv.personaName) + '</h1>' +
+        '<p class="sub">' + esc((ps && ps.desc) || '已加载助手设定') + '</p>' +
+        '<div class="persona-note">' + ICON.chat + '<span>已载入「' + esc(conv.personaName) + '」的系统提示词，直接发消息即可开始。</span></div>' +
+        '<button class="link-btn" id="empty-switch">换一个助手</button>';
       box.appendChild(empty);
-      if (has) {
-        const sg = empty.querySelector('.suggest');
-        SUGGESTIONS.forEach(s => {
-          const b = document.createElement('button');
-          b.innerHTML = '<b>' + esc(s.t) + '</b><span>' + esc(s.d) + '</span>';
-          b.onclick = () => { input.value = s.p; autosize(); updateSendState(); input.focus(); };
-          sg.appendChild(b);
-        });
-        const strip = empty.querySelector('.persona-strip');
-        personas.slice(0, 8).forEach(ps => {
-          const b = document.createElement('button'); b.className = 'pchip';
-          b.innerHTML = '<span class="pc-emoji">' + esc(ps.emoji) + '</span><span>' + esc(ps.name) + '</span>';
-          b.onclick = () => startFromPersona(ps);
-          strip.appendChild(b);
-        });
-        $('#empty-all-personas').onclick = () => openPersonas();
-      } else $('#empty-setup').onclick = openSettings;
+      $('#empty-switch').onclick = () => openPersonas();
       return;
     }
-    conv.messages.forEach(m => box.appendChild(buildMsgEl(m)));
-    box.scrollTop = box.scrollHeight;
+    empty.innerHTML = '<div class="hero-icon"><img class="hero-logo" src="logo.svg" alt=""></div><h1>你好，我是 AI Chat</h1>' +
+      (has ? '<p class="sub">专注高质量文字生成。支持插件扩展能力。</p><div class="suggest"></div>' +
+        '<div class="persona-strip-head"><span>从助手开始</span><button class="link-btn" id="empty-all-personas">全部 ›</button></div><div class="persona-strip"></div>'
+           : '<p class="sub">一个应用，连接多家 AI 服务。支持插件扩展能力。</p><div class="setup-card"><b>开始之前</b><ol><li>打开设置，选择一个服务商</li><li>粘贴你的 API Key 并保存</li><li>回到这里，点顶部切换模型即可聊天</li></ol><button class="pill-btn primary" id="empty-setup" style="width:100%">去设置 API Key</button></div>');
+    box.appendChild(empty);
+    if (has) {
+      const sg = empty.querySelector('.suggest');
+      SUGGESTIONS.forEach(s => {
+        const b = document.createElement('button');
+        b.innerHTML = '<b>' + esc(s.t) + '</b><span>' + esc(s.d) + '</span>';
+        b.onclick = () => { input.value = s.p; autosize(); updateSendState(); input.focus(); };
+        sg.appendChild(b);
+      });
+      const strip = empty.querySelector('.persona-strip');
+      personas.slice(0, 8).forEach(ps => {
+        const b = document.createElement('button'); b.className = 'pchip';
+        b.innerHTML = '<span class="pc-emoji">' + esc(ps.emoji) + '</span><span>' + esc(ps.name) + '</span>';
+        b.onclick = () => startFromPersona(ps);
+        strip.appendChild(b);
+      });
+      $('#empty-all-personas').onclick = () => openPersonas();
+    } else $('#empty-setup').onclick = openSettings;
+  }
+  function renderMessages(opts) {
+    opts = opts || {};
+    const box = $('#messages');
+    const stick = opts.stickBottom != null ? opts.stickBottom : true;
+    if (!vsScrollBound) {
+      vsScrollBound = true;
+      box.addEventListener('scroll', () => {
+        $('.main-top').classList.toggle('scrolled', box.scrollTop > 4);
+        if (!conv.messages.length) return;
+        if (vsRaf) return;
+        vsRaf = requestAnimationFrame(() => { vsRaf = 0; renderMessages({ stickBottom: false, fromScroll: true }); });
+      }, { passive: true });
+    }
+    if (!conv.messages.length) {
+      box.innerHTML = '';
+      vsLastRange = { start: -1, end: -1, empty: true };
+      renderEmptyState(box);
+      return;
+    }
+    const list = conv.messages;
+    // 短列表：直接全量（开销更小，也避免 spacer 抖动）
+    if (list.length <= 40) {
+      if (vsLastRange.empty || vsLastRange.start !== 0 || vsLastRange.end !== list.length || opts.force) {
+        const keepScroll = box.scrollTop;
+        box.innerHTML = '';
+        list.forEach(m => { const el = buildMsgEl(m); box.appendChild(el); vsMeasure(el, m); });
+        vsLastRange = { start: 0, end: list.length, empty: false };
+        if (stick) box.scrollTop = box.scrollHeight;
+        else box.scrollTop = keepScroll;
+      } else if (stick) box.scrollTop = box.scrollHeight;
+      return;
+    }
+    const viewH = box.clientHeight || 600;
+    const scrollTop = box.scrollTop;
+    let start = vsFindStart(list, Math.max(0, scrollTop - viewH * VS_OVERSCAN));
+    let end = start;
+    let acc = 0;
+    const budget = viewH * (1 + 2 * VS_OVERSCAN) + 80;
+    // 先算 start 之前的高度
+    let topH = 0; for (let i = 0; i < start; i++) topH += vsEstimate(list[i]);
+    for (end = start; end < list.length; end++) {
+      acc += vsEstimate(list[end]);
+      if (acc >= budget) { end++; break; }
+    }
+    end = Math.min(list.length, Math.max(end, start + 1));
+    // 范围未变且非强制：跳过 DOM 重建（流式靠 updateMsg）
+    if (!opts.force && !vsLastRange.empty && vsLastRange.start === start && vsLastRange.end === end && box.querySelector('.vs-window')) {
+      if (stick) box.scrollTop = box.scrollHeight;
+      return;
+    }
+    let bottomH = 0; for (let i = end; i < list.length; i++) bottomH += vsEstimate(list[i]);
+    const prevStick = stick || (box.scrollHeight - box.scrollTop - box.clientHeight < 140);
+    const oldTop = box.scrollTop;
+    box.innerHTML = '';
+    const topSp = document.createElement('div'); topSp.className = 'vs-spacer vs-top'; topSp.style.height = topH + 'px'; box.appendChild(topSp);
+    const win = document.createElement('div'); win.className = 'vs-window';
+    for (let i = start; i < end; i++) {
+      const el = buildMsgEl(list[i]);
+      win.appendChild(el);
+    }
+    box.appendChild(win);
+    const botSp = document.createElement('div'); botSp.className = 'vs-spacer vs-bot'; botSp.style.height = bottomH + 'px'; box.appendChild(botSp);
+    // 实测校正
+    win.querySelectorAll('.msg').forEach((el, j) => vsMeasure(el, list[start + j]));
+    vsLastRange = { start, end, empty: false };
+    if (prevStick) box.scrollTop = box.scrollHeight;
+    else box.scrollTop = oldTop;
   }
   function buildMsgEl(m) {
     const el = document.createElement('div');
@@ -900,10 +990,17 @@
   function mkAct(icon, label, fn) { const b = document.createElement('button'); b.className = 'act'; b.innerHTML = icon; b.setAttribute('aria-label', label); b.title = label; b.onclick = fn; return b; }
   function nearBottom() { const b = $('#messages'); return b.scrollHeight - b.scrollTop - b.clientHeight < 140; }
   function updateMsg(m) {
-    const el = document.querySelector('.msg[data-id="' + m.id + '"]');
+    const el = document.querySelector('.msg[data-id="' + String(m.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
     const stick = nearBottom();
-    if (el) fillMsgEl(el, m); else { renderMessages(); return; }
-    if (stick) $('#messages').scrollTop = $('#messages').scrollHeight;
+    if (el) {
+      fillMsgEl(el, m);
+      vsMeasure(el, m);
+      if (stick) $('#messages').scrollTop = $('#messages').scrollHeight;
+      return;
+    }
+    // 虚拟窗口外：仅当是末条或贴近底部时扩展窗口，避免流式全量重建
+    const last = conv.messages[conv.messages.length - 1];
+    if (stick || m === last) renderMessages({ stickBottom: stick, force: true });
   }
   let rafPending = new Set(), rafTimer = null;
   function scheduleUpdate(m) {
@@ -911,9 +1008,8 @@
     if (rafTimer) return;
     rafTimer = setTimeout(() => { rafTimer = null; const s = rafPending; rafPending = new Set(); s.forEach(updateMsg); }, 70);
   }
-  $('#messages').addEventListener('scroll', () => $('.main-top').classList.toggle('scrolled', $('#messages').scrollTop > 4), { passive: true });
 
-  function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); saveConv(); renderMessages(); }
+  function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); if (m && m.id) vsHeight.delete(m.id); saveConv(); renderMessages({ force: true }); }
 
   // ---------------- 回复版本 / 对话分支 ----------------
   /** RP：已写入章节摘要（或超出预算未发送）的消息不能切换版本 */
@@ -1864,6 +1960,55 @@
 
   // ---------------- 助手库 ----------------
   let plTab = 'personas';
+  // ---- Character Card V2 导入 / 导出 ----
+  async function importPersonaCardFile(file) {
+    if (!file) return;
+    try {
+      const buf = await CharCard.readFileAsArrayBuffer(file);
+      const card = CharCard.parseCard(new Uint8Array(buf));
+      const mapped = CharCard.cardToPersona(card);
+      const item = Personas.normalizePersona(Object.assign({}, mapped, { builtin: false }));
+      item.loreText = mapped.loreText || '';
+      item.firstMes = mapped.firstMes || '';
+      item.alternateGreetings = mapped.alternateGreetings || [];
+      item.mesExample = mapped.mesExample || '';
+      item.cardSpec = mapped.cardSpec;
+      item.cardRaw = mapped.cardRaw;
+      personas = Personas.upsert(personas, item);
+      // normalizePersona 会丢掉扩展字段，再补回去
+      const i = personas.findIndex(x => x.id === item.id);
+      if (i >= 0) personas[i] = Object.assign({}, personas[i], {
+        loreText: item.loreText, firstMes: item.firstMes, alternateGreetings: item.alternateGreetings,
+        mesExample: item.mesExample, cardSpec: item.cardSpec, cardRaw: item.cardRaw,
+      });
+      savePersonas(); renderPersonaGrid();
+      toast('已导入角色卡「' + item.name + '」' + (item.loreText ? '（含世界书）' : ''));
+      openPersonaEdit(item.id);
+    } catch (e) {
+      toast('导入失败：' + (e && e.message || e));
+    }
+  }
+  function exportPersonaCard(ps) {
+    try {
+      const full = personas.find(x => x.id === ps.id) || ps;
+      const card = CharCard.personaToCard(full);
+      const png = CharCard.writeCardToPng(card);
+      const blob = new Blob([png], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = (full.name || 'character') + '.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('已导出「' + full.name + '」角色卡 PNG');
+    } catch (e) { toast('导出失败：' + (e && e.message || e)); }
+  }
+  function pickPersonaCardImport() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/png,.png,application/json,.json';
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) importPersonaCardFile(f); };
+    inp.click();
+  }
+
   function openPersonas(tab) {
     closeDrawer();
     plTab = tab || 'personas';
@@ -1879,7 +2024,13 @@
     if (plTab === 'personas') renderPersonaGrid(); else renderPromptManage();
   }
   document.querySelectorAll('#pl-seg button').forEach(b => b.onclick = () => { plTab = b.dataset.tab; renderPersonaPage(); });
-  $('#pl-add').onclick = () => plTab === 'personas' ? openPersonaEdit(null) : openPromptEdit(null);
+  $('#pl-add').onclick = () => {
+    if (plTab !== 'personas') { openPromptEdit(null); return; }
+    actionSheet('新建助手', [
+      { label: '空白助手', icon: ICON.edit, onClick: () => openPersonaEdit(null) },
+      { label: '导入角色卡 PNG / JSON', icon: ICON.image, onClick: () => pickPersonaCardImport() },
+    ]);
+  };
   function renderPersonaGrid() {
     const box = $('#persona-grid'); box.innerHTML = '';
     personas.forEach(ps => {
@@ -1895,6 +2046,7 @@
         actionSheet(ps.emoji + ' ' + ps.name, [
           { label: '开始对话', icon: ICON.chat, onClick: () => startFromPersona(ps) },
           { label: '编辑', icon: ICON.edit, onClick: () => openPersonaEdit(ps.id) },
+          { label: '导出角色卡 PNG', icon: ICON.image, onClick: () => exportPersonaCard(ps) },
           { label: '复制一份', icon: ICON.dup, onClick: () => { personas = Personas.duplicate(personas, ps.id); savePersonas(); renderPersonaGrid(); toast('已复制'); } },
           { label: '删除', icon: ICON.trash, danger: true, onClick: () => deletePersona(ps) },
         ]);
@@ -1920,9 +2072,21 @@
     const f = Personas.conversationFromPersona(ps, configured(), { providerId: conv.providerId, model: conv.model });
     Object.assign(conv, f, { title: '新对话' });
     if (conv.temperature === undefined) delete conv.temperature;
+    // Character Card：世界书写入 RP 状态；开场白作为首条助手消息
+    if (ps.loreText && typeof RPCache !== 'undefined') {
+      const d = Plugins.registry.convData(conv, 'rpcache');
+      d.state = RPCache.setLore(d.state || RPCache.newState(), ps.loreText);
+      if (!conv.plugins) conv.plugins = {};
+      if (!conv.plugins.rpcache) conv.plugins.rpcache = { enabled: true };
+      else conv.plugins.rpcache.enabled = true;
+    }
+    if (ps.firstMes) {
+      conv.messages.push({ id: uid(), role: 'assistant', content: ps.firstMes, model: conv.model, personaName: ps.name, personaEmoji: ps.emoji, createdAt: Date.now() });
+    }
+    saveConv();
     closePersonas(); closeDrawer();
     renderAll();
-    toast('已切换到「' + ps.name + '」');
+    toast('已切换到「' + ps.name + '」' + (ps.loreText ? '（已导入世界书）' : ''));
   }
 
   // 助手编辑
@@ -1970,6 +2134,15 @@
     const item = { id: editingPersona.id, builtin: editingPersona.builtin, emoji: $('#ps-emoji').value.trim() || '🤖', name, desc: $('#ps-desc').value.trim(),
       systemPrompt: $('#ps-prompt').value, providerId: $('#ps-provider').value, model: $('#ps-model').value.trim(), temperature: t === '' ? '' : t };
     personas = Personas.upsert(personas, item);
+    const i = personas.findIndex(x => x.id === item.id);
+    if (i >= 0) personas[i] = Object.assign({}, personas[i], {
+      loreText: editingPersona.loreText || personas[i].loreText || '',
+      firstMes: editingPersona.firstMes || '',
+      alternateGreetings: editingPersona.alternateGreetings || [],
+      mesExample: editingPersona.mesExample || '',
+      cardSpec: editingPersona.cardSpec,
+      cardRaw: editingPersona.cardRaw,
+    });
     savePersonas(); toast('已保存'); closePersonaEdit();
   };
   $('#ps-delete').onclick = async () => { const ps = personas.find(x => x.id === editingPersona.id); if (!ps) return; closePersonaEdit(); deletePersona(ps); };
