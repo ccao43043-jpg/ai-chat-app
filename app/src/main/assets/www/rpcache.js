@@ -314,11 +314,88 @@
     return addChapter(st, Object.assign({}, o, { coveredIds: (o.coveredIds || []).filter(id => !had.has(id)) }));
   }
 
+  // ---------------- v0.9.3：世界书（常驻 / 触发分层 + 触发内容冻结进历史） ----------------
+  /**
+   * 文本格式（一段一条）：
+   *   ## 名称 | 关键词1, 关键词2      → 触发条目：本轮输入或上一条回复出现关键词时触发
+   *   ## 名称 | *                     → 常驻条目：放进 L1 固定设定（与角色核心一起缓存）
+   * 触发条目第一次触发时冻结到「触发它的那条用户消息」末尾（只追加，永不移动 / 改写）；
+   * 该消息被章节摘要覆盖后，记录失效，条目可再次触发（重新冻结到新的位置）。
+   */
+  function parseLore(text) {
+    const out = []; let cur = null;
+    String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach(line => {
+      const m = /^##\s*(.+?)\s*(?:\|\s*(.*))?$/.exec(line);
+      if (m) { cur = { name: m[1].trim(), keysRaw: (m[2] || '').trim(), lines: [] }; out.push(cur); }
+      else if (cur) cur.lines.push(line);
+    });
+    return out.map(e => {
+      const constant = e.keysRaw === '*' || e.keysRaw === '';
+      const keys = constant ? [] : e.keysRaw.split(/[,，、]/).map(k => k.trim()).filter(Boolean);
+      const content = canonicalize(e.lines.join('\n'));
+      return { id: sha256(e.name).slice(0, 12), name: e.name, mode: constant ? 'constant' : 'trigger', keys, content };
+    }).filter(e => e.content);
+  }
+  function loreToText(list) {
+    return (list || []).map(e => '## ' + e.name + ' | ' + (e.mode === 'constant' ? '*' : e.keys.join(', ')) + '\n' + e.content).join('\n\n');
+  }
+  function loreOf(st) { return Array.isArray(st && st.lore) ? st.lore : []; }
+  function firedOf(st) { return Array.isArray(st && st.loreFired) ? st.loreFired : []; }
+  function setLore(st, text) {
+    const lore = parseLore(text);
+    return Object.assign({}, st, { lore, loreText: String(text || '') });
+  }
+  function constantLoreText(st) {
+    const c = loreOf(st).filter(e => e.mode === 'constant');
+    return c.length ? '[LOREBOOK]\n' + c.map(e => '# ' + e.name + '\n' + e.content).join('\n\n') : '';
+  }
+  const loreBlockText = r => '[LORE_TRIGGERED ' + r.name + ']\n' + r.content;
+  /** 冻结记录是否仍有效：锚点消息在本次请求里、且没有被章节覆盖 */
+  function activeFired(st, items) {
+    const covered = new Set(coveredIds(st)); const ids = new Set((items || []).map(m => m.id));
+    return firedOf(st).filter(r => ids.has(r.anchorId) && !covered.has(r.anchorId));
+  }
+  /**
+   * 扫描本轮输入（+ 上一条回复）触发条目，把新触发的冻结到本轮输入消息上。
+   * 已冻结的内容只存一份快照，之后即使编辑世界书也不会改写历史里的那段（保持前缀稳定）。
+   */
+  function fireLore(st, items, at) {
+    const lore = loreOf(st).filter(e => e.mode === 'trigger' && e.keys.length);
+    const last = items[items.length - 1];
+    if (!lore.length || !last || last.role !== 'user' || !last.id) return { state: st, fired: [] };
+    const active = activeFired(st, items);
+    const live = new Set(active.map(r => r.entryId));
+    if (active.some(r => r.anchorId === last.id)) { // 重新生成：已在这条消息上冻结过，不再追加
+      return { state: st, fired: [] };
+    }
+    const prev = items.length > 1 && items[items.length - 2].role === 'assistant' ? items[items.length - 2].content || '' : '';
+    const scan = String(last.content || '') + '\n' + prev;
+    const fired = lore.filter(e => !live.has(e.id) && e.keys.some(k => scan.includes(k)))
+      .map(e => ({ entryId: e.id, name: e.name, anchorId: last.id, content: e.content, hash: sha256(e.content), at: at || 0 }));
+    if (!fired.length) return { state: st, fired };
+    const old = firedOf(st).slice(-200);
+    return { state: Object.assign({}, st, { loreFired: old.concat(fired) }), fired };
+  }
+  /** 把有效的冻结记录拼到各自锚点消息上（顺序 = 触发顺序；逐字节稳定） */
+  function applyFrozenLore(st, items) {
+    const act = activeFired(st, items); if (!act.length) return items;
+    const by = {}; act.forEach(r => { (by[r.anchorId] = by[r.anchorId] || []).push(r); });
+    return items.map(m => by[m.id] ? Object.assign({}, m, { content: [m.content || ''].filter(Boolean).concat(by[m.id].map(loreBlockText)).join('\n\n') }) : m);
+  }
+  /** 摘要勘误：不改写已冻结章节，而是写进「记忆增量」（放在历史之后，不破坏缓存），下次合并时并入 */
+  function addErratum(st, no, text, at) {
+    const t = canonicalize(text); if (!t) throw new Error('勘误内容不能为空');
+    const cur = getBlock(st, 'delta').content;
+    const line = '[SUMMARY_ERRATUM ' + slabel(no) + '] ' + t;
+    return setBlock(st, 'delta', cur ? cur + '\n' + line : line, at);
+  }
+
   // ---------------- 序列化（逐字节稳定：同样的内容 → 同样的文本） ----------------
   function staticText(st, baseSystem) {
     const parts = [];
     const b = canonicalize(baseSystem); if (b) parts.push(b);
     STATIC_DEFS.forEach(d => { const c = getBlock(st, d.id).content; if (c) parts.push('[' + d.tag + ']\n' + c); });
+    const lb = constantLoreText(st); if (lb) parts.push(lb);
     return parts.join('\n\n');
   }
   function memoryText(st) { const c = getBlock(st, 'memory').content; return c ? '[LONG_TERM_MEMORY]\n' + c : ''; }
@@ -402,6 +479,7 @@
     const st = normalizeState(state);
     const s = effectiveSettings(st.settings, env), sum = s.summary;
     const k = st.calib || 1; const cal = n => Math.round(n * k);
+    items = applyFrozenLore(st, items);
     const covered = new Set(coveredIds(st));
     const elig = items.filter(m => !covered.has(m.id));
     const last = elig[elig.length - 1];
@@ -999,7 +1077,8 @@
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
-    makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks };
+    makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
+    parseLore, loreToText, setLore, constantLoreText, activeFired, fireLore, applyFrozenLore, addErratum };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

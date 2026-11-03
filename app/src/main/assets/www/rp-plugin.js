@@ -301,6 +301,9 @@
         let st = R.syncBase(d.state, base);
         const ti = toItems(ctx, st.settings.refresh_on_regen);
         const items = ti.items;
+        // v0.9.3：世界书触发条目首次触发 → 冻结到本轮用户消息末尾（之后作为历史原样发送，不再移动）
+        const fl = R.fireLore(st, items, Date.now());
+        if (fl.fired.length) { st = fl.state; host.toast('世界书触发：' + fl.fired.map(r => r.name).join('、') + '（已冻结进本轮消息，之后位置固定）'); }
         if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
         const logs0 = loadLogs(host, ctx.conv);
         const env = envFor(host, ctx.conv, ap, logs0);
@@ -581,6 +584,8 @@
       card('对话系统提示词 / 助手设定', '<span class="rb-tag soft">来自对话</span>', base, base ? R.sha256(base) : '',
         () => host.dialog({ title: '对话系统提示词 / 助手设定', body: (base || '（空）') + '\n\n这是本对话的系统提示词（或所选助手的设定），作为 L1 固定设定的第一部分。可在顶部模型菜单 →「本对话系统提示词」或「提示词模板」中修改；修改后固定设定版本 +1。', okText: '知道了', info: true }), 'base');
       R.STATIC_DEFS.forEach(def => blockCard(def.id));
+      { const lore = st.lore || []; const nc = lore.filter(e => e.mode === 'constant').length; const act = R.activeFired(st, convItems(conv, host)).length;
+        card('世界书', '<span class="rb-tag soft">常驻 ' + nc + ' · 触发 ' + (lore.length - nc) + ' · 已冻结 ' + act + '</span>', st.loreText || '', '', () => { this.panel.view = box => this._editLore(box, conv, host); this._render(); }); }
       layer('L2', '长期记忆', R.verLabel('memory', R.getBlock(st, 'memory').version) + ' · ≈' + fmtN(p.tokens.memory) + ' Token');
       blockCard('memory');
       const chs = R.chaptersOf(st);
@@ -620,6 +625,23 @@
       d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh(); host.toast('已合并进长期记忆（' + R.verLabel('memory', R.getBlock(r.state, 'memory').version) + '）'); this._render();
     },
 
+    _editLore(box, conv, host) {
+      const d = data(conv);
+      box.innerHTML = '<div class="rp-edit-head"><button class="chip-btn" id="lo-back">‹ 返回</button><span class="rb-title">世界书（常驻 / 触发分层）</span></div>' +
+        '<div class="hint">每条以「## 名称 | 关键词1, 关键词2」开头，下一行起是内容。关键词写 * 表示<b>常驻</b>：放进最前面的固定设定，与角色核心一起长期缓存。' +
+        '其余为<b>触发</b>条目：本轮输入或上一条回复出现关键词时，第一次触发就冻结到这条用户消息末尾（位于最近对话之后），之后位置与内容固定，不会打断前面的缓存；' +
+        '这条消息被章节摘要覆盖后可再次触发。修改世界书不会改写已冻结的历史片段。</div>' +
+        '<div class="group form"><textarea id="lo-text" rows="16" placeholder="## 王都 | 王都, 王城\n王都位于……\n\n## 世界基本法则 | *\n魔法需要代价……"></textarea>' +
+        '<div class="btn-row"><button class="pill-btn" id="lo-cancel">关闭</button><button class="pill-btn primary" id="lo-save">保存</button></div></div>';
+      const ta = box.querySelector('#lo-text'); ta.value = d.state.loreText || '';
+      const back = () => { this.panel.view = null; this._render(); };
+      box.querySelector('#lo-back').onclick = back; box.querySelector('#lo-cancel').onclick = back;
+      box.querySelector('#lo-save').onclick = () => {
+        const st = R.setLore(d.state, ta.value);
+        d.state = st; normalized.add(st); host.saveConv(conv); host.refresh();
+        host.toast('世界书已保存：' + st.lore.length + ' 条' + (st.lore.some(e => e.mode === 'constant') ? '（常驻条目改动会让固定设定缓存重建一次）' : '')); back();
+      };
+    },
     _editBlock(box, conv, host, id) {
       const d = data(conv); const b = R.getBlock(d.state, id); const def = R.BLOCK_DEFS.find(x => x.id === id);
       const warn = def.layer === 'L1' ? '修改固定设定会让全部缓存重建，建议攒到一起再改。保存后为' + R.verLabel('static', d.state.staticVersion + 1) + '。'
@@ -763,7 +785,7 @@
         '<div class="hint">按「知识边界」格式保存。请检查角色是否「知道了不该知道的事」。修改这一章会让它' + (after ? '及之后 ' + after + ' 章' : '') + '和对话历史的缓存重建一次。</div>' +
         '<div class="sum-legend" id="sv-legend"><div class="sl-t">段落标题对照（标题保持英文发送给模型，请勿翻译）</div>' + R.SUMMARY_SECTIONS.map(k => '<span class="sl-item"><code>' + k + '</code>' + R.SUMMARY_SECTION_CN[k] + '</span>').join('') + '</div>' +
         '<div class="group form"><textarea id="sv-text" rows="16"></textarea><div class="rb-meta" id="sv-meta"></div>' +
-        '<div class="btn-row"><button class="pill-btn" id="sv-cancel">关闭</button><button class="pill-btn primary" id="sv-save">保存修改</button></div></div>' +
+        '<div class="btn-row"><button class="pill-btn" id="sv-cancel">关闭</button><button class="pill-btn" id="sv-errata" title="不改写这一章：把补充 / 更正写进记忆增量（历史之后），缓存不重建">追加勘误（不破坏缓存）</button><button class="pill-btn primary" id="sv-save">保存修改</button></div></div>' +
         '<div class="hint small">覆盖 ' + act.coveredIds.length + ' 条消息 · ' + fmtTime(act.at) + (act.mergedFrom ? ' · 合并自 ' + act.mergedFrom.map(R.slabel).join('、') : '') + '</div>' +
         ((act.history || []).length ? '<div class="group-title">这一章的历史版本</div><div class="group" id="sv-hist"></div>' : '');
       const ta = box.querySelector('#sv-text'); ta.value = act.content;
@@ -780,6 +802,12 @@
       box.querySelector('#sv-save').onclick = () => {
         if (!R.canonicalize(ta.value)) { host.toast('章节不能为空'); return; }
         saveText(ta.value); back();
+      };
+      box.querySelector('#sv-errata').onclick = async () => {
+        const t = await host.dialog({ title: '章节 ' + R.slabel(act.no) + ' 勘误', body: '补充遗漏或更正错误（不改写这一章，写进记忆增量，前缀缓存不变）：', input: true, value: '', okText: '追加' });
+        if (!t || !String(t).trim()) return;
+        const r = R.addErratum(d.state, act.no, t, Date.now());
+        d.state = r.state; normalized.add(r.state); host.saveConv(conv); host.refresh(); host.toast('勘误已写入记忆增量（位于对话历史之后，前缀缓存不变）'); back();
       };
       const hl = box.querySelector('#sv-hist');
       if (hl) act.history.slice().reverse().forEach(h => {
