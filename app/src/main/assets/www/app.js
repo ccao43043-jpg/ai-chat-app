@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.13.3';
+  const APP_VERSION = '0.14.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -639,7 +639,7 @@
     const raw = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
     const hit = raw.find(b => b.plugin === 'rpcache' && b.kind === 'hit') || raw.find(b => b.plugin === 'gcache' && b.kind === 'hit')
       || raw.find(b => b.plugin === 'rpcache') || raw.find(b => b.plugin === 'gcache');
-    const mood = raw.find(b => b.plugin === 'liveliness');
+    const mood = raw.find(b => b.plugin === 'affect' && b.kind === 'mood');
     const segs = [hit, mood].filter(Boolean);
     bar.innerHTML = '';
     bar.classList.toggle('show', segs.length > 0);
@@ -938,7 +938,7 @@
         d.querySelector('.r-text').textContent = m.reasoning;
         body.appendChild(d);
       }
-      if (m.content) { const md = renderMarkdown(m.content, m.sources, { streaming: !!m.pending }); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
+      if (m.content) { const md = renderMarkdown(window.Affect ? Affect.stripState(m.content) : m.content, m.sources, { streaming: !!m.pending }); if (m.pending) md.classList.add('cursor'); body.appendChild(md); }
       if (m.error) { const e = document.createElement('div'); e.className = 'err'; e.textContent = m.error; body.appendChild(e); }
       if (m.pending && m.imageGen && !m.error) {
         const st = document.createElement('div'); st.className = 'gen-status';

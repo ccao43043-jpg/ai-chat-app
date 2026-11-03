@@ -9,12 +9,12 @@ const www = (...p) => fs.readFileSync(path.join(__dirname, '..', 'app/src/main/a
 test('renderConvBar 只合成命中率与心情，不再 unshift 模板徽章', () => {
   const s = www('app.js');
   assert.ok(s.includes("raw.find(b => b.plugin === 'rpcache'"));
-  assert.ok(s.includes("raw.find(b => b.plugin === 'liveliness')"));
+  assert.ok(s.includes("raw.find(b => b.plugin === 'affect' && b.kind === 'mood')"));
   assert.ok(s.includes('status-strip'));
   assert.ok(!/badges\.unshift\(\{[^}]*templateName/.test(s) && !s.includes("cls: 'tpl'"));
 });
 
-test('rp / rpmemory / liveliness / gcache 顶栏契约', () => {
+test('rp / rpmemory / affect / gcache 顶栏契约', () => {
   const rp = www('rp-plugin.js');
   assert.ok(rp.includes("kind: 'hit'"));
   assert.ok(!rp.includes('🎭 RP · 不适用'));
@@ -22,9 +22,11 @@ test('rp / rpmemory / liveliness / gcache 顶栏契约', () => {
   assert.ok(!rp.includes('即将自动摘要'));
   const rm = www('rpmemory.js');
   assert.ok(rm.includes('headerBadges() { return []; }'));
-  const lv = www('liveliness.js');
-  assert.ok(lv.includes("kind: 'mood'"));
-  assert.ok(lv.includes("mood(s) + ' · ' + lv"));
+  const af = www('affect.js');
+  assert.ok(af.includes("kind: 'mood'"));
+  assert.ok(af.includes("s.mood + ' · ' + t"));
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'app/src/main/assets/www', 'liveliness.js')));
+  assert.ok(!www('index.html').includes('liveliness') && www('index.html').includes('affect.js'));
   const gc = www('gcache.js');
   assert.ok(gc.includes('headerBadges(conv, host)'));
   assert.ok(gc.includes("kind: 'hit'"));
