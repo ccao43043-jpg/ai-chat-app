@@ -40,6 +40,29 @@ async function scenario(browser, theme) {
         let bin = ''; for (let i = 0; i < x.responseText.length; i++) bin += String.fromCharCode(x.responseText.charCodeAt(i) & 0xff);
         return btoa(bin);
       },
+      // v0.9.0：模拟原生安全存储 + 按服务商注入认证（与 NativeBridge.java 同规则）
+      ...(() => {
+        const sec = window.__secrets = {}, reg = window.__reg = {}, bound = {};
+        const origin = u => { try { const x = new URL(u); if (x.username || !/^https?:$/.test(x.protocol)) return ''; return x.protocol + '//' + x.host.toLowerCase(); } catch (e) { return ''; } };
+        const nameOf = rid => rid.startsWith('search:') ? 'search_key:' + rid.slice(7) : 'provider_key:' + rid;
+        return {
+          storeExists: k => k in mem, storeList: () => JSON.stringify(Object.keys(mem)),
+          storeRename: (a, b) => { if (!(a in mem)) return false; mem[b] = mem[a]; delete mem[a]; return true; },
+          storeAppend: (k, t) => { mem[k] = (mem[k] || '') + t; return true; },
+          registerProvider: (id, base, type) => { reg[id] = { base, type }; const n = nameOf(id); if (sec[n] && bound[n] && bound[n] !== origin(base)) { delete sec[n]; return 'cleared'; } return 'ok'; },
+          setSecret: (kind, id, v) => { const rid = kind === 'search_key' ? 'search:' + id : id; const n = kind + ':' + id; if (!v) { delete sec[n]; return true; } sec[n] = v; if (reg[rid]) bound[n] = origin(reg[rid].base); return true; },
+          hasSecret: (kind, id) => !!sec[kind + ':' + id], deleteSecret: (kind, id) => { delete sec[kind + ':' + id]; },
+          clearSecrets: () => { Object.keys(sec).forEach(k => delete sec[k]); },
+          requestForProvider: (id, pid, method, url, headers, body, t) => {
+            const r = reg[pid]; const H = window.__nativeHttp;
+            if (!r || !origin(url) || origin(url) !== origin(r.base)) { window.__rejected = (window.__rejected || []).concat([url]); setTimeout(() => H.onError(id, '请求地址与服务商 Base URL 不一致，已拒绝'), 0); return; }
+            const h = JSON.parse(headers); if (Object.keys(h).some(k => /^(authorization|x-api-key|x-goog-api-key|x-subscription-token)$/i.test(k))) window.__leakedAuth = true;
+            const key = sec[nameOf(pid)];
+            if (key) { if (r.type === 'anthropic') h['x-api-key'] = key; else if (r.type === 'gemini') h['x-goog-api-key'] = key; else if (r.type === 'brave') h['X-Subscription-Token'] = key; else h.Authorization = 'Bearer ' + key; }
+            window.AndroidBridge.request(id, method, url, JSON.stringify(h), body, t);
+          },
+        };
+      })(),
       request: (id, method, url, headers, body) => {
         window.__reqs.push({ method, url, headers: JSON.parse(headers), body: body ? JSON.parse(body) : null, raw: body || '' });
         const H = window.__nativeHttp;
@@ -130,11 +153,13 @@ async function scenario(browser, theme) {
   r.migrated = await page.evaluate(() => {
     const s = JSON.parse(window.__mem['settings.json']); const c = JSON.parse(window.__mem['conv_oldc1.json']);
     const ds = s.providers.find(p => p.id === 'deepseek');
-    return { models: ds.models, key: ds.apiKey, base: ds.baseUrl, conv: c.model, msgs: c.messages.length, pill: document.querySelector('#mp-model').textContent,
+    return { models: ds.models, key: window.__secrets['provider_key:deepseek'], plain: 'apiKey' in ds || window.__mem['settings.json'].includes('sk-old-key'), hasKey: ds.hasKey, base: ds.baseUrl, conv: c.model, msgs: c.messages.length, pill: document.querySelector('#mp-model').textContent,
       openai: s.providers.find(p => p.id === 'openai').models[0], lastModel: s.lastModel };
   });
   assert.deepStrictEqual(r.migrated.models, ['deepseek-flash', 'deepseek-v4-pro']);
-  assert.strictEqual(r.migrated.key, 'sk-old-key');
+  assert.strictEqual(r.migrated.key, 'sk-old-key', 'Key 迁入安全存储');
+  assert.strictEqual(r.migrated.plain, false, 'settings.json 不再含明文 Key');
+  assert.strictEqual(r.migrated.hasKey, true);
   assert.strictEqual(r.migrated.conv, 'deepseek-flash');
   assert.strictEqual(r.migrated.msgs, 2);
   assert.strictEqual(r.migrated.pill, 'deepseek-flash');
@@ -356,6 +381,7 @@ async function scenario(browser, theme) {
   await shot('scanned-pdf');
   await page.click('#dialog-ok'); await sleep(200);
   r.scanThumbs = await page.$$eval('#attach-preview img', e => e.length);
+  if (r.scanThumbs !== 1) console.log("PREVIEW", await page.$eval("#attach-preview", e => e.innerHTML.slice(0, 1500)));
   assert.strictEqual(r.scanThumbs, 1);
   await page.click('#attach-preview .thumb.doc .rm'); await sleep(150);
   assert.strictEqual(await page.$$eval('#attach-preview .thumb', e => e.length), 0);
@@ -419,7 +445,7 @@ async function scenario(browser, theme) {
   // 真正修改：v2，历史中可恢复 v1
   await openBlock('世界观'); await sleep(250);
   await typeBlock('这是一个剑与魔法的世界。王都分为东西两区，西区夜间戒严。\n北方商会垄断了盐与铁的贸易，暗中豢养刺客。');
-  await page.click('#rb-save'); await sleep(250);
+  await page.click('#rb-save'); await sleep(1200);
   let st = (await rpConv()).plugins.rpcache.state;
   r.versions = Object.fromEntries(st.blocks.map(b => [b.id, b.version]));
   assert.strictEqual(r.versions.world, 2, JSON.stringify(r.versions)); assert.strictEqual(r.versions.character, 1); assert.strictEqual(r.versions.state, 1);
@@ -635,7 +661,7 @@ async function scenario(browser, theme) {
   await page.evaluate(() => { document.querySelector('#page-provider .page-body').scrollTop = 99999; });
   await shot('qwen-provider');
   await page.click('#pe-save'); await sleep(350);
-  r.qwSaved = await page.evaluate(() => { const p = JSON.parse(window.__mem['settings.json']).providers.find(p => p.presetId === 'qwen'); return { thinking: p.thinking, hasKey: !!p.apiKey }; });
+  r.qwSaved = await page.evaluate(() => { const p = JSON.parse(window.__mem['settings.json']).providers.find(p => p.presetId === 'qwen'); return { thinking: p.thinking, hasKey: !!p.hasKey && window.__secrets['provider_key:' + p.id] === 'sk-test-qwen' && !('apiKey' in p) }; });
   assert.deepStrictEqual(r.qwSaved, { thinking: 'off', hasKey: true });
   // DeepSeek 服务商编辑页不显示思考模式
   await page.evaluate(() => [...document.querySelectorAll('.prov-item')].find(e => e.textContent.includes('DeepSeek')).click()); await sleep(400);

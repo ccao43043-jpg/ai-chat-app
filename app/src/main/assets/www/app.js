@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.8.9';
+  const APP_VERSION = '0.9.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -33,19 +33,100 @@
   }
 
   // ---------------- 存储 ----------------
+  // v0.9.0：读取到损坏的 JSON 时不再静默用默认值覆盖——先把坏文件改名为 name.corrupt-<时间戳> 保留，
+  // 再尝试用上一次成功写入留下的 name.bak 恢复；原生层写入为「写临时文件 → 旧文件转 .bak → 改名」。
+  const storeIssues = []; // [{ name, restored: 'bak'|'' , corrupt }]
+  const lsKey = n => 'aichat_' + n;
   const Store = {
+    raw(name) { return bridge ? bridge.storeGet(name) : localStorage.getItem(lsKey(name)); },
+    exists(name) {
+      if (bridge && bridge.storeExists) return !!bridge.storeExists(name);
+      const v = this.raw(name); return v != null;
+    },
+    rename(from, to) {
+      if (bridge && bridge.storeRename) return !!bridge.storeRename(from, to);
+      const v = this.raw(from); if (v == null) return false;
+      if (bridge) { if (!bridge.storeSet(to, v)) return false; bridge.storeDelete(from); return true; }
+      localStorage.setItem(lsKey(to), v); localStorage.removeItem(lsKey(from)); return true;
+    },
+    list() {
+      if (bridge && bridge.storeList) { try { return JSON.parse(bridge.storeList() || '[]'); } catch (e) { return []; } }
+      if (bridge) return [];
+      const out = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('aichat_')) out.push(k.slice(7)); }
+      return out;
+    },
     get(name, def) {
-      try {
-        const v = bridge ? bridge.storeGet(name) : localStorage.getItem('aichat_' + name);
-        return v == null ? def : JSON.parse(v);
-      } catch (e) { return def; }
+      let v;
+      try { v = this.raw(name); } catch (e) { return def; }
+      if (v == null) return def;
+      try { return JSON.parse(v); } catch (e) {
+        const corrupt = Secure.corruptName(name);
+        try { this.rename(name, corrupt); } catch (_) {}
+        let restored = '', val = def;
+        try {
+          const b = this.raw(name + '.bak');
+          if (b != null) { val = JSON.parse(b); restored = 'bak'; this.rawSet(name, b); }
+        } catch (_) { val = def; restored = ''; }
+        storeIssues.push({ name, restored, corrupt });
+        console.warn('[store] 损坏的文件已改名为 ' + corrupt + (restored ? '，已从 .bak 恢复' : ''));
+        return val;
+      }
     },
-    set(name, val) {
-      const s = JSON.stringify(val);
-      if (bridge) bridge.storeSet(name, s); else localStorage.setItem('aichat_' + name, s);
+    rawSet(name, s) { if (bridge) return bridge.storeSet(name, s); localStorage.setItem(lsKey(name), s); return true; },
+    set(name, val) { return this.rawSet(name, JSON.stringify(val)); },
+    del(name) { if (bridge) bridge.storeDelete(name); else localStorage.removeItem(lsKey(name)); },
+    /** 追加一行（JSONL）。原生层是追加写，不会重写整个文件 */
+    append(name, obj) {
+      const line = JSON.stringify(obj) + '\n';
+      if (bridge && bridge.storeAppend) return bridge.storeAppend(name, line);
+      const cur = this.raw(name) || ''; return this.rawSet(name, cur + line);
     },
-    del(name) { if (bridge) bridge.storeDelete(name); else localStorage.removeItem('aichat_' + name); },
+    readJsonl(name) { const v = this.raw(name); return v == null ? null : Secure.parseJsonl(v).items; },
+    writeJsonl(name, items) { return this.rawSet(name, Secure.toJsonl(items)); },
   };
+
+  // ---------------- 密钥（v0.9.0：只存在原生安全存储，页面读不到明文） ----------------
+  const Secrets = (function () {
+    const native = !!(bridge && bridge.setSecret);
+    // 浏览器调试回退（无原生桥）：仅用于开发 / 自动化测试
+    const reg = {}; const sk = (kind, id) => 'aichat_secret:' + kind + ':' + id;
+    return {
+      native,
+      has(kind, id) { return native ? !!bridge.hasSecret(kind, id) : !!localStorage.getItem(sk(kind, id)); },
+      set(kind, id, value) { return native ? !!bridge.setSecret(kind, id, value) : (localStorage.setItem(sk(kind, id), value), true); },
+      del(kind, id) { if (native) bridge.deleteSecret(kind, id); else localStorage.removeItem(sk(kind, id)); },
+      clear() { if (native) bridge.clearSecrets(); else Object.keys(localStorage).filter(k => k.startsWith('aichat_secret:')).forEach(k => localStorage.removeItem(k)); },
+      /** 登记服务商的 Base URL 与认证方式；返回 'cleared' 表示主机变了、原密钥已被原生层清除 */
+      register(id, baseUrl, authType) {
+        if (native) return bridge.registerProvider(id, baseUrl || '', authType || 'bearer') || 'ok';
+        const old = reg[id]; reg[id] = { baseUrl, authType };
+        if (old && Secure.originOf(old.baseUrl) !== Secure.originOf(baseUrl)) {
+          const kind = id.startsWith('search:') ? 'search_key' : 'provider_key', kid = id.startsWith('search:') ? id.slice(7) : id;
+          if (localStorage.getItem(sk(kind, kid))) { localStorage.removeItem(sk(kind, kid)); return 'cleared'; }
+        }
+        return 'ok';
+      },
+      /** 仅浏览器回退：按登记信息注入认证头 */
+      _inject(req) {
+        const r = reg[req.auth]; if (!r) throw new Error('服务商未登记');
+        if (!Secure.isUrlAllowed(req.url, r.baseUrl)) throw new Error('请求地址与服务商 Base URL 不一致，已拒绝');
+        const kind = req.auth.startsWith('search:') ? 'search_key' : 'provider_key', kid = req.auth.startsWith('search:') ? req.auth.slice(7) : req.auth;
+        const key = localStorage.getItem(sk(kind, kid)); const h = Secure.stripAuthHeaders(req.headers);
+        if (key) {
+          if (r.authType === 'anthropic') h['x-api-key'] = key;
+          else if (r.authType === 'gemini') h['x-goog-api-key'] = key;
+          else if (r.authType === 'brave') h['X-Subscription-Token'] = key;
+          else h['Authorization'] = 'Bearer ' + key;
+        }
+        return Object.assign({}, req, { headers: h });
+      },
+    };
+  })();
+  /** 输入框里代表「已保存的密钥」的占位值：保持不变 = 不改；清空 = 删除；输入新值 = 替换 */
+  const KEY_MASK = '••••••••（已保存）';
+  const hasKey = p => !!(p && (p.hasKey || String(p.apiKey || '').trim()));
+  /** 标记请求使用哪个服务商的已存密钥（providerId；搜索为 'search:<id>'） */
+  const authed = (req, id) => (req && id ? Object.assign(req, { auth: id }) : req);
 
   // ---------------- 原生 HTTP ----------------
   const pending = {};
@@ -61,9 +142,15 @@
     const promise = new Promise((resolve, reject) => {
       pending[id] = Object.assign({ resolve, reject }, handlers);
       if (bridge) {
-        bridge.request(id, req.method, req.url, JSON.stringify(req.headers || {}), req.body || '', 600);
+        if (req.auth && bridge.requestForProvider) {
+          bridge.requestForProvider(id, req.auth, req.method, req.url, JSON.stringify(Secure.stripAuthHeaders(req.headers)), req.body || '', 600);
+        } else {
+          if (req.auth) { try { req = Secrets._inject(req); } catch (e) { setTimeout(() => window.__nativeHttp.onError(id, e.message), 0); return; } } // 旧版原生桥（无安全存储）
+          bridge.request(id, req.method, req.url, JSON.stringify(req.headers || {}), req.body || '', 600);
+        }
         cancel = () => bridge.cancel(id);
       } else { // 浏览器调试回退（会受 CORS 限制）
+        if (req.auth) { try { req = Secrets._inject(req); } catch (e) { setTimeout(() => window.__nativeHttp.onError(id, e.message), 0); return; } }
         const ctl = new AbortController();
         cancel = () => ctl.abort();
         fetch(req.url, { method: req.method, headers: req.headers, body: req.body || undefined, signal: ctl.signal }).then(async res => {
@@ -85,7 +172,7 @@
 
   // ---------------- 状态 ----------------
   const presetToProvider = p => ({ id: p.presetId, presetId: p.presetId, name: p.name, type: p.type, baseUrl: p.baseUrl,
-    apiKey: '', models: p.models.slice(), imageModel: p.imageModel || '', videoModel: p.videoModel || '',
+    models: p.models.slice(), imageModel: p.imageModel || '', videoModel: p.videoModel || '',
     embeddingModel: p.embeddingModel || '', speechModel: p.speechModel || '', transcriptionModel: p.transcriptionModel || '' });
   const defaultSettings = () => ({
     providers: Providers.PRESETS.map(presetToProvider),
@@ -94,12 +181,24 @@
     lastProviderId: '', lastModel: '', settingsVersion: Providers.SETTINGS_VERSION,
     search: defaultSearch(), searchOn: false, removedPersonas: [],
   });
-  function defaultSearch() { return { provider: 'tavily', keys: {}, urls: {}, count: 5, rewrite: false }; }
+  function defaultSearch() { return { provider: 'tavily', hasKeys: {}, urls: {}, count: 5, rewrite: false }; }
   const stored = Store.get('settings.json', null);
   let settings = stored ? Object.assign(defaultSettings(), { settingsVersion: 1 }, stored) : defaultSettings();
   // v0.8.4：首条消息自动生成角色卡默认改为「直接生成」；旧版默认的「先询问」迁移一次（关闭的保持关闭）
   if (!settings.autoCharV084) { if (!settings.autoCharMode || settings.autoCharMode === 'ask') settings.autoCharMode = 'auto'; settings.autoCharV084 = true; }
-  let convIndex = Store.get('convs.json', []); // [{id,title,providerId,model,updatedAt}]
+  let convIndex = loadConvIndex(); // [{id,title,providerId,model,updatedAt}]
+  /** v0.9.0：convs.json 损坏 / 丢失但还有 conv_*.json 时，扫描对话文件重建索引 */
+  function loadConvIndex() {
+    const idx = Store.get('convs.json', null);
+    if (Array.isArray(idx)) return idx;
+    const files = Store.list().filter(n => /^conv_[^/]+\.json$/.test(n));
+    if (!files.length) return [];
+    const rebuilt = Secure.rebuildIndex(files.map(n => Store.get(n, null)));
+    Store.set('convs.json', rebuilt);
+    storeIssues.push({ name: 'convs.json', restored: 'rebuild', count: rebuilt.length });
+    console.warn('[store] 已从 ' + files.length + ' 个对话文件重建 convs.json');
+    return rebuilt;
+  }
   let conv = null;
   let attachments = [];   // 图片 data URL
   let docs = [];          // 待发送的文件 [{id,name,size,kind,status,text,...}]
@@ -115,7 +214,27 @@
   let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
   const saveTemplates = () => Store.set('templates.json', templates);
   // 全局 Token 用量统计（非插件，独立页面）
-  let usageState = UsageStats.normalize(Store.get('usage-stats.json', null));
+  // v0.9.0：用量明细改为追加式 usage-stats.jsonl（每条一行），价格等元数据放 usage-stats-meta.json
+  const USAGE_LOG = 'usage-stats.jsonl', USAGE_META = 'usage-stats-meta.json';
+  let usageState = loadUsageStats();
+  function loadUsageStats() {
+    const meta = Store.get(USAGE_META, null);
+    if (!meta) {
+      const old = Store.get('usage-stats.json', null);
+      const st = UsageStats.normalize(old);
+      if (old) { // 旧版整文件 JSON → 迁移一次，旧文件改名保留
+        if (Store.writeJsonl(USAGE_LOG, st.log) !== false && Store.set(USAGE_META, usageMetaOf(st)) !== false) Store.rename('usage-stats.json', 'usage-stats.json.migrated');
+      }
+      return st;
+    }
+    const items = Store.readJsonl(USAGE_LOG) || [];
+    const seen = new Set(), log = [];
+    items.forEach(e => { if (e && e.key && !seen.has(e.key)) { seen.add(e.key); log.push(e); } });
+    const st = UsageStats.normalize(Object.assign({}, meta, { log: log.slice(-UsageStats.LOG_LIMIT) }));
+    if (items.length > Math.max(UsageStats.LOG_LIMIT, log.length) * 1.2 || items.length - log.length > 200) Store.writeJsonl(USAGE_LOG, st.log); // 压缩
+    return st;
+  }
+  function usageMetaOf(st) { return { version: st.version, backfilled: st.backfilled, prices: st.prices, priceMode: st.priceMode }; }
   // 若 RP 插件里改过价格，合并过来（用户只改一处）
   (function syncPricesFromRp() {
     const rp = settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.prices;
@@ -123,7 +242,9 @@
     if (settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.priceMode)
       usageState.priceMode = settings.plugins.rpcache.priceMode;
   })();
-  const saveUsageStats = () => Store.set('usage-stats.json', usageState);
+  const saveUsageMeta = () => Store.set(USAGE_META, usageMetaOf(usageState));
+  /** 整体重写（清空 / 回填时用）；平时新增一条只追加一行 */
+  const saveUsageStats = () => { Store.writeJsonl(USAGE_LOG, usageState.log); saveUsageMeta(); };
   const saveSettings = () => Store.set('settings.json', settings);
   const saveIndex = () => Store.set('convs.json', convIndex);
   function saveConv(c, touch) {
@@ -145,7 +266,7 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushSaves(); });
   window.addEventListener('pagehide', flushSaves);
   const getProvider = id => settings.providers.find(p => p.id === id);
-  const configured = () => settings.providers.filter(p => p.apiKey && p.apiKey.trim());
+  const configured = () => settings.providers.filter(hasKey);
 
   // ---------------- 升级迁移（不改 API Key） ----------------
   (function migrate() {
@@ -166,6 +287,28 @@
     if (pr.presetId !== 'custom' && !settings.providers.some(p => p.presetId === pr.presetId) && !(settings.removedPresets || []).includes(pr.presetId))
       settings.providers.push(presetToProvider(pr));
   });
+
+
+  // ---------------- v0.9.0：API Key 迁入原生安全存储 ----------------
+  const providerAuth = p => Secure.authTypeFor('provider_key', p.type);
+  function registerProvider(p) { return Secrets.register(p.id, p.baseUrl, providerAuth(p)); }
+  const searchBase = id => ((settings.search.urls || {})[id] || Search.DEFAULT_BASE[id] || '');
+  function registerSearch(id) { return Secrets.register('search:' + id, searchBase(id), Secure.authTypeFor('search_key', id)); }
+  function refreshKeyFlags() {
+    settings.providers.forEach(p => { p.hasKey = Secrets.has('provider_key', p.id); });
+    const hk = {}; Search.SEARCH_PROVIDERS.forEach(x => { if (Secrets.has('search_key', x.id)) hk[x.id] = true; });
+    settings.search.hasKeys = hk;
+  }
+  (function migrateSecrets() {
+    settings.providers.forEach(registerProvider);
+    Search.SEARCH_PROVIDERS.forEach(x => registerSearch(x.id));
+    const r = Secure.stripSecrets(settings);
+    let ok = true;
+    r.secrets.forEach(x => { if (!Secrets.set(x.kind, x.id, x.value)) ok = false; });
+    refreshKeyFlags();
+    if (r.changed && ok) { saveSettings(); if (r.secrets.length) console.log('[secrets] 已迁移 ' + r.secrets.length + ' 个密钥到安全存储'); }
+    else if (r.changed) console.warn('[secrets] 部分密钥写入安全存储失败，settings.json 暂不改写');
+  })();
 
   // ---------------- 工具 ----------------
   let toastTimer;
@@ -200,8 +343,10 @@
       convId: c && c.id || '', convTitle: c && c.title || '',
       msgId: opts.msgId || '', key: opts.key,
     });
+    const before = usageState.log.length, last = usageState.log[before - 1];
     usageState = UsageStats.record(usageState, entry);
-    saveUsageStats();
+    const added = usageState.log[usageState.log.length - 1];
+    if (added && added !== last && added.key === entry.key) { if (!Store.exists(USAGE_META)) saveUsageMeta(); Store.append(USAGE_LOG, added); }
     updateUsageSubtitle();
   }
   function updateUsageSubtitle() {
@@ -393,6 +538,7 @@
   const mdHtmlCache = new Map(), hlCache = new Map();
   function lruGet(map, k) { if (!map.has(k)) return undefined; const v = map.get(k); map.delete(k); map.set(k, v); return v; }
   function lruSet(map, k, v, max) { if (map.has(k)) map.delete(k); map.set(k, v); while (map.size > max) map.delete(map.keys().next().value); }
+  let streamHeadCache = null; // { src, html, codes } 只保留一条（当前正在流式的消息）
   function renderMarkdown(text, sources, opts) {
     const streaming = !!(opts && opts.streaming);
     const src = text || '';
@@ -400,17 +546,32 @@
     const div = document.createElement('div');
     div.className = 'md';
     let html = cacheable ? lruGet(mdHtmlCache, src) : undefined;
+    let stableCodes = 0; // 流式时，前面已稳定部分的代码块数量（这些块可以走高亮缓存）
+    if (html === undefined && streaming) {
+      // v0.9.0：流式增量渲染——在稳定边界处切开，前半段复用上次结果，只重新解析尾部
+      const sp = Secure.splitStableMarkdown(src);
+      if (sp.head) {
+        if (!streamHeadCache || streamHeadCache.src !== sp.head) {
+          const h = DOMPurify.sanitize(marked.parse(sp.head));
+          streamHeadCache = { src: sp.head, html: h, codes: (h.match(/<pre[\s>]/g) || []).length };
+        }
+        html = streamHeadCache.html + DOMPurify.sanitize(marked.parse(sp.tail));
+        stableCodes = streamHeadCache.codes;
+      } else html = DOMPurify.sanitize(marked.parse(src));
+    }
     if (html === undefined) { html = DOMPurify.sanitize(marked.parse(src)); if (cacheable) lruSet(mdHtmlCache, src, html, MD_CACHE_MAX); }
     div.innerHTML = html;
+    let codeIdx = 0;
     linkCitations(div, sources);
     div.querySelectorAll('pre > code').forEach(code => {
-      const pre = code.parentElement;
+      const pre = code.parentElement; codeIdx++;
       const m = /language-([\w+#.-]+)/.exec(code.className || '');
       const lang = m ? m[1] : '';
       const raw = code.textContent;
       try {
         const known = !!(lang && hljs.getLanguage(lang));
-        const hk = cacheable && raw.length <= MD_CACHE_TEXT_MAX ? (lang || '') + '\u0000' + raw : null;
+        const stable = cacheable || codeIdx <= stableCodes;
+        const hk = stable && raw.length <= MD_CACHE_TEXT_MAX ? (lang || '') + '\u0000' + raw : null;
         let hl = hk ? lruGet(hlCache, hk) : undefined;
         if (hl === undefined) {
           if (known) hl = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
@@ -436,7 +597,7 @@
   // ---------------- 对话管理 ----------------
   function newConv() {
     const lp = getProvider(settings.lastProviderId);
-    const pid = lp && lp.apiKey ? lp.id : ((configured()[0] || {}).id || '');
+    const pid = hasKey(lp) ? lp.id : ((configured()[0] || {}).id || '');
     const p = getProvider(pid);
     const model = settings.lastProviderId === pid && settings.lastModel ? settings.lastModel : (p ? p.models[0] || '' : '');
     conv = { id: uid(), title: '新对话', providerId: pid, model, systemPrompt: settings.systemPrompt || '', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
@@ -454,7 +615,7 @@
     const ok = await dialog({ title: '删除对话？', body: '「' + (meta ? meta.title : '') + '」将被永久删除。', okText: '删除', danger: true });
     if (!ok) return;
     if (running && conv && conv.id === id) stopGen();
-    pendingSaves.delete(id); Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json');
+    pendingSaves.delete(id); Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json'); Store.del('rplog_' + id + '.jsonl');
     convIndex = convIndex.filter(x => x.id !== id); saveIndex();
     if (conv && conv.id === id) newConv(); else renderConvList();
     toast('已删除');
@@ -486,7 +647,7 @@
   }
   function renderHeader() {
     const p = getProvider(conv.providerId);
-    const ok = p && p.apiKey;
+    const ok = hasKey(p);
     $('#mp-model').textContent = ok ? (conv.model || '未设置模型') : (configured().length ? '选择模型' : '未配置服务商');
     $('#mp-provider').textContent = ok ? (conv.personaName ? conv.personaEmoji + ' ' + conv.personaName + ' · ' + p.name : p.name) : (configured().length ? '点此切换' : '点此添加 API Key');
     const dot = $('#mp-dot');
@@ -898,7 +1059,7 @@
   function updateSendState() { $('#btn-send').disabled = !running && !input.value.trim() && !attachments.length && !docs.length; }
   function ensureProvider() {
     const p = getProvider(conv.providerId);
-    if (!p || !p.apiKey) {
+    if (!hasKey(p)) {
       if (!configured().length) { toast('请先在设置中填写 API Key'); openSettings(); }
       else { toast('请先选择服务商和模型'); openModelMenu(); }
       return null;
@@ -1054,11 +1215,11 @@
   const searchInfo = id => Search.SEARCH_PROVIDERS.find(x => x.id === id) || Search.SEARCH_PROVIDERS[0];
   function searchCfg() {
     const ss = settings.search;
-    return { provider: ss.provider, apiKey: (ss.keys || {})[ss.provider] || '', baseUrl: (ss.urls || {})[ss.provider] || '', count: ss.count || 5 };
+    return { provider: ss.provider, hasKey: !!(ss.hasKeys || {})[ss.provider], baseUrl: (ss.urls || {})[ss.provider] || '', count: ss.count || 5 };
   }
   function searchReady() {
     const c = searchCfg(); const info = searchInfo(c.provider);
-    return info.needsKey ? !!c.apiKey.trim() : /^https?:\/\/.+/.test(c.baseUrl.trim());
+    return info.needsKey ? c.hasKey : /^https?:\/\/.+/.test(c.baseUrl.trim());
   }
   async function askSearchSetup() {
     const ok = await dialog({ title: '还没有配置联网搜索', body: '联网搜索需要一个搜索服务。推荐 Tavily（注册即送免费额度）或国内的博查 Bocha，在设置中填入 API Key 即可。', okText: '去设置' });
@@ -1078,7 +1239,7 @@
   }
   async function webSearch(query, setCancel) {
     const cfg = searchCfg();
-    const req = Search.buildSearchRequest(cfg, query);
+    const req = authed(Search.buildSearchRequest(cfg, query), cfg.hasKey ? 'search:' + cfg.provider : '');
     const r = await requestText(req, setCancel, 25000);
     if (r.status >= 400 || !r.status) throw new Error(searchErrorText(r.status, r.text));
     let list;
@@ -1088,7 +1249,7 @@
   }
   async function rewriteQuery(p, q, history, setCancel) {
     try {
-      const req = Providers.buildChatRequest(p, conv.model, [{ role: 'user', content: Search.buildRewritePrompt(q, history) }], '', { stream: false, temperature: 0, maxTokens: 256 });
+      const req = authed(Providers.buildChatRequest(p, conv.model, [{ role: 'user', content: Search.buildRewritePrompt(q, history) }], '', { stream: false, temperature: 0, maxTokens: 256 }), p.id);
       const r = await requestText(req, setCancel, 20000);
       if (r.status >= 400 || !r.status) return q;
       const text = Providers.parseFullResponse(p.type, r.text).filter(d => d.kind === 'text').map(d => d.text).join('');
@@ -1174,6 +1335,7 @@
     let req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
     const gcp = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache'); // v0.8.2：OpenRouter Gemini 提示缓存
     if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
+    authed(req, p.id);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
     const parser = Providers.createStreamParser(p.type);
     let status = 0, raw = '', gotDelta = false;
@@ -1222,7 +1384,7 @@
     conv.messages.push(user, bot);
     if (conv.title === '新对话') conv.title = '🎨 ' + prompt.slice(0, 20);
     input.value = ''; autosize(); renderMessages();
-    const req = ImageGen.buildRequest(p, prompt, settings.imageSize || ImageGen.DEFAULT_SIZE);
+    const req = authed(ImageGen.buildRequest(p, prompt, settings.imageSize || ImageGen.DEFAULT_SIZE), p.id);
     let status = 0, raw = '', httpStarted = false, receiving = false;
     const thisConv = conv;
     const startedAt = Date.now();
@@ -1231,7 +1393,7 @@
       const stage = ImageGen.progressStage(elapsed, { httpStarted: httpStarted, receiving: receiving });
       bot.genStatus = stage.text;
       bot.genElapsed = ImageGen.formatElapsed(elapsed);
-      if (conv === thisConv) renderMessages();
+      if (conv === thisConv) scheduleUpdate(bot); // v0.9.0：只更新这条消息，不整表重绘
     };
     const progressTimer = setInterval(tickChatProgress, 900);
     const h = httpRequest(req, {
@@ -1256,7 +1418,7 @@
         clearInterval(progressTimer);
         delete bot.genStatus; delete bot.genElapsed;
         bot.pending = false; setRunning(null); saveConv(thisConv);
-        if (conv === thisConv) renderMessages(); renderConvList();
+        if (conv === thisConv) updateMsg(bot); renderConvList();
       });
   }
 
@@ -1543,7 +1705,7 @@
   function openSheet() {
     const list = configured();
     if (!list.length) { toast('请先在设置中填写 API Key'); openSettings(); return; }
-    sheetPid = getProvider(conv.providerId) && getProvider(conv.providerId).apiKey ? conv.providerId : list[0].id;
+    sheetPid = hasKey(getProvider(conv.providerId)) ? conv.providerId : list[0].id;
     $('#sheet-model').value = sheetPid === conv.providerId ? conv.model : (getProvider(sheetPid).models[0] || '');
     $('#sheet-system').value = conv.systemPrompt || '';
     renderSheet();
@@ -1606,7 +1768,7 @@
     readGeneral();
     $('#page-settings').classList.remove('show');
     const cur = getProvider(conv.providerId);
-    if (!cur || !cur.apiKey) {
+    if (!hasKey(cur)) {
       const p = configured()[0]; if (p) { conv.providerId = p.id; conv.model = p.models[0] || ''; }
     }
     renderAll();
@@ -1616,10 +1778,10 @@
   if ($('#set-autochar')) $('#set-autochar').onchange = readGeneral;
   function renderProviderList() {
     const box = $('#provider-list'); box.innerHTML = '';
-    const sorted = settings.providers.slice().sort((a, b) => (b.apiKey ? 1 : 0) - (a.apiKey ? 1 : 0));
+    const sorted = settings.providers.slice().sort((a, b) => (hasKey(b) ? 1 : 0) - (hasKey(a) ? 1 : 0));
     sorted.forEach(p => {
       const el = document.createElement('button'); el.className = 'prov-item';
-      const ok = p.apiKey && p.apiKey.trim();
+      const ok = hasKey(p);
       el.innerHTML = avatarHtml(p, 'lg') + '<div class="pi-main"><div class="pi-name">' + esc(p.name) + '</div><div class="pi-sub">' +
         esc(ok ? (p.models.filter(Boolean).slice(0, 3).join(' · ') || p.baseUrl) : p.baseUrl) + '</div></div>' +
         '<span class="status' + (ok ? ' ok' : '') + '">' + (ok ? '已配置' : '未配置') + '</span>' + ICON.chevR;
@@ -1628,14 +1790,14 @@
     });
   }
   $('#btn-add-provider').onclick = () => {
-    openProviderEdit(null, { id: uid(), presetId: 'custom', name: '自定义服务', type: 'openai', baseUrl: 'https://', apiKey: '', models: [], imageModel: '', videoModel: '', embeddingModel: '', speechModel: '', transcriptionModel: '' });
+    openProviderEdit(null, { id: uid(), presetId: 'custom', name: '自定义服务', type: 'openai', baseUrl: 'https://', models: [], imageModel: '', videoModel: '', embeddingModel: '', speechModel: '', transcriptionModel: '' });
   };
   $('#btn-clear-all').onclick = async () => {
     const ok = await dialog({ title: '删除全部对话？', body: '将删除所有本地对话记录（服务商与 API Key 设置会保留）。', okText: '全部删除', danger: true });
     if (!ok) return;
     if (running) stopGen();
     pendingSaves.clear();
-    convIndex.forEach(m => { Store.del('conv_' + m.id + '.json'); Store.del('rplog_' + m.id + '.json'); });
+    convIndex.forEach(m => { Store.del('conv_' + m.id + '.json'); Store.del('rplog_' + m.id + '.json'); Store.del('rplog_' + m.id + '.jsonl'); });
     convIndex = []; saveIndex(); newConv(); toast('已删除全部对话');
   };
 
@@ -1655,7 +1817,7 @@
     ssShown = ss.provider;
     $('#ss-provider').value = ss.provider;
     $('#ss-key-field').style.display = info.needsKey ? '' : 'none';
-    $('#ss-key').value = (ss.keys || {})[ss.provider] || ''; $('#ss-key').placeholder = info.keyHint || '';
+    $('#ss-key').value = (ss.hasKeys || {})[ss.provider] ? KEY_MASK : ''; $('#ss-key').placeholder = info.keyHint || '';
     $('#ss-key').type = 'password'; $('#ss-key-toggle').textContent = '显示';
     $('#ss-url').value = (ss.urls || {})[ss.provider] || '';
     $('#ss-url').placeholder = ss.provider === 'searxng' ? 'https://searx.example.com' : Search.DEFAULT_BASE[ss.provider];
@@ -1667,9 +1829,15 @@
   }
   function readSearchSettings() {
     const ss = settings.search; const pid = ssShown || ss.provider;
-    ss.keys = ss.keys || {}; ss.urls = ss.urls || {};
-    ss.keys[pid] = $('#ss-key').value.trim();
+    ss.urls = ss.urls || {}; ss.hasKeys = ss.hasKeys || {};
     ss.urls[pid] = $('#ss-url').value.trim().replace(/\/+$/, '');
+    const cleared = registerSearch(pid) === 'cleared';
+    const kv = $('#ss-key').value.trim();
+    if (kv === KEY_MASK) { if (cleared) { toast('接口地址的主机已变更，旧 Key 已清除，请重新填写'); $('#ss-key').value = ''; } }
+    else if (kv) Secrets.set('search_key', pid, kv);
+    else Secrets.del('search_key', pid);
+    ss.hasKeys[pid] = Secrets.has('search_key', pid);
+    if (ss.hasKeys[pid] && kv && kv !== KEY_MASK) $('#ss-key').value = KEY_MASK;
     const n = parseInt($('#ss-count').value, 10); ss.count = isNaN(n) ? 5 : Math.max(1, Math.min(10, n));
     ss.rewrite = $('#ss-rewrite').checked;
   }
@@ -1768,8 +1936,8 @@
     $('#ps-emoji').value = editingPersona.emoji; $('#ps-emoji-view').textContent = editingPersona.emoji;
     $('#ps-name').value = ps ? ps.name : ''; $('#ps-desc').value = editingPersona.desc; $('#ps-prompt').value = editingPersona.systemPrompt;
     const sel = $('#ps-provider');
-    sel.innerHTML = '<option value="">跟随当前对话</option>' + settings.providers.filter(p => p.apiKey || p.id === editingPersona.providerId)
-      .map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + (p.apiKey ? '' : '（未配置）') + '</option>').join('');
+    sel.innerHTML = '<option value="">跟随当前对话</option>' + settings.providers.filter(p => hasKey(p) || p.id === editingPersona.providerId)
+      .map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + (hasKey(p) ? '' : '（未配置）') + '</option>').join('');
     sel.value = editingPersona.providerId || '';
     $('#ps-model').value = editingPersona.model || '';
     $('#ps-temp').value = editingPersona.temperature === '' ? '' : editingPersona.temperature;
@@ -1908,7 +2076,7 @@
     $('#pe-name').value = editing.name;
     $('#pe-type').value = editing.type;
     $('#pe-base').value = editing.baseUrl;
-    $('#pe-key').value = editing.apiKey || ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
+    $('#pe-key').value = hasKey(editing) ? KEY_MASK : ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
     Providers.normalizeModelFields(editing);
     Object.keys(PE_FIELDS).forEach(f => { $(PE_FIELDS[f]).value = editing[f] || ''; });
     $('#pe-streamusage').checked = Providers.streamUsageEnabled(Object.assign({}, editing, { type: 'openai' }));
@@ -1985,7 +2153,8 @@
     if ($('#pe-model-add').value.trim()) addModels($('#pe-model-add').value.split(/[\n,，]/));
     if (!editModels.length) { toast('请至少添加一个模型'); return; }
     const p = { id: editing.id, presetId: editing.presetId, name: $('#pe-name').value.trim() || '未命名', type: $('#pe-type').value,
-      baseUrl: base, apiKey: $('#pe-key').value.trim(), models: editModels.slice() };
+      baseUrl: base, models: editModels.slice() };
+    const keyVal = $('#pe-key').value.trim();
     Object.keys(PE_FIELDS).forEach(f => { p[f] = $(PE_FIELDS[f]).value.trim(); });
     const th = $('#pe-thinking').value;
     if (th && Providers.isQwenEndpoint(p)) p.thinking = th;
@@ -1995,14 +2164,21 @@
       const su = $('#pe-streamusage').checked;
       if (su !== Providers.streamUsageEnabled(Object.assign({}, p, { streamUsage: undefined }))) p.streamUsage = su; // 只保存与默认不同的选择
     }
+    // v0.9.0：密钥写入原生安全存储（先登记 Base URL，主机变化时原生层会清掉旧 Key）
+    const cleared = registerProvider(p) === 'cleared';
+    if (keyVal === KEY_MASK) { /* 保持原密钥 */ }
+    else if (keyVal) { if (!Secrets.set('provider_key', p.id, keyVal)) { toast('API Key 保存失败'); return; } }
+    else Secrets.del('provider_key', p.id);
+    p.hasKey = Secrets.has('provider_key', p.id);
     const i = settings.providers.findIndex(x => x.id === p.id);
     if (i >= 0) settings.providers[i] = p; else settings.providers.push(p);
-    saveSettings(); toast('已保存'); closeProviderEdit(); renderHeader();
+    saveSettings(); toast(cleared && keyVal === KEY_MASK ? 'Base URL 主机已变更，旧 API Key 已清除，请重新填写' : '已保存'); closeProviderEdit(); renderHeader();
   };
   $('#pe-delete').onclick = async () => {
     const ok = await dialog({ title: '删除服务商？', body: '将删除「' + editing.name + '」及其 API Key。', okText: '删除', danger: true });
     if (!ok) return;
     settings.providers = settings.providers.filter(x => x.id !== editing.id);
+    Secrets.del('provider_key', editing.id);
     if (editing.presetId && editing.presetId !== 'custom') settings.removedPresets = (settings.removedPresets || []).concat(editing.presetId);
     saveSettings(); closeProviderEdit(); renderHeader();
   };
@@ -2012,12 +2188,16 @@
   const FETCH_CATS = [['all', '全部'], ['text', '文本'], ['image', '图片'], ['video', '视频'], ['embedding', '嵌入'], ['audio', '音频']];
   const catOf = m => { const c = Providers.classifyModel(m, editMeta[m]); return c === 'speech' || c === 'transcription' ? 'audio' : c; };
   $('#pe-fetch').onclick = async () => {
-    const prov = { type: $('#pe-type').value, baseUrl: $('#pe-base').value.trim(), apiKey: $('#pe-key').value.trim() };
+    const typed = $('#pe-key').value.trim();
+    // 新输入的 Key 直接用于本次请求（页面本来就知道）；已保存的 Key 由原生层注入，且只能发往登记的同源地址
+    const useStored = typed === KEY_MASK;
+    const prov = { presetId: editing.presetId, type: $('#pe-type').value, baseUrl: $('#pe-base').value.trim(), apiKey: useStored ? '' : typed };
     if (!/^https?:\/\/.+/.test(prov.baseUrl)) { toast('请先填写正确的 Base URL'); return; }
-    if (!prov.apiKey) { toast('请先填写 API Key'); return; }
+    if (!typed) { toast('请先填写 API Key'); return; }
+    if (useStored && !Secure.isUrlAllowed(prov.baseUrl, (getProvider(editing.id) || {}).baseUrl)) { toast('Base URL 主机已改动，请重新填写 API Key 再获取'); return; }
     const btn = $('#pe-fetch'); btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '获取中…';
     try {
-      const r = await httpSimple(Providers.buildModelsRequest(prov));
+      const r = await httpSimple(authed(Providers.buildModelsRequest(prov), useStored ? editing.id : ''));
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       fetched = Providers.parseModelsResponse(prov.type, r.text);
       Object.assign(editMeta, Providers.parseModelsMeta(prov.type, r.text));
@@ -2326,7 +2506,8 @@
   const pluginHost = {
     settings: () => settings, saveSettings, conv: () => conv,
     saveConv: c => saveConvSoon(c || conv),
-    store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v) },
+    store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v), del: n => Store.del(n),
+      append: (n, v) => Store.append(n, v), readJsonl: n => Store.readJsonl(n), writeJsonl: (n, v) => Store.writeJsonl(n, v) },
     toast, dialog, esc,
     /** v0.7.8：一键启用角色卡 Skill（无变量模板） */
     applyCardSkill: () => { const t = templates.find(x => x.id === Templates.CARD_SKILL_ID) || templates.find(x => x.skill); return t ? applyTemplate(t) : (toast('未找到角色卡 Skill'), false); },
@@ -2344,10 +2525,10 @@
       o = o || {};
       const cv = o.conv || conv; // v0.7.5：后台调用固定在发起时的对话（切换对话不串）
       const p = getProvider(cv.providerId);
-      if (!p || !p.apiKey) throw new Error('请先为本对话选择已配置 API Key 的服务商');
+      if (!hasKey(p)) throw new Error('请先为本对话选择已配置 API Key 的服务商');
       const model = o.model || cv.model;
       // 摘要等后台调用：千问关闭思考模式（enable_thinking=false）省钱省时；其他服务商不受影响
-      const req = Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096, thinking: false, jsonMode: !!o.jsonMode });
+      const req = authed(Providers.buildChatRequest(p, model, [{ role: 'user', content: prompt }], '', { stream: false, temperature: 0.3, maxTokens: o.maxTokens || 4096, thinking: false, jsonMode: !!o.jsonMode }), p.id);
       const r = await requestText(req, o.setCancel || null, o.timeoutMs || 180000);
       if (r.status >= 400 || !r.status) throw new Error(Providers.parseError(r.status, r.text));
       const ds = Providers.parseFullResponse(p.type, r.text);
@@ -2544,7 +2725,7 @@
         (actions ? '<div class="bal-actions">' + actions + '</div>' : '') + '</div>';
     });
     // 列出无 Key 但已有预设的，提示可去设置
-    const noKey = settings.providers.filter(p => p.presetId !== 'custom' && !(p.apiKey && p.apiKey.trim()));
+    const noKey = settings.providers.filter(p => p.presetId !== 'custom' && !hasKey(p));
     if (noKey.length) {
       html += '<div class="group-title">未填写 API Key</div><div class="hint">在设置中为 ' +
         noKey.slice(0, 4).map(p => esc(p.name)).join('、') + (noKey.length > 4 ? ' 等' : '') + ' 填写 Key 后即可出现在上方。</div>';
@@ -2573,7 +2754,7 @@
         return;
       }
       try {
-        const r = await httpSimple(req);
+        const r = await httpSimple(authed(req, p.id));
         const parsed = Balance.parseBalanceResponse(p.presetId, r.status, r.text);
         balanceCache[p.id] = { at: Date.now(), result: parsed };
       } catch (e) {
@@ -2610,7 +2791,7 @@
       if (p && p.type === 'openai') return p;
     }
     const list = imageCapableProviders();
-    const withKey = list.filter(p => (p.apiKey || '').trim());
+    const withKey = list.filter(hasKey);
     const prefer = withKey.find(p => (p.imageModel || '').trim()) || withKey[0] || list[0] || null;
     if (prefer && !id) {
       settings.imageGenProviderId = prefer.id;
@@ -2651,7 +2832,7 @@
       sel.innerHTML = '<option value="">（无 OpenAI 兼容服务商）</option>';
     } else {
       sel.innerHTML = list.map(p => {
-        const label = esc(p.name || p.id) + ((p.apiKey || '').trim() ? '' : '（未填 Key）');
+        const label = esc(p.name || p.id) + (hasKey(p) ? '' : '（未填 Key）');
         return '<option value="' + esc(p.id) + '"' + (p.id === curId ? ' selected' : '') + '>' + label + '</option>';
       }).join('');
       if (curId) sel.value = curId;
@@ -2804,7 +2985,7 @@
     settings.imageSize = size; saveSettings();
     let status = 0, raw = '';
     if (igRefs.length > 1) toast('当前仅使用第一张参考图');
-    const req = ImageGen.buildRequest(p, prompt, size, model, { images: igRefs.slice() });
+    const req = authed(ImageGen.buildRequest(p, prompt, size, model, { images: igRefs.slice() }), p.id);
     const progress = beginImageGenProgress();
     $('#ig-generate').style.display = 'none';
     $('#ig-stop').style.display = '';
@@ -2999,16 +3180,16 @@
     });
     if (usTab === 'prices') {
       const mode = box.querySelector('#us-price-mode');
-      if (mode) { mode.value = usageState.priceMode || 'auto'; mode.onchange = e => { usageState.priceMode = e.target.value; saveUsageStats(); renderUsagePage(); }; }
+      if (mode) { mode.value = usageState.priceMode || 'auto'; mode.onchange = e => { usageState.priceMode = e.target.value; saveUsageMeta(); renderUsagePage(); }; }
       box.querySelectorAll('.price-row input').forEach(inp => {
         inp.onchange = () => {
           const v = parseFloat(inp.value); if (isNaN(v) || v < 0) { inp.value = usageState.prices[inp.dataset.m][inp.dataset.k]; return; }
           usageState.prices[inp.dataset.m] = Object.assign({}, usageState.prices[inp.dataset.m], { [inp.dataset.k]: v });
-          saveUsageStats();
+          saveUsageMeta();
         };
       });
       const rst = box.querySelector('#us-price-reset');
-      if (rst) rst.onclick = () => { usageState.prices = Object.assign({}, UsageStats.DEFAULT_PRICES); saveUsageStats(); renderUsagePage(); toast('已恢复默认价格'); };
+      if (rst) rst.onclick = () => { usageState.prices = Object.assign({}, UsageStats.DEFAULT_PRICES); saveUsageMeta(); renderUsagePage(); toast('已恢复默认价格'); };
     }
   }
   async function usageMore() {

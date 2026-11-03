@@ -16,7 +16,7 @@
   function canGenerate(provider, modelOverride) {
     if (!provider) return { ok: false, reason: '请先选择服务商' };
     if (provider.type !== 'openai') return { ok: false, reason: '图片生成仅支持 OpenAI 兼容接口' };
-    if (!(provider.apiKey || '').trim()) return { ok: false, reason: '请先在设置中填写 API Key' };
+    if (!provider.hasKey && !(provider.apiKey || '').trim()) return { ok: false, reason: '请先在设置中填写 API Key' };
     const model = effectiveModel(provider, modelOverride);
     if (!model) {
       return { ok: false, reason: '请先填写图片生成模型（或在设置中为「' + (provider.name || '当前服务商') + '」配置 imageModel）' };

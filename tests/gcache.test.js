@@ -6,7 +6,8 @@ const OR = { type: 'openai', presetId: 'openrouter', baseUrl: 'https://openroute
 
 test('识别 OpenRouter Gemini', () => {
   assert.ok(G.isOpenRouterGemini(OR, 'google/gemini-2.5-flash'));
-  assert.ok(G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://x.com', apiKey: 'sk-or-1' }, '~google/gemini-pro'));
+  // v0.9.0：Key 不再暴露给页面，不能再靠 sk-or- 前缀识别，只认 presetId / Base URL
+  assert.ok(!G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://x.com', apiKey: 'sk-or-1' }, '~google/gemini-pro'));
   assert.ok(!G.isOpenRouterGemini(OR, 'anthropic/claude-sonnet-4'));
   assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'deepseek', baseUrl: 'https://api.deepseek.com' }, 'gemini-2.5'));
   assert.ok(!G.isOpenRouterGemini({ type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com' }, 'gemini-2.5-flash'));

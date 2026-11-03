@@ -26,7 +26,7 @@
   function isOpenRouterGemini(provider, model) {
     const p = provider || {};
     if (p.type && p.type !== 'openai') return false;
-    const isOR = p.presetId === 'openrouter' || /openrouter\.ai/i.test(String(p.baseUrl || '')) || String(p.apiKey || '').trim().startsWith('sk-or-');
+    const isOR = p.presetId === 'openrouter' || /openrouter\.ai/i.test(String(p.baseUrl || ''));
     if (!isOR) return false;
     const m = String(model || '').toLowerCase();
     return m.startsWith('google/gemini') || m.startsWith('~google/gemini') || /(^|\/)gemini-/.test(m);

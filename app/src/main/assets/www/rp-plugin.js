@@ -32,8 +32,45 @@
     c.peak = Object.assign({}, R.DEFAULT_PEAK, c.peak || {});
     return c;
   }
-  const logKey = conv => 'rplog_' + conv.id + '.json';
-  const loadLogs = (host, conv) => host.store.get(logKey(conv), []) || [];
+  // v0.9.0：请求日志改为追加式 rplog_<id>.jsonl；旧 rplog_<id>.json 首次读取时迁移
+  const logKey = conv => 'rplog_' + conv.id + '.jsonl';
+  const oldLogKey = conv => 'rplog_' + conv.id + '.json';
+  const logCache = new Map(); // convId → { logs, lines, prompts }（lines / prompts = 磁盘上的行数 / 含完整 prompt 的行数）
+  const countPrompts = list => list.reduce((n, e) => n + (e && e.prompt ? 1 : 0), 0);
+  const compactLogs = list => (list.length ? R.appendLog(list.slice(0, -1), list[list.length - 1]) : []);
+  function loadLogs(host, conv) {
+    const st = host.store;
+    if (!st.append || !st.readJsonl) return st.get(oldLogKey(conv), []) || []; // 旧宿主（测试桩）：整文件 JSON
+    const c = logCache.get(conv.id); if (c) return c.logs;
+    let items = st.readJsonl(logKey(conv)), lines;
+    if (items == null) {
+      const old = st.get(oldLogKey(conv), null);
+      items = Array.isArray(old) ? old : [];
+      lines = -1; // 需要写出 jsonl
+    } else lines = items.length;
+    const logs = compactLogs(items);
+    const ent = { logs, lines: logs.length, prompts: countPrompts(logs) };
+    if (st.writeJsonl && (lines !== logs.length || countPrompts(items) !== ent.prompts)) {
+      if (lines !== -1 || items.length) st.writeJsonl(logKey(conv), logs);
+      if (lines === -1 && st.del) st.del(oldLogKey(conv));
+    }
+    logCache.set(conv.id, ent);
+    return logs;
+  }
+  function saveLogAppend(host, conv, logs, entry) {
+    const st = host.store;
+    if (!st.append || !st.readJsonl) { st.set(oldLogKey(conv), logs); return; }
+    const ent = logCache.get(conv.id) || { lines: 0, prompts: 0 };
+    ent.logs = logs; ent.lines++; if (entry.prompt) ent.prompts++;
+    // 只追加一行；磁盘上多出的旧行 / 旧 prompt 超过阈值时才整体压缩重写
+    if (ent.lines > R.LOG_LIMIT_RP + 50 || ent.prompts > R.PROMPT_KEEP + 10) { st.writeJsonl(logKey(conv), logs); ent.lines = logs.length; ent.prompts = countPrompts(logs); }
+    else st.append(logKey(conv), entry);
+    logCache.set(conv.id, ent);
+  }
+  function clearLogs(host, conv) {
+    logCache.delete(conv.id);
+    if (host.store.writeJsonl) host.store.writeJsonl(logKey(conv), []); else host.store.set(oldLogKey(conv), []);
+  }
   const providerOf = (host, conv) => (host.provider ? host.provider(conv) : null) || null;
   /** 服务商适用性。DeepSeek / 千问 → 适用；其他服务商默认「不适用」（请求不改写），可在面板中强制启用 */
   function applicability(host, conv, provider, model) {
@@ -331,7 +368,7 @@
         if (result.usage && result.usage.prompt) st = R.calibrate(st, info.tokens.raw_total, result.usage.prompt);
         if (st !== d.state) { d.state = st; normalized.add(st); }
         const logs = R.appendLog(logs0, entry);
-        host.store.set(logKey(ctx.conv), logs);
+        saveLogAppend(host, ctx.conv, logs, entry);
         const an = R.detectAnomaly(logs);
         if (result.bot) result.bot.rpCache = { rate: entry.hit_rate, hit: entry.cache_hit_tokens, miss: entry.cache_miss_tokens, prompt: entry.prompt_tokens,
           supported: entry.supported, anomaly: an.anomaly, summaryNo: entry.summary_no, merged: entry.summary_merged, reason: entry.reason, req: entry.request_id };
@@ -802,7 +839,7 @@
       body.innerHTML = html;
       body.querySelector('#rp-clear-log').onclick = async () => {
         const ok = await host.dialog({ title: '清空统计？', body: '只删除本对话的缓存统计记录，不影响聊天内容。', okText: '清空', danger: true });
-        if (!ok) return; host.store.set(logKey(conv), []); this._render();
+        if (!ok) return; clearLogs(host, conv); this._render();
       };
     },
 

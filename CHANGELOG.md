@@ -1,5 +1,23 @@
 # 更新日志
 
+**v0.9.0：安全与性能加固**
+
+- **WebView CSP**：页面加 Content-Security-Policy（`script-src 'self'`、`connect-src 'none'`、`object-src 'none'` 等），禁止内联脚本与页面直连网络；桌面版共用同一页面
+- **API Key 不再进入页面**：服务商 / 联网搜索的 Key 迁入原生安全存储（Android Keystore AES-GCM；桌面 Electron safeStorage），页面只知道「已保存」
+  - 新桥接：`setSecret / hasSecret / deleteSecret / clearSecrets`、`registerProvider(id, baseUrl, type)`、`requestForProvider(...)`；原生层只允许发往与登记 Base URL **同源**的地址，丢弃页面传入的认证头、按类型注入（Bearer / x-api-key / x-goog-api-key / X-Subscription-Token），带 Key 的请求不跟随重定向
+  - 修改 Base URL 的主机后旧 Key 自动清除（需重新填写）
+  - 首次启动自动迁移：settings.json 里的 `apiKey` / `search.keys` 写入安全存储后删除
+  - 输入框显示「••••••••（已保存）」：保持不变 = 不改、清空 = 删除、输入新值 = 替换
+  - OpenRouter Gemini 识别不再依赖 `sk-or-` Key 前缀（用 presetId / Base URL）
+- **配置损坏不再被静默覆盖**：读到坏 JSON 时改名为 `name.corrupt-<时间戳>` 保留，并尝试从 `name.bak` 恢复；写入改为「临时文件 + fsync → 旧文件转 .bak → 改名」；convs.json 损坏时扫描 conv_*.json 重建索引
+- 新桥接：`storeExists / storeRename / storeList / storeAppend`
+- **性能**：
+  - 生图进度只更新对应消息，不再每 0.9 秒整表重绘
+  - Token 统计改为追加式 `usage-stats.jsonl` + `usage-stats-meta.json`（旧 usage-stats.json 迁移一次后改名为 .migrated）；RP 请求日志改为 `rplog_<id>.jsonl` 追加写，超阈值才压缩
+  - 流式 Markdown 增量渲染：在稳定边界切开，已完成部分复用解析结果，只重新解析尾部；LRU 缓存保留
+  - 后续（未做）：SQLite 存储、app.js 拆分 / ESLint
+- Android `0.9.0`（versionCode 41）/ 桌面 / npm `0.9.0`
+
 **v0.8.9：插件正确性修复 + 请求核心提速（plugin-optimization P1/P2）**
 
 - 「💎 Gemini 提示缓存」插件 1.4.0：

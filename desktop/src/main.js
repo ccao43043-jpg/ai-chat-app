@@ -4,7 +4,7 @@
  * API Key 只存在本机用户数据目录，请求直接发往服务商；不写日志。
  */
 'use strict';
-const { app, BrowserWindow, ipcMain, protocol, net, shell, clipboard, dialog, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, clipboard, dialog, Menu, nativeTheme, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -84,10 +84,13 @@ function storeFile(name) {
 ipcMain.on('bridge:storeGet', (e, name) => {
   try { e.returnValue = fs.readFileSync(storeFile(name), 'utf8'); } catch (err) { e.returnValue = null; }
 });
+// v0.9.0：写临时文件 → 旧文件转 .bak（只留一份）→ 改名
 ipcMain.on('bridge:storeSet', (e, name, value) => {
   const f = storeFile(name), tmp = f + '.tmp';
   try {
-    fs.writeFileSync(tmp, String(value == null ? '' : value), 'utf8');
+    const fd = fs.openSync(tmp, 'w');
+    try { fs.writeSync(fd, String(value == null ? '' : value), null, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    if (!/\.(jsonl|bak)$/.test(f) && fs.existsSync(f)) { try { fs.rmSync(f + '.bak', { force: true }); fs.renameSync(f, f + '.bak'); } catch (_) {} }
     fs.renameSync(tmp, f);
     e.returnValue = true;
   } catch (err) {
@@ -96,8 +99,97 @@ ipcMain.on('bridge:storeSet', (e, name, value) => {
   }
 });
 ipcMain.on('bridge:storeDelete', (e, name) => {
-  try { fs.rmSync(storeFile(name), { force: true }); } catch (_) {}
+  try { fs.rmSync(storeFile(name), { force: true }); fs.rmSync(storeFile(name) + '.bak', { force: true }); } catch (_) {}
   e.returnValue = true;
+});
+ipcMain.on('bridge:storeExists', (e, name) => { e.returnValue = fs.existsSync(storeFile(name)); });
+ipcMain.on('bridge:storeRename', (e, from, to) => {
+  try { const a = storeFile(from), b = storeFile(to); if (!fs.existsSync(a)) { e.returnValue = false; return; } fs.renameSync(a, b); e.returnValue = true; }
+  catch (_) { e.returnValue = false; }
+});
+ipcMain.on('bridge:storeList', e => {
+  try { e.returnValue = JSON.stringify(fs.readdirSync(dataDir).filter(n => !n.endsWith('.tmp'))); } catch (_) { e.returnValue = '[]'; }
+});
+ipcMain.on('bridge:storeAppend', (e, name, text) => {
+  try { fs.appendFileSync(storeFile(name), String(text == null ? '' : text), 'utf8'); e.returnValue = true; } catch (_) { e.returnValue = false; }
+});
+
+// ---------------- v0.9.0：密钥安全存储（safeStorage 加密，明文不回传页面） ----------------
+const AUTH_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key', 'x-subscription-token'];
+function originOf(u) {
+  try {
+    const x = new URL(String(u || '').trim());
+    if ((x.protocol !== 'http:' && x.protocol !== 'https:') || x.username || x.password || !x.hostname) return '';
+    return x.protocol.slice(0, -1) + '://' + x.hostname.toLowerCase() + (x.port ? ':' + x.port : '');
+  } catch (_) { return ''; }
+}
+const secretsFile = () => path.join(dataDir, '..', 'secrets.json');
+let secretsCache = null;
+function loadSecrets() {
+  if (secretsCache) return secretsCache;
+  try { secretsCache = JSON.parse(fs.readFileSync(secretsFile(), 'utf8')); } catch (_) { secretsCache = {}; }
+  secretsCache.s = secretsCache.s || {}; secretsCache.o = secretsCache.o || {}; secretsCache.r = secretsCache.r || {};
+  return secretsCache;
+}
+function saveSecrets() {
+  const f = secretsFile(), tmp = f + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(secretsCache), { encoding: 'utf8', mode: 0o600 }); fs.renameSync(tmp, f);
+}
+function encSecret(v) {
+  if (safeStorage.isEncryptionAvailable()) return 'e:' + safeStorage.encryptString(v).toString('base64');
+  return 'p:' + Buffer.from(v, 'utf8').toString('base64'); // 系统无可用钥匙串时退化为仅文件权限保护
+}
+function decSecret(v) {
+  try {
+    if (v.startsWith('e:')) return safeStorage.decryptString(Buffer.from(v.slice(2), 'base64'));
+    if (v.startsWith('p:')) return Buffer.from(v.slice(2), 'base64').toString('utf8');
+  } catch (_) {}
+  return null;
+}
+const validKind = k => k === 'provider_key' || k === 'search_key';
+const regIdOf = (kind, id) => (kind === 'search_key' ? 'search:' + id : id);
+const secretNameOf = rid => (rid.startsWith('search:') ? 'search_key:' + rid.slice(7) : 'provider_key:' + rid);
+ipcMain.on('bridge:registerProvider', (e, id, baseUrl, authType) => {
+  try {
+    const S = loadSecrets(); id = String(id || ''); if (!id) { e.returnValue = 'error'; return; }
+    S.r[id] = { baseUrl: String(baseUrl || ''), authType: String(authType || 'bearer') };
+    const n = secretNameOf(id), bound = S.o[n], now = originOf(baseUrl);
+    let res = 'ok';
+    if (S.s[n] && bound && bound !== now) { delete S.s[n]; delete S.o[n]; res = 'cleared'; }
+    saveSecrets(); e.returnValue = res;
+  } catch (_) { e.returnValue = 'error'; }
+});
+ipcMain.on('bridge:setSecret', (e, kind, id, value) => {
+  try {
+    if (!validKind(kind)) { e.returnValue = false; return; }
+    const S = loadSecrets(), rid = regIdOf(kind, String(id)), n = secretNameOf(rid);
+    if (!value) { delete S.s[n]; delete S.o[n]; }
+    else { S.s[n] = encSecret(String(value)); const r = S.r[rid]; const o = r && originOf(r.baseUrl); if (o) S.o[n] = o; }
+    saveSecrets(); e.returnValue = true;
+  } catch (_) { e.returnValue = false; }
+});
+ipcMain.on('bridge:hasSecret', (e, kind, id) => { e.returnValue = validKind(kind) && !!loadSecrets().s[kind + ':' + id]; });
+ipcMain.on('bridge:deleteSecret', (e, kind, id) => {
+  try { const S = loadSecrets(); delete S.s[kind + ':' + id]; delete S.o[kind + ':' + id]; saveSecrets(); } catch (_) {}
+  e.returnValue = true;
+});
+ipcMain.on('bridge:clearSecrets', e => { try { const S = loadSecrets(); S.s = {}; S.o = {}; saveSecrets(); } catch (_) {} e.returnValue = true; });
+ipcMain.on('bridge:requestForProvider', (e, id, providerId, method, url, headersJson, body, timeoutSec) => {
+  const S = loadSecrets(); const r = S.r[String(providerId)];
+  if (!r) { callPage(e.sender, 'onError', String(id), '服务商未登记'); return; }
+  const allowed = originOf(r.baseUrl);
+  if (!allowed || allowed !== originOf(url)) { callPage(e.sender, 'onError', String(id), '请求地址与服务商 Base URL 不一致，已拒绝'); return; }
+  let h = {}; try { h = JSON.parse(headersJson || '{}') || {}; } catch (_) {}
+  const clean = {}; Object.keys(h).forEach(k => { if (!AUTH_HEADERS.includes(k.toLowerCase())) clean[k] = h[k]; });
+  const n = secretNameOf(String(providerId));
+  const key = S.s[n] && (!S.o[n] || S.o[n] === allowed) ? decSecret(S.s[n]) : null;
+  if (key) {
+    if (r.authType === 'anthropic') clean['x-api-key'] = key;
+    else if (r.authType === 'gemini') clean['x-goog-api-key'] = key;
+    else if (r.authType === 'brave') clean['X-Subscription-Token'] = key;
+    else clean.Authorization = 'Bearer ' + key;
+  }
+  doRequest(e.sender, String(id), method, url, JSON.stringify(clean), body, Number(timeoutSec) || 0, true);
 });
 
 // ---------------- 网络（主进程，Chromium 网络栈：跟随系统代理，无 CORS） ----------------
@@ -109,7 +201,7 @@ function callPage(wc, fn, ...args) {
   wc.executeJavaScript(code).catch(() => {});
 }
 
-async function doRequest(wc, id, method, url, headersJson, body, timeoutSec) {
+async function doRequest(wc, id, method, url, headersJson, body, timeoutSec, noRedirect) {
   const ctl = new AbortController();
   const st = { ctl, cancelled: false, timedOut: null };
   requests.set(id, st);
@@ -122,7 +214,7 @@ async function doRequest(wc, id, method, url, headersJson, body, timeoutSec) {
     let headers = {};
     if (headersJson) { try { headers = JSON.parse(headersJson) || {}; } catch (_) { headers = {}; } }
     const m = (method || 'GET').toUpperCase();
-    const init = { method: m, headers, signal: ctl.signal, redirect: 'follow', cache: 'no-store', credentials: 'omit' };
+    const init = { method: m, headers, signal: ctl.signal, redirect: noRedirect ? 'manual' : 'follow', cache: 'no-store', credentials: 'omit' };
     if (body && m !== 'GET' && m !== 'HEAD') init.body = body;
     arm(30000 + readTimeout, 'SocketTimeoutException: 连接超时');
     const res = await net.fetch(u.toString(), init);

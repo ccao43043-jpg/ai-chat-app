@@ -45,7 +45,7 @@
    * 认证一律用 Bearer，绝不把 key 写入 URL。
    */
   function buildBalanceRequest(provider) {
-    if (!provider || !(provider.apiKey || '').trim()) return null;
+    if (!provider || !(provider.hasKey || (provider.apiKey || '').trim())) return null; // v0.9.0：Key 在原生层，由其注入
     const id = provider.presetId || '';
     const key = (provider.apiKey || '').trim();
     const auth = { Authorization: 'Bearer ' + key, Accept: 'application/json' };

@@ -15,6 +15,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -26,9 +27,12 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Reader;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -46,12 +50,14 @@ public class NativeBridge {
     private final Map<String, HttpURLConnection> conns = new ConcurrentHashMap<>();
     private final Map<String, Boolean> cancelled = new ConcurrentHashMap<>();
     private final File dataDir;
+    private final SecretStore secrets;
 
     public NativeBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
         this.dataDir = new File(activity.getFilesDir(), "store");
         if (!dataDir.exists()) dataDir.mkdirs();
+        this.secrets = new SecretStore(activity);
     }
 
     void shutdown() {
@@ -81,10 +87,111 @@ public class NativeBridge {
         if (c != null) pool.execute(() -> { try { c.disconnect(); } catch (Exception ignored) {} });
     }
 
+    // ---------------- v0.9.0：密钥安全存储 + 按服务商注入认证 ----------------
+
+    private static boolean validKind(String kind) { return "provider_key".equals(kind) || "search_key".equals(kind); }
+    private static String regId(String kind, String id) { return "search_key".equals(kind) ? "search:" + id : id; }
+    private static String secretName(String regId) {
+        return regId.startsWith("search:") ? "search_key:" + regId.substring(7) : "provider_key:" + regId;
+    }
+
+    /** scheme://host[:port]（小写、去默认端口）；含用户信息或非 http(s) 时返回 null。与 secure.js originOf 一致 */
+    static String originOf(String u) {
+        try {
+            if (u == null) return null;
+            URI x = new URI(u.trim());
+            String scheme = x.getScheme(), host = x.getHost();
+            if (scheme == null || host == null || x.getRawUserInfo() != null) return null;
+            scheme = scheme.toLowerCase(Locale.ROOT);
+            if (!"http".equals(scheme) && !"https".equals(scheme)) return null;
+            int port = x.getPort();
+            if (("http".equals(scheme) && port == 80) || ("https".equals(scheme) && port == 443)) port = -1;
+            return scheme + "://" + host.toLowerCase(Locale.ROOT) + (port > 0 ? ":" + port : "");
+        } catch (Exception e) { return null; }
+    }
+
+    /** 登记服务商 Base URL 与认证方式；主机变化时删除旧密钥并返回 "cleared"，否则 "ok" */
+    @JavascriptInterface
+    public String registerProvider(String id, String baseUrl, String authType) {
+        if (id == null || id.isEmpty()) return "error";
+        secrets.putReg(id, baseUrl == null ? "" : baseUrl, authType == null ? "bearer" : authType);
+        String name = secretName(id);
+        String bound = secrets.origin(name), now = originOf(baseUrl);
+        if (secrets.has(name) && bound != null && !bound.equals(now)) { secrets.remove(name); return "cleared"; }
+        return "ok";
+    }
+
+    @JavascriptInterface
+    public boolean setSecret(String kind, String id, String value) {
+        if (!validKind(kind) || id == null || value == null) return false;
+        String rid = regId(kind, id), name = secretName(rid);
+        String[] r = secrets.reg(rid);
+        if (value.isEmpty()) { secrets.remove(name); return true; }
+        if (!secrets.put(name, value)) return false;
+        String o = r == null ? null : originOf(r[0]);
+        if (o != null) secrets.setOrigin(name, o);
+        return true;
+    }
+
+    @JavascriptInterface
+    public boolean hasSecret(String kind, String id) { return validKind(kind) && id != null && secrets.has(kind + ":" + id); }
+
+    @JavascriptInterface
+    public void deleteSecret(String kind, String id) { if (validKind(kind) && id != null) secrets.remove(kind + ":" + id); }
+
+    @JavascriptInterface
+    public void clearSecrets() { secrets.clear(); }
+
+    /** 用已存密钥请求：URL 必须与登记的 Base URL 同源；认证头由原生层注入，页面传入的认证头一律丢弃 */
+    @JavascriptInterface
+    public void requestForProvider(final String id, final String providerId, final String method, final String url,
+                                   final String headersJson, final String body, final int timeoutSec) {
+        pool.execute(() -> {
+            try {
+                String[] r = providerId == null ? null : secrets.reg(providerId);
+                if (r == null) throw new Exception("服务商未登记");
+                String allowed = originOf(r[0]), target = originOf(url);
+                if (allowed == null || !allowed.equals(target)) throw new Exception("请求地址与服务商 Base URL 不一致，已拒绝");
+                JSONObject h = headersJson == null || headersJson.isEmpty() ? new JSONObject() : new JSONObject(headersJson);
+                JSONObject clean = new JSONObject();
+                Iterator<String> keys = h.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    if (Arrays.asList("authorization", "x-api-key", "x-goog-api-key", "x-subscription-token").contains(k.toLowerCase(Locale.ROOT))) continue;
+                    clean.put(k, h.getString(k));
+                }
+                String name = secretName(providerId);
+                String bound = secrets.origin(name);
+                String key = (bound == null || bound.equals(allowed)) ? secrets.get(name) : null;
+                if (key != null && !key.isEmpty()) {
+                    String t = r[1];
+                    if ("anthropic".equals(t)) clean.put("x-api-key", key);
+                    else if ("gemini".equals(t)) clean.put("x-goog-api-key", key);
+                    else if ("brave".equals(t)) clean.put("X-Subscription-Token", key);
+                    else clean.put("Authorization", "Bearer " + key);
+                }
+                doRequest(id, method, url, clean.toString(), body, timeoutSec, true);
+            } catch (Exception e) {
+                js("window.__nativeHttp.onError(" + q(id) + "," + q(e.getMessage() == null ? "请求失败" : e.getMessage()) + ")");
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void requestForSearch(String id, String searchId, String method, String url, String headersJson, String body, int timeoutSec) {
+        requestForProvider(id, "search:" + searchId, method, url, headersJson, body, timeoutSec);
+    }
+
     private void doRequest(String id, String method, String url, String headersJson, String body, int timeoutSec) {
+        doRequest(id, method, url, headersJson, body, timeoutSec, false);
+    }
+
+    private void doRequest(String id, String method, String url, String headersJson, String body, int timeoutSec, boolean noRedirect) {
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(url).openConnection();
+            // 带密钥的请求不自动跟随重定向，避免认证头被带到其他主机
+            if (noRedirect) conn.setInstanceFollowRedirects(false);
             conns.put(id, conn);
             conn.setRequestMethod(method == null || method.isEmpty() ? "GET" : method);
             conn.setConnectTimeout(30000);
@@ -148,18 +255,54 @@ public class NativeBridge {
         } catch (Exception e) { return null; }
     }
 
+    /** 写临时文件并 fsync → 旧文件转为 name.bak（只保留一份）→ 改名为正式文件 */
     @JavascriptInterface
-    public boolean storeSet(String name, String value) {
+    public synchronized boolean storeSet(String name, String value) {
         File f = storeFile(name);
         File tmp = new File(f.getPath() + ".tmp");
-        try (OutputStream os = new FileOutputStream(tmp)) {
-            os.write(value.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) { return false; }
+        try (FileOutputStream os = new FileOutputStream(tmp)) {
+            os.write((value == null ? "" : value).getBytes(StandardCharsets.UTF_8));
+            os.getFD().sync();
+        } catch (Exception e) { tmp.delete(); return false; }
+        boolean jsonl = f.getName().endsWith(".jsonl") || f.getName().endsWith(".bak");
+        if (f.exists() && !jsonl) {
+            File bak = new File(f.getPath() + ".bak");
+            if (bak.exists()) bak.delete();
+            if (!f.renameTo(bak)) f.delete();
+        }
         return tmp.renameTo(f);
     }
 
     @JavascriptInterface
-    public void storeDelete(String name) { storeFile(name).delete(); }
+    public synchronized void storeDelete(String name) { File f = storeFile(name); f.delete(); new File(f.getPath() + ".bak").delete(); }
+
+    @JavascriptInterface
+    public boolean storeExists(String name) { return storeFile(name).exists(); }
+
+    @JavascriptInterface
+    public synchronized boolean storeRename(String from, String to) {
+        File a = storeFile(from), b = storeFile(to);
+        if (!a.exists()) return false;
+        if (b.exists()) b.delete();
+        return a.renameTo(b);
+    }
+
+    @JavascriptInterface
+    public String storeList() {
+        JSONArray arr = new JSONArray();
+        String[] names = dataDir.list();
+        if (names != null) for (String n : names) if (!n.endsWith(".tmp")) arr.put(n);
+        return arr.toString();
+    }
+
+    /** 追加写（JSONL 日志），不重写整个文件 */
+    @JavascriptInterface
+    public synchronized boolean storeAppend(String name, String text) {
+        try (FileOutputStream os = new FileOutputStream(storeFile(name), true)) {
+            os.write((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            return true;
+        } catch (Exception e) { return false; }
+    }
 
     // ---------------- 杂项 ----------------
 

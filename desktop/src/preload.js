@@ -22,6 +22,19 @@ const bridge = {
   storeGet(name) { const v = ipcRenderer.sendSync('bridge:storeGet', str(name)); return v == null ? null : v; },
   storeSet(name, value) { return ipcRenderer.sendSync('bridge:storeSet', str(name), str(value)) === true; },
   storeDelete(name) { ipcRenderer.sendSync('bridge:storeDelete', str(name)); },
+  // v0.9.0
+  storeExists(name) { return ipcRenderer.sendSync('bridge:storeExists', str(name)) === true; },
+  storeRename(from, to) { return ipcRenderer.sendSync('bridge:storeRename', str(from), str(to)) === true; },
+  storeList() { return ipcRenderer.sendSync('bridge:storeList') || '[]'; },
+  storeAppend(name, text) { return ipcRenderer.sendSync('bridge:storeAppend', str(name), str(text)) === true; },
+  registerProvider(id, baseUrl, authType) { return ipcRenderer.sendSync('bridge:registerProvider', str(id), str(baseUrl), str(authType)) || 'error'; },
+  setSecret(kind, id, value) { return ipcRenderer.sendSync('bridge:setSecret', str(kind), str(id), str(value)) === true; },
+  hasSecret(kind, id) { return ipcRenderer.sendSync('bridge:hasSecret', str(kind), str(id)) === true; },
+  deleteSecret(kind, id) { ipcRenderer.sendSync('bridge:deleteSecret', str(kind), str(id)); },
+  clearSecrets() { ipcRenderer.sendSync('bridge:clearSecrets'); },
+  requestForProvider(id, providerId, method, url, headersJson, body, timeoutSec) {
+    ipcRenderer.send('bridge:requestForProvider', str(id), str(providerId), str(method), str(url), str(headersJson), str(body), Number(timeoutSec) || 0);
+  },
   copy(text) { ipcRenderer.send('bridge:copy', str(text)); },
   openUrl(url) { ipcRenderer.send('bridge:openUrl', str(url)); },
   readAsset(p) { return ipcRenderer.sendSync('bridge:readAsset', str(p)) || ''; },
