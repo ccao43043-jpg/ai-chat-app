@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.13.0';
+  const APP_VERSION = '0.13.1';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -804,58 +804,54 @@
     }
     const viewH = box.clientHeight || 600;
     const scrollTop = box.scrollTop;
-    let start = vsFindStart(list, Math.max(0, scrollTop - viewH * VS_OVERSCAN));
-    let end = start;
-    let acc = 0;
-    const budget = viewH * (1 + 2 * VS_OVERSCAN) + 80;
-    // 先算 start 之前的高度
-    let topH = 0; for (let i = 0; i < start; i++) topH += vsEstimate(list[i]);
-    for (end = start; end < list.length; end++) {
-      acc += vsEstimate(list[end]);
-      if (acc >= budget) { end++; break; }
-    }
-    end = Math.min(list.length, Math.max(end, start + 1));
+    const heights = list.map(vsEstimate);
+    const hasWin = !!box.querySelector(':scope > .vs-window');
+    // 滞回：滚动触发时，已渲染窗口仍覆盖视口+余量就不重建（v0.13.0 每次 range 变化都重建，向上滑时反复重排）
+    if (opts.fromScroll && !opts.force && hasWin && VScroll.windowCovers(vsLastRange, heights, scrollTop, viewH)) return;
+    const { start, end, topH, bottomH } = VScroll.computeRange(heights, scrollTop, viewH, VS_OVERSCAN);
     // 范围未变且非强制：跳过 DOM 重建（流式靠 updateMsg）
-    if (!opts.force && !vsLastRange.empty && vsLastRange.start === start && vsLastRange.end === end && box.querySelector('.vs-window')) {
+    if (!opts.force && !vsLastRange.empty && vsLastRange.start === start && vsLastRange.end === end && hasWin) {
       if (stick) box.scrollTop = box.scrollHeight;
       return;
     }
-    let bottomH = 0; for (let i = end; i < list.length; i++) bottomH += vsEstimate(list[i]);
     const prevStick = stick || (box.scrollHeight - box.scrollTop - box.clientHeight < 140);
-    // 锚点校正：记录重渲染前首个可见消息相对视口的偏移，避免实测高度变化导致跳动
-    const boxRect = box.getBoundingClientRect();
+    // 锚点：记录重渲染前首个可见消息相对视口的偏移
+    const boxTop = box.getBoundingClientRect().top;
     let anchorId = null, anchorOffset = 0;
-    if (!prevStick) {
-      const visible = box.querySelectorAll('.vs-window .msg, .msg');
+    if (!prevStick && hasWin) {
+      const visible = box.querySelectorAll('.vs-window > .msg');
       for (let i = 0; i < visible.length; i++) {
         const r = visible[i].getBoundingClientRect();
-        if (r.bottom > boxRect.top + 1) { anchorId = visible[i].dataset.id; anchorOffset = r.top - boxRect.top; break; }
+        if (r.bottom > boxTop + 1) { anchorId = visible[i].dataset.id; anchorOffset = r.top - boxTop; break; }
       }
-      if (!anchorId && list[start]) anchorId = list[start].id;
     }
-    box.innerHTML = '';
-    const topSp = document.createElement('div'); topSp.className = 'vs-spacer vs-top'; topSp.style.height = topH + 'px'; box.appendChild(topSp);
-    const win = document.createElement('div'); win.className = 'vs-window';
-    for (let i = start; i < end; i++) {
-      const el = buildMsgEl(list[i]);
-      win.appendChild(el);
+    // 不再 innerHTML='' 整体清空：复用 spacer 与已存在的消息节点（图片不重载、不露背景闪黑）
+    let topSp = box.querySelector(':scope > .vs-top'), win = box.querySelector(':scope > .vs-window'), botSp = box.querySelector(':scope > .vs-bot');
+    const reuse = new Map();
+    if (!topSp || !win || !botSp) {
+      box.innerHTML = '';
+      topSp = document.createElement('div'); topSp.className = 'vs-spacer vs-top';
+      win = document.createElement('div'); win.className = 'vs-window';
+      botSp = document.createElement('div'); botSp.className = 'vs-spacer vs-bot';
+      box.appendChild(topSp); box.appendChild(win); box.appendChild(botSp);
+    } else if (!opts.force) {
+      win.querySelectorAll(':scope > .msg').forEach(el => reuse.set(el.dataset.id, el));
     }
-    box.appendChild(win);
-    const botSp = document.createElement('div'); botSp.className = 'vs-spacer vs-bot'; botSp.style.height = bottomH + 'px'; box.appendChild(botSp);
-    // 实测校正高度；若与估算偏差大，重算 spacer
-    win.querySelectorAll('.msg').forEach((el, j) => vsMeasure(el, list[start + j]));
-    let topH2 = 0; for (let i = 0; i < start; i++) topH2 += vsEstimate(list[i]);
-    let botH2 = 0; for (let i = end; i < list.length; i++) botH2 += vsEstimate(list[i]);
-    if (Math.abs(topH2 - topH) > 1) topSp.style.height = topH2 + 'px';
-    if (Math.abs(botH2 - bottomH) > 1) botSp.style.height = botH2 + 'px';
+    const frag = document.createDocumentFragment();
+    for (let i = start; i < end; i++) frag.appendChild(reuse.get(list[i].id) || buildMsgEl(list[i]));
+    win.replaceChildren(frag);
+    // 实测窗口内高度；spacer 只依赖窗口外高度，实测不应改变它（旧版在此「重算」导致向上滑时 spacer 突变）
+    win.querySelectorAll(':scope > .msg').forEach((el, j) => vsMeasure(el, list[start + j]));
+    topSp.style.height = topH + 'px';
+    botSp.style.height = bottomH + 'px';
     vsLastRange = { start, end, empty: false };
     if (prevStick) box.scrollTop = box.scrollHeight;
     else if (anchorId) {
       let el2 = null;
-      box.querySelectorAll('.msg').forEach(el => { if (!el2 && el.dataset.id === anchorId) el2 = el; });
+      win.querySelectorAll(':scope > .msg').forEach(el => { if (!el2 && el.dataset.id === anchorId) el2 = el; });
       if (el2) {
-        const newOffset = el2.getBoundingClientRect().top - box.getBoundingClientRect().top;
-        box.scrollTop = box.scrollTop + (newOffset - anchorOffset);
+        const delta = (el2.getBoundingClientRect().top - box.getBoundingClientRect().top) - anchorOffset;
+        if (isFinite(delta) && Math.abs(delta) >= 1) box.scrollTop = box.scrollTop + delta;
       }
     }
   }

@@ -1,5 +1,13 @@
 # 更新日志
 
+**v0.13.1：修复向上滑卡住、闪黑**
+
+- **根因**：v0.13.0 虚拟滚动每次 range 变化都 `innerHTML=''` 整体清空再重建（图片重载、背景露出闪黑）；锚点校正改写 `scrollTop` 又触发 scroll → 下一帧 range 再变 → 再重建，向上滑时形成反馈循环导致卡住
+- 复用 spacer 与已在窗口内的消息节点（`replaceChildren`），不再清空整个列表
+- 滚动滞回：已渲染窗口仍覆盖视口 ± 余量时不重建；锚点偏移 <1px 不改 `scrollTop`
+- range 计算抽为纯函数 `vscroll.js`，防 NaN / 负高度；新增 `tests/vscroll.test.js`
+- Android `0.13.1`（versionCode 49）/ 桌面 / npm `0.13.1`
+
 **v0.13.0：世界书状态机 + 确定性概率 + 虚拟滚动锚点**
 
 - **P0 世界书概率确定性种子**：`convId + anchorId + entryId` → cyrb53/mulberry32；同消息重生成激活结果一致；配套测试「两次激活一致」
