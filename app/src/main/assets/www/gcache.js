@@ -22,6 +22,13 @@
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     return ('0000000' + h.toString(16)).slice(-8);
   }
+  /** 静态层指纹：先按原始字符串 === 比较，与上次相同则复用上次哈希，避免重复计算 */
+  let lastStatic = null, lastStaticHash = '';
+  function staticHash(st) {
+    const key = STATIC_PROMPT_VERSION + '\n' + st;
+    if (key === lastStatic) return lastStaticHash;
+    lastStatic = key; lastStaticHash = hash(key); return lastStaticHash;
+  }
   /** 是否为 OpenRouter 上的 Gemini 模型 */
   function isOpenRouterGemini(provider, model) {
     const p = provider || {};
@@ -90,7 +97,7 @@
     const dy = blocks.filter(b => b.kind === 'dynamic').map(b => b.text).join('\n');
     let seenDyn = false, ordered = true;
     blocks.forEach(b => { if (b.kind === 'dynamic') seenDyn = true; else if (seenDyn) ordered = false; });
-    return { blocks, staticText: st, dynamicText: dy, static_hash: hash(STATIC_PROMPT_VERSION + '\n' + st), dynamic_hash: hash(dy), layered: known >= 2, ordered, static_prompt_version: STATIC_PROMPT_VERSION };
+    return { blocks, staticText: st, dynamicText: dy, static_hash: staticHash(st), dynamic_hash: hash(dy), layered: known >= 2, ordered, static_prompt_version: STATIC_PROMPT_VERSION };
   }
   const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, hash, STATIC_PROMPT_VERSION };
 
@@ -182,7 +189,17 @@
   function summarizeTurns(turns, startNo) {
     return turns.map((t, i) => '第' + (startNo + i + 1) + '轮：' + t.map(m => (m.role === 'user' ? '玩家' : m.role === 'assistant' ? '回复' : m.role) + '「' + clip(partsText(m.content), m.role === 'user' ? 60 : 90) + '」').join(' → ')).join('\n');
   }
-  const batchFp = batch => hash(batch.flat().map(m => m.role + ':' + partsText(m.__orig != null ? m.__orig : m.content)).join('\n'));
+  // 冻结批次指纹：用于判定摘要是否仍有效（正确性相关），用 SHA-256 而非 32 位 FNV，避免碰撞导致改过的批次沿用旧摘要
+  const batchText = batch => batch.flat().map(m => m.role + ':' + partsText(m.__orig != null ? m.__orig : m.content)).join('\n');
+  const batchFp = batch => 'sha256:' + sha(batchText(batch));
+  /** 校验冻结批次；兼容旧版 8 位 FNV 指纹（一致则就地升级为 SHA-256，不作废摘要） */
+  function batchValid(s, batch) {
+    if (typeof s.fp === 'string' && /^[0-9a-f]{8}$/.test(s.fp)) {
+      if (hash(batchText(batch)) !== s.fp) return false;
+      s.fp = batchFp(batch); return true;
+    }
+    return batchFp(batch) === s.fp;
+  }
   function emptyHybrid() { return { v: 1, cut: 0, summaries: [], sent: {} }; }
   /**
    * apply(history, state) → { messagesForRequest, state, prefixChanged, summaryCreated, rawTurns, totalTurns, untilNext }
@@ -196,8 +213,8 @@
     if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; } // 历史被删到摘要范围内：作废重来
     // 已冻结批次被编辑：按指纹校验，不一致则从该批起作废
     for (let i = 0; i < state.summaries.length; i++) {
-      const s = state.summaries[i], fp = batchFp(turns.slice(s.from, s.to));
-      if (fp !== s.fp) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
+      const s = state.summaries[i];
+      if (!batchValid(s, turns.slice(s.from, s.to))) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
     }
     while (turns.length - state.cut >= RAW_MAX) {
       const from = state.cut, to = from + (RAW_MAX - RAW_MIN), batch = turns.slice(from, to);

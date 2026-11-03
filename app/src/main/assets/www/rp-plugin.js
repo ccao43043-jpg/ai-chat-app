@@ -331,7 +331,7 @@
         const a = R.assemble(p);
         let marks = null;
         if (ap.claude && ap.forced) {
-          // Claude：system + 稳定历史末尾两个 cache_control 断点
+          // Claude：system + 稳定历史末尾断点；providers.js 再按块数向前补历史锚点（总数 ≤ 4）
           ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true });
           if (p.hist.length) a.messages[p.hist.length - 1]._cache = true;
         } else if (env.cap.vendor === 'qwen' && env.strategy === 'explicit') {

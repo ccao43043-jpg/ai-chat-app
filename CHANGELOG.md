@@ -1,5 +1,13 @@
 # 更新日志
 
+**v0.9.1：Claude 缓存历史锚点 + Gemini 缓存指纹加固**
+
+- **Claude 缓存历史锚点**：在对话历史上追加 cache_control 断点（历史锚点 ≤3 个，连同 system 合计 ≤4 个，符合 Anthropic 上限），只打在 text 内容块上，长对话的历史前缀可命中缓存
+- **gcache 冻结批次指纹改为 SHA-256**：替换原 FNV 哈希，降低碰撞风险；旧版 FNV 指纹读取时平滑升级，不会导致已有缓存失效重建
+- **静态层字符串短路**：静态层内容未变时直接按字符串相等短路，跳过重复哈希计算
+- 新增测试 `tests/claude-anchors.test.js`，扩充 `tests/gcache-p1.test.js`
+- Android `0.9.1`（versionCode 42）/ 桌面 / npm `0.9.1`
+
 **v0.9.0：安全与性能加固**
 
 - **WebView CSP**：页面加 Content-Security-Policy（`script-src 'self'`、`connect-src 'none'`、`object-src 'none'` 等），禁止内联脚本与页面直连网络；桌面版共用同一页面

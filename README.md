@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.9.1：Claude 缓存历史锚点 + Gemini 缓存指纹加固**
+
+- Claude 历史 cache_control 锚点（≤3 + system ≤4，仅 text 块）；gcache 冻结批次指纹改 SHA-256（旧 FNV 平滑升级）；静态层字符串短路
+- Android `0.9.1`（versionCode 42）/ 桌面 / npm `0.9.1`
+
 **v0.8.9：插件正确性修复 + 请求核心提速**
 
 - Gemini 缓存 Hybrid「已发送版本」按消息 id + SHA-256 校验（修复连发「继续」改写历史 / 哈希碰撞）；RP 缓存优化器历史指纹增量化 + Token 估算缓存 + 截断二分，请求核心约 36ms → 不到 1ms

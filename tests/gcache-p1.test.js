@@ -67,3 +67,26 @@ test('P2 L0 含 ASCII 双引号 / 反斜杠的设定行不误报缺失', () => {
   assert.strictEqual(G.MemoryManager.missingL0(entries, body).length, 0);
   assert.strictEqual(G.MemoryManager.missingL0([{ text: '不存在的设定' }], body).length, 1);
 });
+
+test('P1：batchFp 为 SHA-256；冻结批次改一个字符即作废摘要；旧 FNV 指纹平滑升级', () => {
+  const H = G.HybridWindow;
+  const hist = [];
+  for (let i = 0; i < H.RAW_MAX + 2; i++) hist.push({ role: 'user', content: '问题' + i }, { role: 'assistant', content: '回答' + i });
+  const st = H.empty();
+  const r1 = H.apply(hist, st);
+  assert.ok(r1.summaryCreated && st.summaries.length);
+  assert.match(st.summaries[0].fp, /^sha256:[0-9a-f]{64}$/);
+  // 未修改：复用
+  assert.strictEqual(H.apply(hist, st).prefixChanged, false);
+  // 改一个字符：作废后重建（文本更新）
+  const edited = hist.map(m => Object.assign({}, m)); edited[0].content = '问题X';
+  const r2 = H.apply(edited, st);
+  assert.strictEqual(r2.prefixChanged, true);
+  assert.ok(st.summaries[0].text.includes('问题X'));
+  // 旧版 8 位 FNV 指纹：内容一致时升级而不作废
+  const st2 = H.empty(); H.apply(hist, st2);
+  const batch = H.splitTurns(hist).slice(st2.summaries[0].from, st2.summaries[0].to);
+  st2.summaries[0].fp = G.hash(batch.flat().map(m => m.role + ':' + m.content).join('\n'));
+  assert.strictEqual(H.apply(hist, st2).prefixChanged, false);
+  assert.match(st2.summaries[0].fp, /^sha256:/);
+});

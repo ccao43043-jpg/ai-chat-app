@@ -236,6 +236,41 @@
    * opts: { stream, temperature, maxTokens }
    * 返回 { url, method, headers, body(string) }
    */
+  /** Claude 消息的内容块数（文本块 + 图片块） */
+  function claudeBlocks(bm) {
+    if (typeof bm.content === 'string') return bm.content ? 1 : 0;
+    return Array.isArray(bm.content) ? bm.content.length : 0;
+  }
+  function claudeHasText(bm) {
+    if (typeof bm.content === 'string') return !!bm.content;
+    return Array.isArray(bm.content) && bm.content.some(b => b && b.type === 'text' && b.text);
+  }
+  /** 在消息的最后一个 text 块上打 cache_control（不打在图片块上；无文本块则跳过） */
+  function markLastText(bm, cc) {
+    if (typeof bm.content === 'string') { if (bm.content) bm.content = [{ type: 'text', text: bm.content, cache_control: cc }]; return; }
+    for (let j = bm.content.length - 1; j >= 0; j--) {
+      const b = bm.content[j];
+      if (b && b.type === 'text' && b.text) { bm.content[j] = Object.assign({}, b, { cache_control: cc }); return; }
+    }
+  }
+  /**
+   * Claude 历史断点：以最后一个 _cache 标记的消息为末尾断点，向前每累计 ≥ every（默认 15）个块插一个锚点；
+   * 历史断点最多 max 个（≤3，连同 system ≤ 4），只选含文本块的消息。返回升序消息下标。
+   */
+  function claudeCacheAnchors(bodyMessages, marked, max, every) {
+    max = Math.max(0, Math.min(3, max == null ? 3 : max)); every = every || 15;
+    if (!max || !marked || !marked.length) return [];
+    let tail = marked[marked.length - 1];
+    while (tail >= 0 && !claudeHasText(bodyMessages[tail])) tail--;
+    if (tail < 0) return [];
+    const out = [tail];
+    let since = claudeBlocks(bodyMessages[tail]);
+    for (let i = tail - 1; i >= 0 && out.length < max; i--) {
+      since += claudeBlocks(bodyMessages[i]);
+      if (since >= every && claudeHasText(bodyMessages[i])) { out.push(i); since = 0; }
+    }
+    return out.reverse();
+  }
   function buildChatRequest(provider, model, messages, systemPrompt, opts) {
     opts = opts || {};
     const stream = opts.stream !== false;
@@ -262,16 +297,15 @@
         }),
       };
       if (sys) body.system = sys;
-      // RP 缓存优化器（强制启用于 Claude 时）：system 与「稳定历史末尾」加 cache_control 断点（最多 2 个，Anthropic 上限 4 个）
+      // RP 缓存优化器（强制启用于 Claude 时）：system + 稳定历史末尾 + 历史锚点（每 ~15 块一个，历史最多 3 个，总数 ≤ 4）
+      // Anthropic 每个断点只向前回溯 20 个内容块；一轮新增很多块（如图片）时，锚点保证上一轮写入点仍在窗口内。
       if (opts.cacheControl) {
         const cc = { type: 'ephemeral' };
         if (sys) body.system = [{ type: 'text', text: sys, cache_control: cc }];
-        msgs.forEach((m, i) => {
-          if (!m._cache) return;
-          const bm = body.messages[i];
-          if (typeof bm.content === 'string') bm.content = [{ type: 'text', text: bm.content, cache_control: cc }];
-          else if (bm.content.length) bm.content[bm.content.length - 1] = Object.assign({}, bm.content[bm.content.length - 1], { cache_control: cc });
-        });
+        const marked = [];
+        msgs.forEach((m, i) => { if (m._cache) marked.push(i); });
+        const idx = claudeCacheAnchors(body.messages, marked, sys ? 3 : 4);
+        idx.forEach(i => markLastText(body.messages[i], cc));
       }
       if (temp !== undefined) body.temperature = temp;
       return {
@@ -638,7 +672,7 @@
     }).filter(Boolean);
   }
 
-  const api = { PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
+  const api = { claudeCacheAnchors, PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
