@@ -156,7 +156,7 @@
     /** 检索：按评分返回前 k 条 */
     search(entries, query, k) { return (entries || []).map(e => ({ e, s: score(query, e.text) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, k || 5).map(x => Object.assign({ score: Math.round(x.s * 100) / 100 }, x.e)); },
     /** 诊断误压缩：L0 条目不在本轮请求文本里即视为丢失 */
-    missingL0(entries, requestText) { const t = String(requestText || ''); return (entries || []).filter(e => t.indexOf(e.text) < 0); },
+    missingL0(entries, requestText) { const t = String(requestText || ''); return (entries || []).filter(e => t.indexOf(e.text) < 0 && t.indexOf(JSON.stringify(String(e.text)).slice(1, -1)) < 0); }, // 请求体是 JSON：同时按转义后的形式匹配（含 " \\ 的设定行不再误报）
     /** 记录压缩前原始历史指针（不复制原文，原文仍在对话消息里） */
     backupPointer(messages) { const m = messages || []; return { at: Date.now(), count: m.length, fp: hash(m.map(x => x && x.role + ':' + partsText(x.content)).join('\n')) }; },
   };
@@ -190,7 +190,7 @@
    */
   function hwApply(history, state) {
     state = state && state.v ? state : Object.assign(emptyHybrid(), state || {});
-    state.summaries = state.summaries || []; state.sent = state.sent || {};
+    state.summaries = state.summaries || []; hwMigrateSent(state);
     const turns = splitTurns(history || []);
     let prefixChanged = false, summaryCreated = false;
     if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; } // 历史被删到摘要范围内：作废重来
@@ -209,19 +209,28 @@
     const rawTurns = turns.length - state.cut;
     return { messagesForRequest: out, state, prefixChanged, summaryCreated, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
   }
-  /** 记录本轮实际送出的 user 文本（含当轮动态块），键为原始 user 文本指纹；下一轮拼历史时替换回去 */
-  function hwRecordSent(state, original, sent) {
+  // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
+  // 并记录原文 SHA-256 + 长度，替换前校验——原文变了（编辑 / 删除错位 / 哈希碰撞）就不替换。
+  // 旧版以内容 FNV-32 为键：重复文本（连发「继续」）会互相覆盖、碰撞时静默替换，已废弃（旧条目加载时丢弃）。
+  const sha = s => (root.RPCache || (typeof require === 'function' ? require('./rpcache.js') : null)).sha256(s);
+  const sentKey = (id, ord) => (id != null && id !== '' ? 'i:' + id : ord != null ? 'u#' + ord : null);
+  function hwRecordSent(state, key, original, sent) {
+    if (key == null || typeof original !== 'string') return;
+    state.sent = state.sent || {};
+    delete state.sent[key];
     if (original === sent) return;
-    state.sent[hash(partsText(original))] = sent;
+    state.sent[key] = { h: sha(original), n: original.length, sent };
     const ks = Object.keys(state.sent); if (ks.length > HW_SENT_MAX) ks.slice(0, ks.length - HW_SENT_MAX).forEach(k => delete state.sent[k]);
   }
-  function hwOutbound(state, m) {
-    if (m.role !== 'user' || typeof m.content !== 'string') return m;
-    const s = state.sent && state.sent[hash(m.content)];
-    if (s == null) return m;
-    const o = Object.assign({}, m, { content: s }); Object.defineProperty(o, '__orig', { value: m.content, enumerable: false }); return o;
+  function hwOutbound(state, m, key) {
+    if (m.role !== 'user' || typeof m.content !== 'string' || key == null) return m;
+    const r = state.sent && state.sent[key];
+    if (!r || typeof r !== 'object' || r.n !== m.content.length || r.h !== sha(m.content)) return m;
+    const o = Object.assign({}, m, { content: r.sent }); Object.defineProperty(o, '__orig', { value: m.content, enumerable: false }); return o;
   }
-  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, empty: emptyHybrid };
+  /** 清掉旧版（以内容哈希为键、值为字符串）的条目 */
+  function hwMigrateSent(state) { const o = state.sent || {}; Object.keys(o).forEach(k => { if (!o[k] || typeof o[k] !== 'object') delete o[k]; }); state.sent = o; }
+  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
 
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */
@@ -259,17 +268,20 @@
     if (cfg.responseCache) headers['X-OpenRouter-Cache'] = 'true';
     const msgs = Array.isArray(body.messages) ? body.messages : [];
     let applied = null, k = 0;
+    // extra.ids：与 body.messages 尾部对齐的消息 id 并行数组（调用方传 ctx.messages[i]._src.id）；只用于 Hybrid 已发送表，不写入请求
+    const src = Array.isArray(extra.ids) ? extra.ids : [];
+    const ids = msgs.map((_, i) => { const j = i - (msgs.length - src.length); return j >= 0 ? src[j] : undefined; });
     while (k < msgs.length && msgs[k].role === 'system') k++;
     // 1. 合并开头连续 system 消息（保持 rpcache 已排好的顺序，只拼接不重排）
     if (k > 1 && cfg.mergeSystem && msgs.slice(0, k).every(m => typeof m.content === 'string')) {
       msgs.splice(0, k, { role: 'system', content: msgs.slice(0, k).map(m => m.content).filter(Boolean).join('\n\n') });
-      k = 1;
+      ids.splice(0, k, undefined); k = 1;
     }
     // 2. RP 协议锚点 → 固定层 A（仅 RP 对话 / 用户开启；文本恒定）
     const guard = cfg.rpGuardrails === 'on' || cfg.rpGuardrails === true || (cfg.rpGuardrails === 'auto' && extra.rp);
     if (guard && cfg.rpGuardrails !== 'off') {
       if (k > 0 && typeof msgs[0].content === 'string') { if (msgs[0].content.indexOf(RP_ANCHOR) < 0) msgs[0].content = RP_ANCHOR + '\n\n' + msgs[0].content; }
-      else if (k === 0) { msgs.unshift({ role: 'system', content: RP_ANCHOR }); k = 1; }
+      else if (k === 0) { msgs.unshift({ role: 'system', content: RP_ANCHOR }); ids.unshift(undefined); k = 1; }
     }
     // 2.5 Hybrid-5（仅调用方传入 extra.hybrid 状态时）：日期归一到天；动态层 E–G 从 system 移到本轮 user 尾部；历史走迟滞窗口
     let hybrid = null;
@@ -283,12 +295,13 @@
         if (la.dynamicText && lastUser > 0) { dyn = la.dynamicText; msgs[0].content = la.blocks.filter(b => b.kind === 'static').map(b => b.text).join('\n').replace(/\s+$/, ''); }
       }
       const tail = lastUser > 0 ? msgs[lastUser] : null;
-      const hist = msgs.slice(k, lastUser > 0 ? lastUser : msgs.length).map(m => hwOutbound(st, m));
+      let ord = 0;
+      const hist = msgs.slice(k, lastUser > 0 ? lastUser : msgs.length).map((m, i) => hwOutbound(st, m, m.role === 'user' ? sentKey(ids[k + i], ord++) : null));
       const w = hwApply(hist, st);
       let sentUser = null;
       if (tail) {
         const orig = tail.content;
-        if (typeof orig === 'string') { sentUser = Object.assign({}, tail, { content: normalizeDates(dyn ? dyn.replace(/\s+$/, '') + '\n\n' + orig : orig) }); hwRecordSent(st, orig, sentUser.content); }
+        if (typeof orig === 'string') { sentUser = Object.assign({}, tail, { content: normalizeDates(dyn ? dyn.replace(/\s+$/, '') + '\n\n' + orig : orig) }); hwRecordSent(st, sentKey(ids[lastUser], ord), orig, sentUser.content); }
         else sentUser = tail;
       }
       msgs.splice(k, msgs.length - k, ...w.messagesForRequest.concat(sentUser ? [sentUser] : []));
@@ -389,9 +402,10 @@
 
   const reg = root.Plugins && root.Plugins.registry; if (!reg) return;
   const cfgOf = host => Object.assign({}, DEFAULTS, reg.config(host.settings(), ID));
+  const lastPrefix = new Map(); // convId -> 上一轮 system 前缀（仅运行时）
   const statOf = conv => {
     const d = reg.convData(conv, ID);
-    d.stat = Object.assign({ requests: 0, hits: 0, prompt: 0, cached: 0, write: 0, unknown: 0, prefixChanges: 0, prefixLen: 0, prefix: null, lastDiff: null, roll: [], hist: [], static_hash: '', static_prompt_version: STATIC_PROMPT_VERSION, session_id: '', decision: '', diag: null }, d.stat);
+    d.stat = Object.assign({ requests: 0, hits: 0, prompt: 0, cached: 0, write: 0, unknown: 0, prefixChanges: 0, prefixLen: 0, lastDiff: null, roll: [], hist: [], static_hash: '', static_prompt_version: STATIC_PROMPT_VERSION, session_id: '', decision: '', diag: null }, d.stat);
     return d.stat;
   };
   /** MemoryManager 存储：convData.gcache.memory = { L0:[{layer,text,fp}], backups:[指针] } */
@@ -400,7 +414,7 @@
   const LV = { good: '良好 ✅', ok: '一般', low: '偏低 ⚠️（已诊断）', unknown: '未知' };
 
   reg.register({
-    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.3.0', perConversation: false, defaultEnabled: true,
+    id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.4.0', perConversation: false, defaultEnabled: true,
     desc: '只对 OpenRouter 上的 Gemini 模型生效（算法规格 v1.0）：隐式缓存优先，固定前缀够长且稳定时才打 cache_control 显式断点；系统提示分层指纹（static_hash）、每个对话稳定 session_id（sticky routing）、RP 协议锚点、L0 核心记忆保护、按真实 cached_tokens 统计命中与成本并在命中率 <40% 时自动诊断。其他服务商 / 模型的请求完全不变。',
     hooks: {
       onBeforeRequest(ctx, host) {
@@ -444,7 +458,7 @@
       const hyOn = o.hybrid !== false && !(ctx.meta && ctx.meta.gcacheRpcache) && ctx.conv;
       const hd = ctx.conv && reg.convData(ctx.conv, ID);
       if (hyOn) hd.hybrid = hd.hybrid && hd.hybrid.v ? hd.hybrid : HybridWindow.empty();
-      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null });
+      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined) });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
       const now = Date.now();
@@ -453,8 +467,11 @@
       s.expect = expectedHit(s.lastReq, { prefix_hash: hash(r.prefix), t: now }, ttlSec(o));
       s.lastReq = { explicit: !!r.applied, prefix_hash: hash(r.prefix), t: now };
       s.applied = r.applied;
-      if (s.prefix != null && s.prefix !== r.prefix) { s.prefixChanges++; s.lastDiff = firstDiff(s.prefix, r.prefix); }
-      s.prefix = r.prefix; s.prefixLen = r.prefix.length;
+      // v1.4.0：上一轮前缀只留在内存（不再随对话持久化整段 system）；持久化的只有 prefix_hash 与 lastDiff 样本
+      const prevPrefix = ctx.conv ? lastPrefix.get(ctx.conv.id) : null, ph = hash(r.prefix);
+      if (prevPrefix != null ? prevPrefix !== r.prefix : (s.prefix_hash && s.prefix_hash !== ph)) { s.prefixChanges++; if (prevPrefix != null) s.lastDiff = firstDiff(prevPrefix, r.prefix); }
+      if (ctx.conv) lastPrefix.set(ctx.conv.id, r.prefix);
+      delete s.prefix; s.prefix_hash = ph; s.prefixLen = r.prefix.length;
       if (r.layers) {
         s.static_hash = r.layers.static_hash; s.decision = r.decision.reason; s.session_id = r.session_id; s.layered = r.layers.layered;
         s.hist = (s.hist || []).concat([{ t: Date.now(), static_hash: r.layers.static_hash, prefix_hash: hash(r.prefix), model: r.route.model, provider: r.route.provider, session_id: r.session_id, tokens: estTokens(r.layers.staticText) }]).slice(-ROLL_N);

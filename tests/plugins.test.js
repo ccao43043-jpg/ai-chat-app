@@ -79,3 +79,16 @@ test('onResponseUsage / onAfterResponse / 徽章错误隔离', () => {
   const b = reg.messageBadges({ role: 'assistant' }, {}, {}, {});
   assert.deepStrictEqual(b, [{ plugin: 'a', text: 'A', tone: 'ok' }]);
 });
+
+test('v0.8.9 errors 上限 50 + 连续重复去重', () => {
+  const reg = Plugins.createRegistry();
+  let n = 0;
+  reg.register({ id: 'bad', name: 'bad', defaultEnabled: true, hooks: { messageBadges: () => { throw new Error('e' + (n++ % 2 ? '' : n)); } } });
+  for (let i = 0; i < 300; i++) reg.messageBadges({ role: 'assistant' }, {}, {}, {});
+  assert.strictEqual(reg.errors.length, 50);
+  const reg2 = Plugins.createRegistry();
+  reg2.register({ id: 'bad', name: 'bad', defaultEnabled: true, hooks: { messageBadges: () => { throw new Error('same'); } } });
+  for (let i = 0; i < 30; i++) reg2.messageBadges({ role: 'assistant' }, {}, {}, {});
+  assert.strictEqual(reg2.errors.length, 1);
+  assert.strictEqual(reg2.errors[0].count, 30);
+});

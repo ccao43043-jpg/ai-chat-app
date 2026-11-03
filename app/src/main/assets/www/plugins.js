@@ -7,6 +7,13 @@
   function createRegistry() {
     const list = [];
     const errors = [];
+    // v0.8.9：最多保留最近 50 条；同一插件 + 同一钩子 + 同一信息的连续重复只计数（count）
+    const ERR_MAX = 50;
+    function pushErr(e) {
+      const last = errors[errors.length - 1];
+      if (last && last.plugin === e.plugin && last.hook === e.hook && last.message === e.message) { last.count = (last.count || 1) + 1; return; }
+      errors.push(e); if (errors.length > ERR_MAX) errors.splice(0, errors.length - ERR_MAX);
+    }
 
     /** 注册插件。必填：id、name；其余均可选 */
     function register(plugin) {
@@ -68,7 +75,7 @@
 
     function safe(p, name, fn) {
       try { return fn(); } catch (e) {
-        errors.push({ plugin: p.id, hook: name, message: String(e && e.message || e) });
+        pushErr({ plugin: p.id, hook: name, message: String(e && e.message || e) });
         if (typeof console !== 'undefined') console.warn('[plugin ' + p.id + '] ' + name + ' 出错：', e);
         return undefined;
       }
@@ -92,7 +99,7 @@
         const work = Object.assign({}, cur, { messages: (cur.messages || []).map(m => Object.assign({}, m)), meta: Object.assign({}, cur.meta), opts: Object.assign({}, cur.opts) });
         let r;
         try { r = await p.hooks.onBeforeRequest(work, host); } catch (e) {
-          errors.push({ plugin: p.id, hook: 'onBeforeRequest', message: String(e && e.message || e) });
+          pushErr({ plugin: p.id, hook: 'onBeforeRequest', message: String(e && e.message || e) });
           if (typeof console !== 'undefined') console.warn('[plugin ' + p.id + '] onBeforeRequest 出错：', e);
           continue;
         }

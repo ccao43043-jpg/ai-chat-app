@@ -372,7 +372,19 @@
     const calib = Math.round((prev * 0.7 + ratio * 0.3) * 1000) / 1000;
     return Object.assign({}, st, { calib, calibN: (st.calibN | 0) + 1 });
   }
-  const estimateItems = items => items.reduce((n, m) => n + estimateTokens(m.content) + 4 + (m.images ? m.images.length * 1000 : 0), 0);
+  // v0.8.9（P2）：每条消息的估算按 id 缓存（内容 / 图片数不变则复用；运行时，不持久化）
+  const tokCache = new Map();
+  function itemTokens(m) {
+    const imgN = m.images ? m.images.length : 0;
+    if (m.id == null) return estimateTokens(m.content) + 4 + imgN * 1000;
+    const hit = tokCache.get(m.id);
+    if (hit && hit.c === m.content && hit.i === imgN) return hit.t;
+    const t = estimateTokens(m.content) + 4 + imgN * 1000;
+    if (tokCache.size > 20000) tokCache.clear();
+    tokCache.set(m.id, { c: m.content, i: imgN, t });
+    return t;
+  }
+  const estimateItems = items => { let n = 0; for (let i = 0; i < items.length; i++) n += itemTokens(items[i]); return n; };
   const roundsOf = items => items.filter(m => m.role === 'user').length;
   /** 最旧的一批历史：除最近 keep 轮之外的全部 */
   function oldestBatch(hist, keep) {
@@ -486,9 +498,12 @@
     const k = p.calib || 1;
     const un = p.unsummarized;
     const users = []; un.forEach((m, i) => { if (m.role === 'user') users.push(i); });
-    let j = Math.max(0, users.length - keep);
     const fixed = p.tokens.total - p.tokens.history;
-    while (j < users.length - 1 && fixed + estimateItems(un.slice(users[j])) * k > p.limit) j++;
+    // v0.8.9（P2）：前缀和 + 二分。尾部 Token 随起点后移单调不增 → 找最小可行用户轮起点，不早于保留的最近 keep 轮
+    const S = [0]; for (let i = 0; i < un.length; i++) S.push(S[i] + itemTokens(un[i]));
+    const fits = j => fixed + (S[un.length] - S[users[j]]) * k <= p.limit;
+    let j = Math.max(0, users.length - keep);
+    if (users.length && !fits(j)) { let lo = j, hi = users.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (fits(mid)) hi = mid; else lo = mid + 1; } j = lo; }
     const startIdx = users.length ? users[j] : 0;
     if (!un[startIdx]) return st;
     return Object.assign({}, st, { window: { startId: un[startIdx].id, startOrdinal: startIdx } });
@@ -601,13 +616,38 @@
   }
 
   // ---------------- 指纹与诊断 ----------------
+  // v0.8.9（P2）：历史指纹增量化。每条消息 digest（cyrb53）按 id 缓存；history_hash = 滚动前缀哈希 prefix[n]。
+  // 只有需要跨会话比较的层指纹（static / memory / summary / 章节…）保留 SHA-256。新格式以 'c:' 开头，旧日志（64 位十六进制）按旧算法比较。
+  function cyrb53(str, seed) {
+    let h1 = 0xdeadbeef ^ (seed | 0), h2 = 0x41c6ce57 ^ (seed | 0);
+    for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0');
+  }
+  const digestCache = new Map();
+  function digestOf(m) {
+    const imgs = m.images ? imgSig(m.images).join('|') : '';
+    const hit = m.id != null ? digestCache.get(m.id) : null;
+    if (hit && hit.c === m.content && hit.r === m.role && hit.g === imgs) return hit.d;
+    const d = cyrb53(m.role + '\u0001' + String(m.content || '') + '\u0002' + imgs);
+    if (m.id != null) { if (digestCache.size > 20000) digestCache.clear(); digestCache.set(m.id, { c: m.content, r: m.role, g: imgs, d }); }
+    return d;
+  }
+  /** 滚动前缀哈希：out[i] = 前 i 条历史的指纹（out[0] 为空历史） */
+  function historyPrefixes(hist) {
+    const out = ['c:' + cyrb53('')];
+    for (let i = 0; i < hist.length; i++) out.push('c:' + cyrb53(out[i] + ':' + digestOf(hist[i])));
+    return out;
+  }
+  const isLegacyHash = h => typeof h === 'string' && h.length === 64 && h.indexOf(':') < 0;
   function fingerprints(p, baseSystem) {
-    const histSer = serializeHistory(p.hist);
+    const pre = historyPrefixes(p.hist), hh = pre[pre.length - 1];
     const act = activeSummary(p.st);
     return {
       static_hash: sha256(staticText(p.st, baseSystem)), memory_hash: sha256(memoryText(p.st)), summary_hash: sha256(summaryText(p.st)),
-      history_hash: sha256(histSer), delta_hash: sha256(deltaText(p.st)), state_hash: sha256(stateText(p.st)), input_hash: sha256(p.input ? JSON.stringify([p.input.content || '', imgSig(p.input.images)]) : ''),
-      full_prefix_hash: sha256(p.system + '\u0000' + histSer), history_count: p.hist.length,
+      history_hash: hh, delta_hash: sha256(deltaText(p.st)), state_hash: sha256(stateText(p.st)), input_hash: sha256(p.input ? JSON.stringify([p.input.content || '', imgSig(p.input.images)]) : ''),
+      full_prefix_hash: 'c:' + cyrb53(cyrb53(p.system) + '\u0000' + hh), history_count: p.hist.length,
       chapters: chaptersOf(p.st).map(c => c.no + ':' + c.hash.slice(0, 12)),
       versions: { static: p.st.staticVersion | 0, memory: getBlock(p.st, 'memory').version, summary: act ? act.no : 0, delta: getBlock(p.st, 'delta').version, state: getBlock(p.st, 'state').version },
     };
@@ -624,7 +664,9 @@
     if (out.summary === 'CHANGED' && Array.isArray(prev.chapters) && Array.isArray(fp.chapters) && prev.chapters.length && fp.chapters.length > prev.chapters.length &&
       prev.chapters.every((c, i) => fp.chapters[i] === c)) out.summary = 'APPEND';
     if (prev.history_hash === fp.history_hash) out.history = 'SAME';
-    else if (fp.history_count > (prev.history_count | 0) && sha256(serializeHistory(hist, prev.history_count | 0)) === prev.history_hash) out.history = 'APPEND';
+    else if (fp.history_count > (prev.history_count | 0) && (isLegacyHash(prev.history_hash)
+      ? sha256(serializeHistory(hist, prev.history_count | 0)) === prev.history_hash
+      : historyPrefixes((hist || []).slice(0, prev.history_count | 0)).pop() === prev.history_hash)) out.history = 'APPEND';
     else out.history = 'CHANGED';
     return out;
   }
@@ -955,7 +997,7 @@
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, consolidate, editChapter, removeLastChapter,
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
-    estimateTokens, estimateItems, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
+    estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

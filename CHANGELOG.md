@@ -1,5 +1,20 @@
 # 更新日志
 
+**v0.8.9：插件正确性修复 + 请求核心提速（plugin-optimization P1/P2）**
+
+- 「💎 Gemini 提示缓存」插件 1.4.0：
+  - **P1 修复**：Hybrid「已发送版本」表改为按消息 id 索引（无 id 时按历史中第 n 条 user 的序号），记录原文 SHA-256 + 长度，替换前校验；原文变了就不替换。修复连发「继续」时早期历史被改写、FNV-32 碰撞时静默替换的问题（旧版条目升级后丢弃，首轮前缀会重建一次）
+  - `transformRequest` 把 `ctx.messages[i]._src.id` 作为与请求体对齐的并行数组传给 `applyToRequest`（不写入请求体）
+  - L0 缺失诊断同时匹配 JSON 转义形式，含 ASCII 双引号 / 反斜杠的设定行不再误报
+  - `stat.prefix` 不再持久化：上一轮前缀只留内存，持久化 `prefix_hash` + `lastDiff` 样本
+- 「RP 缓存优化器」：
+  - 历史指纹增量化：消息级 cyrb53 digest 运行时缓存 + 滚动前缀哈希；`diagnose` 的 APPEND 判定不再重新序列化历史；层指纹 / 章节仍用 SHA-256；旧日志（SHA-256 history_hash）兼容
+  - Token 估算按消息 id 缓存；`fallbackTrim` 改为前缀和 + 二分（结果与原线性扫描一致）
+  - 600 条消息（约 700KB）请求核心 plan+fingerprints+diagnose：约 36ms → 约 0.6ms（桌面 Node 稳态；首轮冷启动约 18ms）
+- 插件框架：`errors` 只保留最近 50 条，连续重复错误合并计数
+- 请求内容：除 P1 修复本身外不变；无插件时请求逐字节不变
+- Android `0.8.9`（versionCode 40）/ 桌面 / npm `0.8.9`
+
 **v0.8.8：Gemini 缓存 auto 断点覆盖历史 + 保活分析**
 
 - 「💎 Gemini 提示缓存（OpenRouter）」插件 1.3.0：
