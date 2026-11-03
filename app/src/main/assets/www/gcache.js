@@ -174,6 +174,18 @@
   // 「摘要+窗口」前缀每 20 轮才变化一次。摘要为本地启发式（离线、确定性），不调用模型。
   const RAW_MIN = 20, RAW_MAX = 40, SUM_HEAD = '【前情提要（冻结摘要）】';
   const HW_SENT_MAX = 120;
+  // 问题 1：冻结摘要上限。总长（字符）超 SUM_CAP 时，在 20 轮边界把最早 SUM_MERGE_K 段合并为一段更短的二级摘要
+  const SUM_CAP = 8000, SUM_MERGE_K = 4, SUM_L2_LINE = 36, SUM_L2_MIN = 8;
+  const sumLen = ss => ss.reduce((a, s) => a + s.text.length, 0) + Math.max(0, ss.length - 1);
+  /** 二级合并：只压缩更早摘要的文本（确定性、不调用模型），逐行再截断；指纹覆盖合并后整段原文范围 */
+  function mergeSummaries(ss, turns) {
+    const k = ss.slice(0, SUM_MERGE_K), from = k[0].from, to = k[k.length - 1].to;
+    const raw = k.map(s => s.level === 2 ? s.text.split('\n').slice(1).join('\n').split('；') : s.text.split('\n')).flat();
+    const n = Math.max(SUM_L2_MIN, Math.min(SUM_L2_LINE, Math.floor(SUM_CAP / 2 / raw.length) - 1)); // 二级摘要总长约束在 SUM_CAP/2 以内
+    const lines = raw.map(l => clip(l, n));
+    const text = '【二级摘要 第' + (from + 1) + '–' + to + '轮】\n' + lines.join('；');
+    return { from, to, fp: batchFp(turns.slice(from, to)), text, level: 2, at: k[k.length - 1].at };
+  }
   /** 日期只精确到天：「2026-11-02 13:45(:10)」「2026年11月2日 13:45」→ 只保留日期部分 */
   function normalizeDates(s) {
     return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]?|\s*)\d{1,2}[:：]\d{2}(?:[:：]\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '$1');
@@ -221,10 +233,18 @@
       state.summaries.push({ from, to, fp: batchFp(batch), text: summarizeTurns(batch, from), at: new Date().toISOString().slice(0, 10) });
       state.cut = to; summaryCreated = true; prefixChanged = true;
     }
+    let summaryMerged = false;
+    if (summaryCreated) { // 只在 20 轮边界（本次刚追加摘要）合并，前缀本就在此刻变化，不额外抖动
+      while (state.summaries.length >= SUM_MERGE_K && sumLen(state.summaries) > SUM_CAP) {
+        const m = mergeSummaries(state.summaries, turns), old = sumLen(state.summaries.slice(0, SUM_MERGE_K));
+        if (m.text.length >= old) break;
+        state.summaries = [m].concat(state.summaries.slice(SUM_MERGE_K)); summaryMerged = true;
+      }
+    }
     const raw = turns.slice(state.cut).flat();
     const out = state.summaries.length ? [{ role: 'system', content: SUM_HEAD + '\n' + state.summaries.map(s => s.text).join('\n') }].concat(raw) : raw;
     const rawTurns = turns.length - state.cut;
-    return { messagesForRequest: out, state, prefixChanged, summaryCreated, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
+    return { messagesForRequest: out, state, prefixChanged, summaryCreated, summaryMerged, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
   }
   // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
   // 并记录原文 SHA-256 + 长度，替换前校验——原文变了（编辑 / 删除错位 / 哈希碰撞）就不替换。
@@ -247,7 +267,7 @@
   }
   /** 清掉旧版（以内容哈希为键、值为字符串）的条目 */
   function hwMigrateSent(state) { const o = state.sent || {}; Object.keys(o).forEach(k => { if (!o[k] || typeof o[k] !== 'object') delete o[k]; }); state.sent = o; }
-  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
+  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
 
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */

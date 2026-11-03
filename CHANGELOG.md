@@ -1,5 +1,11 @@
 # 更新日志
 
+**v0.9.2：Hybrid-5 冻结摘要二级合并**
+
+- **二级摘要合并**：Hybrid-5 冻结摘要总长超过 8000 字时，仅在 20 轮边界把最早 4 段合并为一段二级摘要（总长约 ≤4000，可再次参与合并），并按合并后的原文范围重算指纹；不改原文、不在边界外抖动缓存前缀
+- 扩充 `tests/gcache.test.js`，更新 `docs/plugins/gemini-hybrid5.md`
+- Android `0.9.2`（versionCode 43）/ 桌面 / npm `0.9.2`
+
 **v0.9.1：Claude 缓存历史锚点 + Gemini 缓存指纹加固**
 
 - **Claude 缓存历史锚点**：在对话历史上追加 cache_control 断点（历史锚点 ≤3 个，连同 system 合计 ≤4 个，符合 Anthropic 上限），只打在 text 内容块上，长对话的历史前缀可命中缓存

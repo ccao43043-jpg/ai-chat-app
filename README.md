@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.9.2：Hybrid-5 冻结摘要二级合并**
+
+- 冻结摘要超 8000 字时在 20 轮边界合并最早 4 段为二级摘要并重算指纹
+- Android `0.9.2`（versionCode 43）/ 桌面 / npm `0.9.2`
+
 **v0.9.1：Claude 缓存历史锚点 + Gemini 缓存指纹加固**
 
 - Claude 历史 cache_control 锚点（≤3 + system ≤4，仅 text 块）；gcache 冻结批次指纹改 SHA-256（旧 FNV 平滑升级）；静态层字符串短路

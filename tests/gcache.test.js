@@ -221,3 +221,38 @@ test('保活分析与写入价', () => {
   assert.ok(G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'a', t: 1000 }, 300));
   assert.ok(!G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'b', t: 1000 }, 300));
 });
+
+// ── 问题 1：冻结摘要二级合并 ──
+const mkLong = n => { const a = []; for (let i = 1; i <= n; i++) a.push({ role: 'user', content: '玩家第' + i + '句：' + '很长的行动描述'.repeat(12) }, { role: 'assistant', content: '回复第' + i + '段：' + '剧情推进与细节'.repeat(16) }); return a; };
+const fpOf = (hist, s) => 'sha256:' + require('../app/src/main/assets/www/rpcache.js').sha256(H.splitTurns(hist).slice(s.from, s.to).flat().map(m => m.role + ':' + m.content).join('\n'));
+test('二级合并：超上限在 20 轮边界合并最早 K 段，指纹覆盖合并范围', () => {
+  const st = H.empty(); let r;
+  for (let n = 40; n <= 100; n += 20) r = H.apply(mkLong(n), st);
+  assert.ok(r.summaryMerged);
+  const s0 = st.summaries[0];
+  assert.strictEqual(s0.level, 2); assert.strictEqual(s0.from, 0); assert.strictEqual(s0.to, H.SUM_MERGE_K * 20);
+  assert.strictEqual(s0.fp, fpOf(mkLong(100), s0));
+  assert.ok(st.summaries.reduce((a, s) => a + s.text.length, 0) <= H.SUM_CAP);
+  // 不变：再调一次字节稳定、不再合并
+  const before = JSON.stringify(r.messagesForRequest[0]);
+  const r2 = H.apply(mkLong(100), st);
+  assert.ok(!r2.summaryMerged && !r2.prefixChanged); assert.strictEqual(JSON.stringify(r2.messagesForRequest[0]), before);
+});
+test('二级合并：未到 20 轮边界不合并', () => {
+  const st = H.empty();
+  for (let n = 40; n <= 80; n += 20) H.apply(mkLong(n), st);
+  const len = st.summaries.length; st.summaries.forEach(s => assert.ok(!s.level));
+  for (let n = 81; n < 100; n++) assert.ok(!H.apply(mkLong(n), st).summaryMerged);
+  assert.strictEqual(st.summaries.length, len);
+});
+test('二级合并：合并后继续追加新摘要；400 轮受上限约束；编辑被合并范围则作废', () => {
+  const st = H.empty(); let merges = 0;
+  for (let n = 40; n <= 420; n += 20) if (H.apply(mkLong(n), st).summaryMerged) merges++;
+  assert.ok(merges >= 2);
+  const last = st.summaries[st.summaries.length - 1];
+  assert.ok(!last.level && last.to === 400);
+  assert.ok(st.summaries.reduce((a, s) => a + s.text.length, 0) <= H.SUM_CAP + 4000);
+  st.summaries.forEach(s => assert.strictEqual(s.fp, fpOf(mkLong(420), s)));
+  const h = mkLong(420); h[2].content = '改过';
+  const r = H.apply(h, st); assert.ok(r.prefixChanged); assert.ok(st.summaries.every(s => s.fp === fpOf(h, s)));
+});
