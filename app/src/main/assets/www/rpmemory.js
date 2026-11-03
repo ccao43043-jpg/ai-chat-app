@@ -177,10 +177,7 @@
           const o = cfgOf(host), cd = reg.convData(ctx.conv, ID);
           if (shouldExtract(userTurns(ctx.conv), cd.lastTurn, o.interval)) Promise.resolve().then(() => extract(ctx.conv, host, false)).then(r => { if (r && r.added && host.isCurrent(ctx.conv)) host.refresh(); }).catch(() => {});
         },
-        headerBadges(conv, host) {
-          const b = loadAll(host)[charKey(conv)]; if (!b || !b.entries.length) return [];
-          return [{ text: '🧠' + b.entries.length, tone: b.lastError ? 'warn' : 'info', title: '结构化记忆 ' + b.entries.length + ' 条' + (b.lastError ? '（上次提取失败：' + b.lastError + '）' : ''), action: () => host.openPanel(ID) }];
-        },
+        headerBadges() { return []; }, // 顶栏不显示记忆条数；详情仍在插件面板
       },
       renderSettings(box, host) {
         const c = reg.config(host.settings(), ID), o = settingsOf(c);

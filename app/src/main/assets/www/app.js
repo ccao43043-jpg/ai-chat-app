@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.13.2';
+  const APP_VERSION = '0.13.3';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -634,16 +634,31 @@
   function renderAll() { renderHeader(); renderMessages(); renderConvList(); }
   function renderConvBar() {
     const bar = $('#conv-bar'); if (!bar) return;
-    const badges = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
-    if (conv && conv.templateName) badges.unshift({ text: (conv.templateEmoji || '📋') + ' ' + conv.templateName, tone: 'info', title: '当前提示词模板（点击切换）', action: openTemplateSheet, cls: 'tpl' });
     renderTplChip();
+    // 顶栏方案1：紧凑状态条，只显示「命中率」+「心情」；模板入口在输入栏 tpl-chip / 模型菜单
+    const raw = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
+    const hit = raw.find(b => b.plugin === 'rpcache' && b.kind === 'hit') || raw.find(b => b.plugin === 'gcache' && b.kind === 'hit')
+      || raw.find(b => b.plugin === 'rpcache') || raw.find(b => b.plugin === 'gcache');
+    const mood = raw.find(b => b.plugin === 'liveliness');
+    const segs = [hit, mood].filter(Boolean);
     bar.innerHTML = '';
-    bar.classList.toggle('show', badges.length > 0);
-    badges.forEach(b => {
-      const el = document.createElement('button'); el.className = 'hbadge tone-' + (b.tone || 'info') + (b.cls ? ' ' + b.cls : ''); el.textContent = b.text; if (b.title) el.title = b.title;
+    bar.classList.toggle('show', segs.length > 0);
+    if (!segs.length) return;
+    const strip = document.createElement('div');
+    strip.className = 'status-strip';
+    strip.setAttribute('role', 'group');
+    strip.setAttribute('aria-label', '对话状态');
+    segs.forEach((b, i) => {
+      if (i) { const d = document.createElement('span'); d.className = 'ss-div'; d.setAttribute('aria-hidden', 'true'); strip.appendChild(d); }
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'ss-seg hbadge tone-' + (b.tone || 'info') + (b.kind ? ' kind-' + b.kind : '');
+      el.textContent = (b.kind === 'mood' ? '💓 ' : b.kind === 'hit' ? '⚡ ' : '') + b.text;
+      if (b.title) el.title = b.title;
       if (b.action) el.onclick = b.action;
-      bar.appendChild(el);
+      strip.appendChild(el);
     });
+    bar.appendChild(strip);
   }
   function renderHeader() {
     const p = getProvider(conv.providerId);

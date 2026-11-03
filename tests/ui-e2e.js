@@ -466,11 +466,14 @@ async function scenario(browser, theme) {
   await closePanels();
 
   // 发送几轮：L1→L2 在 system，L5+L6 在最后一条用户消息，历史前缀逐字节稳定
-  r.badge = await page.$eval('#conv-bar', e => e.textContent);
-  assert.ok(r.badge.includes('RP'), r.badge);
+  // 顶栏精简：无命中数据前不显示徽章；模板入口在 #btn-template
+  assert.ok(!(await page.$eval('#conv-bar', e => e.classList.contains('show'))) || !(await page.$eval('#conv-bar', e => e.textContent)).includes('🎭'), '顶栏不显示 RP 开关/模板杂徽章');
   const rq = [];
   rq.push(await sendRP('我推开旧书店的门，低声问老板：失踪的商人最后来过这里吗？'));
   rq.push(await sendRP('我拿出那本账本给张燕看。'));
+  r.badge = await page.$eval('#conv-bar', e => e.textContent);
+  assert.ok(r.badge.includes('命中'), '发送后顶栏显示命中率：' + r.badge);
+  assert.ok(!r.badge.includes('章') && !r.badge.includes('不适用') && !/🧠/.test(r.badge), '无章节/记忆杂徽章：' + r.badge);
   // 修改动态状态（L5）：不影响历史缓存
   await page.click('#conv-bar .hbadge'); await sleep(450); await tab('blocks'); await sleep(200);
   await openBlock('当前动态状态'); await sleep(250); await typeBlock('Location: 王都西区 · 旧书店\nTime: 22:05\nHP: 82/100\nZhangYan_Affection: 41'); await page.click('#rb-save'); await sleep(250);
@@ -583,7 +586,7 @@ async function scenario(browser, theme) {
   logs = await rpLogs();
   assert.strictEqual(logs[logs.length - 1].diag.summary, 'SAME'); assert.strictEqual(logs[logs.length - 1].diag.history, 'APPEND');
   // 摘要页（V2）：章节列表 / 查看 / 编辑（旧内容进入该章历史）/ 恢复
-  await page.click('#conv-bar .hbadge:nth-child(2)'); await sleep(500);
+  await page.click('#conv-bar .hbadge'); await sleep(450); await tab('summary'); await sleep(200);
   r.sumTab = await page.$eval('#pp-body .seg button.active', e => e.textContent);
   assert.strictEqual(r.sumTab, '章节摘要');
   assert.deepStrictEqual(await englishLeft(), [], '章节摘要页');
@@ -691,9 +694,10 @@ async function scenario(browser, theme) {
   r.qwBadges = await page.$$eval('.msg.assistant', els => els.length ? [...els[els.length - 1].querySelectorAll('.mbadge')].map(b => b.textContent) : []);
   assert.ok(r.qwBadges.some(t => t.startsWith('缓存 ')), JSON.stringify(r.qwBadges));
   r.qwHeader = await page.$$eval('#conv-bar .hbadge', e => e.map(x => x.textContent));
-  assert.ok(r.qwHeader.some(t => t.startsWith('🎭 RP')), JSON.stringify(r.qwHeader));
-  // 面板：自动标签 + 自动策略
-  await page.evaluate(() => { const b = [...document.querySelectorAll('#conv-bar .hbadge')].find(x => x.textContent.includes('🎭')); if (b) b.click(); }); await sleep(500);
+  assert.ok(r.qwHeader.some(t => t.includes('命中')), JSON.stringify(r.qwHeader));
+  assert.ok(!r.qwHeader.some(t => t.includes('🎭') || t.includes('章')), '顶栏无 RP 杂徽章 ' + JSON.stringify(r.qwHeader));
+  // 面板：自动标签 + 自动策略（点命中率徽章）
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#conv-bar .hbadge')].find(x => x.textContent.includes('命中')); if (b) b.click(); }); await sleep(500);
   if (!await page.$eval('#page-plugin', e => e.classList.contains('show'))) {
     await page.click('#model-pill'); await sleep(250);
     await page.evaluate(() => [...document.querySelectorAll('#model-menu .pm-item.tool')].find(e => e.textContent.includes('RP 缓存优化')).click()); await sleep(500);
@@ -744,8 +748,9 @@ async function scenario(browser, theme) {
   await tqPick('简洁回答'); await sleep(350);
   assert.ok(!(await page.$eval('#tpl-sheet', e => e.classList.contains('show'))), '点一下立即应用并关闭');
   assert.strictEqual(await page.$eval('#tpl-chip-label', e => e.textContent), '简洁回答');
-  r.tplBadge = await page.$eval('#conv-bar .hbadge.tpl', e => e.textContent);
+  r.tplBadge = await page.$eval('#tpl-chip-label', e => e.textContent);
   assert.ok(r.tplBadge.includes('简洁回答'), r.tplBadge);
+  assert.strictEqual(await page.$('#conv-bar .hbadge.tpl'), null, '顶栏不再显示模板徽章');
   await setInput('什么是 TCP？'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250);
   const concise = r.tplBuiltin.find(t => t.id === 't-concise').content;
   r.tplReq = await lastPost();
@@ -757,7 +762,7 @@ async function scenario(browser, theme) {
   assert.ok(r.toolsRow.every(x => Math.abs(x[0] - r.toolsRow[0][0]) <= 2 && x[2]), '输入栏工具保持一行 ' + JSON.stringify(r.toolsRow));
   assert.ok(r.toolsRow[r.toolsRow.length - 1][1] <= 390, '发送按钮不溢出');
   // 变量：以某种身份回答 → 填写 {{身份}} {{语气}}
-  await page.click('#conv-bar .hbadge.tpl'); await sleep(450);
+  await page.click('#btn-template'); await sleep(450);
   assert.ok((await page.$eval('#tq-cur', e => e.textContent)).includes('简洁回答'));
   assert.ok(await page.$eval('#tq-list .tpl-item.current .tpl-cur', e => e.textContent === '使用中'));
   await tqPick('以某种身份回答'); await sleep(400);
@@ -871,7 +876,8 @@ async function scenario(browser, theme) {
   await page.evaluate(() => window.onAndroidBack()); await sleep(400);
   assert.ok(!(await page.$eval('#page-templates', e => e.classList.contains('show'))));
   await page.click('#btn-new'); await sleep(350);
-  assert.ok((await page.$eval('#conv-bar .hbadge.tpl', e => e.textContent)).includes('润色改写'));
+  assert.ok((await page.$eval('#tpl-chip-label', e => e.textContent)).includes('润色改写'));
+  assert.strictEqual(await page.$('#conv-bar .hbadge.tpl'), null, '新对话默认模板也不进顶栏');
   await setInput('这句话帮我改一下：我们公司产品非常的好用'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250);
   assert.strictEqual((await lastPost()).body.messages[0].content, r.tplBuiltin.find(t => t.id === 't-polish').content);
   // 设置页里也能改默认模板

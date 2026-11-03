@@ -486,6 +486,14 @@
         if (i.known === false) return [{ text: '💎 缓存 ?', tone: 'info', title: usageText(i), action: () => host.openPanel(ID) }];
         return [{ text: '💎 缓存 ' + i.pct + '%', tone: i.pct >= DIAG_GOOD ? 'ok' : i.hit ? 'warn' : 'info', title: usageText(i), action: () => host.openPanel(ID) }];
       },
+      headerBadges(conv, host) {
+        // 顶栏：Gemini 滚动命中率（RP 有命中率时由 app 优先展示 RP）
+        if (!conv) return [];
+        const s = reg.convData(conv, ID).stat; if (!s || !(s.roll || []).length) return [];
+        const d = s.diag || diagnose(s); if (d.rate == null) return [];
+        const tn = d.level === 'good' ? 'ok' : d.level === 'low' ? 'bad' : d.level === 'ok' ? 'warn' : 'info';
+        return [{ text: '命中 ' + d.rate + '%', tone: tn, title: 'Gemini 滚动命中率（近 ' + ROLL_N + ' 次）', action: () => host.openPanel(ID), kind: 'hit' }];
+      },
     },
     /** app.js 在 buildChatRequest 之后调用：改写请求并记录分层指纹 / 前缀稳定性 */
     transformRequest(req, ctx) {

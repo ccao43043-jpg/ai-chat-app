@@ -395,17 +395,12 @@
         return out;
       },
       headerBadges(conv, host) {
+        // 顶栏只保留命中率（不适用 / 强制 / 章节 / 即将摘要等杂项不再显示）
         const ap = applicability(host, conv);
-        if (!ap.effective) return [{ text: '🎭 RP · 不适用', tone: 'info', title: '当前服务商 / 模型不是 DeepSeek / 千问，插件不改写请求（可在面板中强制启用）', action: () => host.openPanel(ID, 'blocks') }];
+        if (!ap.effective) return [];
         const logs = loadLogs(host, conv); const last = logs[logs.length - 1];
-        const out = [{ text: '🎭 RP' + (ap.forced ? '（强制）' : '') + (last ? ' · 命中 ' + (last.supported ? pct(last.hit_rate) : '—') : ''), tone: last && last.supported ? tone(last.hit_rate) : 'info', action: () => host.openPanel(ID, last ? 'monitor' : 'blocks') }];
-        const p = planConv(conv, host); const ch = R.chaptersOf(p.st);
-        if (ch.length) out.push({ text: '📚 ' + ch.length + ' 章', tone: 'info', action: () => host.openPanel(ID, 'summary') });
-        const sum = p.st.settings.summary;
-        const unTok = Math.round(R.estimateItems(p.unsummarized) * p.calib);
-        if (p.needSummary) out.push({ text: p.needConsolidate ? '下次发送将合并章节' : '下次发送将追加章节', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
-        else if (sum.enabled && unTok >= sum.trigger_tokens * 0.85) out.push({ text: p.summaryBlocked === 'interval' ? '摘要间隔未到' : '即将自动摘要', tone: 'warn', action: () => host.openPanel(ID, 'summary') });
-        return out;
+        if (!last || !last.supported || last.hit_rate == null) return [];
+        return [{ text: '命中 ' + pct(last.hit_rate), tone: tone(last.hit_rate), title: '缓存命中率（点击查看监控）', action: () => host.openPanel(ID, 'monitor'), kind: 'hit' }];
       },
       messageState(msg, conv, host) {
         if (host && !effectiveFor(host, conv)) return null; // 不适用时完全不影响界面（不变灰、不冻结）

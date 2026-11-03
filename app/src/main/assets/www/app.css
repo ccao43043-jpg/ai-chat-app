@@ -455,6 +455,12 @@ input:disabled { opacity: .55; }
 .conv-bar { display: none; gap: 6px; padding: 0 14px 6px; overflow-x: auto; flex-shrink: 0; scrollbar-width: none; background: var(--bg); }
 .conv-bar::-webkit-scrollbar { display: none; }
 .conv-bar.show { display: flex; justify-content: center; }
+/* 方案1：顶部单行紧凑状态条（命中率 + 心情） */
+.status-strip { display: inline-flex; align-items: center; height: 32px; max-width: 100%; padding: 0 2px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line); gap: 0; }
+.status-strip .ss-div { width: 1px; height: 14px; background: var(--line); flex: 0 0 auto; opacity: .85; }
+.status-strip .ss-seg.hbadge { height: 28px; border: none; background: transparent; border-radius: 999px; padding: 0 11px; }
+.status-strip .ss-seg.hbadge:active { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .hbadge { flex: 0 0 auto; height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center;
   background: var(--surface-2); color: var(--fg-2); border: 1px solid var(--line); }
 .hbadge:active, .mbadge:active { transform: scale(.96); }

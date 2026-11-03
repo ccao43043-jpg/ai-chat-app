@@ -151,7 +151,7 @@
           const st = loadAll(host)[charKey(conv)]; if (!st) return [];
           const s = normalize(st, charKey(conv), Date.now() / 1000); applyDecay(s, Date.now() / 1000);
           const [lv] = level(s, willingness(s), Date.now() / 1000);
-          return [{ text: '💓' + mood(s) + '·' + lv, tone: lv <= 2 ? 'warn' : 'info', title: '角色活人感：' + STAGES[s.stage] + ' · 配合度 ' + lv, action: () => host.openPanel(ID) }];
+          return [{ text: mood(s) + ' · ' + lv, tone: lv <= 2 ? 'warn' : 'info', title: '心情 ' + mood(s) + ' · 好感档 ' + lv + '（' + STAGES[s.stage] + '）', action: () => host.openPanel(ID), kind: 'mood' }];
         },
       },
       renderPanel(box, host) {

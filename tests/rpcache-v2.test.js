@@ -225,7 +225,7 @@ test('服务商适用性：非 DeepSeek 对话默认逐字节不变（即使在�
     assert.strictEqual(on.conv.messages[0].rpSent, undefined, id + '：不冻结用户消息');
     assert.strictEqual(on.host.raw['rplog_' + on.conv.id + '.json'], undefined, '不记录日志');
     const hb = reg.headerBadges(on.settings, on.conv, on.host);
-    assert.strictEqual(hb[0].text, '🎭 RP · 不适用');
+    assert.deepStrictEqual(hb, [], id + '：不适用时顶栏不显示 RP 徽章');
     assert.strictEqual(reg.messageState(on.conv.messages[0], on.settings, on.conv, on.host), null);
   }
   // 自定义 OpenAI 兼容服务商：地址或模型名含 deepseek 即适用
@@ -247,7 +247,9 @@ test('强制启用于 Claude：system 与稳定历史末尾带 cache_control；D
   assert.strictEqual(marked.length, 1, '只有一个消息断点');
   assert.strictEqual(b.messages.indexOf(marked[0]), b.messages.length - 2, '断点在稳定历史末尾（最后一条用户消息之前）');
   assert.ok(!JSON.stringify(b.messages[b.messages.length - 1]).includes('cache_control'));
-  assert.ok(reg.headerBadges(s.settings, s.conv, s.host)[0].text.includes('强制'));
+  // 顶栏只显示命中率，不再带「强制」字样（请求侧 cache_control 已在上方断言）
+  const hbForce = reg.headerBadges(s.settings, s.conv, s.host);
+  assert.ok(hbForce.length === 1 && hbForce[0].text.startsWith('命中 ') && !hbForce[0].text.includes('强制'), JSON.stringify(hbForce.map(b => b.text)));
   const d = session(); await d.send('一'); await d.send('二');
   assert.ok(!d.turns[1].body.includes('cache_control'));
   // 强制启用于 OpenAI：照常重排但不加 cache_control
