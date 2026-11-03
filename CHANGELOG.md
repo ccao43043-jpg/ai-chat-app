@@ -1,5 +1,16 @@
 # 更新日志
 
+**v0.13.0：世界书状态机 + 确定性概率 + 虚拟滚动锚点**
+
+- **P0 世界书概率确定性种子**：`convId + anchorId + entryId` → cyrb53/mulberry32；同消息重生成激活结果一致；配套测试「两次激活一致」
+- **P0 sticky / cooldown / delay 接入 `activateLore` 状态机**（`conv.loreState`）：sticky 期间不重复追加；cooldown / delay 按回合跳过；章节覆盖与 `rebuildLore` 清理状态
+- **P0 虚拟滚动锚点校正**：重渲染后按可见消息相对视口偏移回位，实测高度后再校正 spacer，避免跳动
+- **P1 世界书预算**：触发与常驻均用剩余额度，装不下则 `continue` 试下一条（不再 `break`）
+- **P1 记忆相关性**：中文关键词不再只截前 2 字；查询侧抽词 + 子串互含匹配
+- **P1 上下文体检面板**（简化版）：RP 面板新增「上下文体检」只读摘要（Token、分层指纹、世界书状态机）
+- 保留 liveliness / rpmemory / charcard；Android `0.13.0`（versionCode 48）/ 桌面 / npm `0.13.0`
+
+
 **v0.12.0：Character Card V2 + 世界书 ST 语义 + 消息虚拟滚动**
 
 - **Character Card V2 导入 / 导出**：独立模块 `charcard.js` 解析 PNG tEXt/zTXt `chara`（及 JSON），映射到助手 persona + 世界书文本；可从助手库导入 PNG/JSON、导出 PNG；开场白可作为首条助手消息，世界书写入 RP 状态。配套 `tests/charcard.test.js`

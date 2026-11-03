@@ -167,6 +167,7 @@
       window: { startId: null, startOrdinal: 0 }, // 仅在超预算且无法摘要时使用的「分块截断」起点
       settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
       seq: 0,
+      loreState: { turn: 0, entries: {} }, // v0.13：sticky / cooldown / delay 状态机
     };
   }
   /** v0.3.x 的单份合并摘要 → V2 章节 #001（覆盖范围不变，内容逐字保留） */
@@ -200,7 +201,41 @@
     return Object.assign({}, st, { blocks, settings, staticVersion: st.staticVersion | 0, baseHash: st.baseHash == null ? null : st.baseHash,
       summaries: Array.isArray(st.summaries) ? st.summaries : [], chapters, chapterSeq: Math.max(chapterSeq, chapters.reduce((n, c) => Math.max(n, c.no | 0), 0)),
       archive: Array.isArray(st.archive) ? st.archive : [], lastSummaryRound: st.lastSummaryRound | 0, calib,
-      window: Object.assign({ startId: null, startOrdinal: 0 }, st.window || {}), seq: st.seq | 0 });
+      window: Object.assign({ startId: null, startOrdinal: 0 }, st.window || {}), seq: st.seq | 0,
+      loreState: normalizeLoreState(st.loreState) });
+  }
+  function normalizeLoreState(ls) {
+    const base = { turn: 0, entries: {} };
+    if (!ls || typeof ls !== 'object') return base;
+    const entries = {};
+    const src = ls.entries && typeof ls.entries === 'object' ? ls.entries : {};
+    Object.keys(src).forEach(id => {
+      const e = src[id] || {};
+      entries[id] = {
+        stickyUntil: e.stickyUntil | 0,
+        cooldownUntil: e.cooldownUntil | 0,
+        lastAnchorId: e.lastAnchorId || null,
+      };
+    });
+    return { turn: ls.turn | 0, entries };
+  }
+  function loreStateOf(st) { return normalizeLoreState(st && st.loreState); }
+  /** 章节覆盖 / 重建时清理：去掉已无有效冻结的条目状态，或整表重置 */
+  function pruneLoreState(st, opts) {
+    opts = opts || {};
+    if (opts.reset) return Object.assign({}, st, { loreState: { turn: 0, entries: {} } });
+    const ls = loreStateOf(st);
+    const keep = opts.keepEntryIds ? new Set(opts.keepEntryIds) : null;
+    if (!keep) {
+      // 默认：仅保留仍有 activeFired 的 entry
+      const live = new Set((opts.active || activeFired(st, opts.items || [])).map(r => r.entryId));
+      const entries = {};
+      Object.keys(ls.entries).forEach(id => { if (live.has(id)) entries[id] = ls.entries[id]; });
+      return Object.assign({}, st, { loreState: { turn: ls.turn, entries } });
+    }
+    const entries = {};
+    Object.keys(ls.entries).forEach(id => { if (keep.has(id)) entries[id] = ls.entries[id]; });
+    return Object.assign({}, st, { loreState: { turn: ls.turn, entries } });
   }
   function budgetIsDefault(s) {
     const d = DEFAULT_SETTINGS, a = s.summary || {}, b = d.summary;
@@ -279,16 +314,31 @@
   /** 追加新章节：只覆盖本批新移出的历史；之前的章节逐字不变 → 前缀保持 */
   function addChapter(st, o) {
     const ch = mkChapter(st, o);
-    return Object.assign({}, st, { chapters: chaptersOf(st).concat([ch]), chapterSeq: ch.no, lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0,
+    const next = Object.assign({}, st, { chapters: chaptersOf(st).concat([ch]), chapterSeq: ch.no, lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0,
       window: { startId: null, startOrdinal: 0 } });
+    return clearLoreStateForCovered(next, ch.coveredIds || []);
+  }
+  /** 锚点被章节覆盖后，清掉对应条目的 sticky/cooldown，允许再次触发 */
+  function clearLoreStateForCovered(st, covered) {
+    const cov = new Set(covered || []);
+    if (!cov.size) return st;
+    const ls = loreStateOf(st);
+    const entries = {};
+    Object.keys(ls.entries).forEach(id => {
+      const es = ls.entries[id];
+      if (es && es.lastAnchorId && cov.has(es.lastAnchorId)) return;
+      entries[id] = es;
+    });
+    return Object.assign({}, st, { loreState: { turn: ls.turn, entries } });
   }
   const pushArchive = (st, list, why, at) => (st.archive || []).concat(list.map(c => Object.assign({}, c, { archivedAt: at || 0, archivedWhy: why }))).slice(-ARCHIVE_LIMIT);
   /** 合并全部章节（+ 可选的新一批历史）为一章：只在章节总量超过上限时使用，会让 L3 之后的缓存重建一次 */
   function consolidate(st, o) {
     const old = chaptersOf(st);
     const ch = mkChapter(st, Object.assign({}, o, { coveredIds: coveredIds(st).concat(o.coveredIds || []), mergedFrom: old.map(c => c.no), source: o.source || 'merge' }));
-    return Object.assign({}, st, { chapters: [ch], chapterSeq: ch.no, archive: pushArchive(st, old, 'merge', o.at),
+    const next = Object.assign({}, st, { chapters: [ch], chapterSeq: ch.no, archive: pushArchive(st, old, 'merge', o.at),
       lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0, window: { startId: null, startOrdinal: 0 } });
+    return clearLoreStateForCovered(next, ch.coveredIds || []);
   }
   /** 编辑某一章（会让这一章及之后的缓存重建）；旧内容进入该章的版本历史 */
   function editChapter(st, no, content, at) {
@@ -436,11 +486,11 @@
     const ctx = ctxTokens || (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
     const budget = Math.max(200, Math.floor(ctx * (ls.constantBudgetPct != null ? ls.constantBudgetPct : 0.15)));
     const sorted = all.slice().sort((a, b) => (b.priority - a.priority) || (a.order - b.order));
-    const out = []; let used = 0;
+    const out = []; let used = 0; let remaining = budget;
     for (const e of sorted) {
       const t = estimateLoreTokens(e);
-      if (out.length && used + t > budget) break;
-      out.push(e); used += t;
+      if (t > remaining) continue; // 装不下则跳过，继续试下一条
+      out.push(e); used += t; remaining -= t;
     }
     return out;
   }
@@ -487,6 +537,24 @@
     const slice = (items || []).slice(-n);
     return slice.map(m => String(m.content || '')).join('\n');
   }
+  /** 确定性种子 RNG：同 (convId+anchorId+entryId) 重生成结果一致 */
+  function seedHash(str) {
+    // 复用 cyrb53 的数值部分作为 32-bit 种子
+    const hex = cyrb53(String(str || ''), 0);
+    return parseInt(hex.slice(-8), 16) >>> 0;
+  }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function rngForSeed(seedStr) { return mulberry32(seedHash(seedStr)); }
+  function loreSeedKey(convId, anchorId, entryId) {
+    return String(convId || '') + '\0' + String(anchorId || '') + '\0' + String(entryId || '');
+  }
   function rollProbability(p, rng) {
     const prob = p == null ? 100 : Number(p);
     if (!(prob < 100)) return true;
@@ -508,16 +576,31 @@
     // 条目级 depth：取最大窗口再扫一次（热路径仍基于同一 messages 后缀）
     const maxDepth = Math.max(depth0, ...lore.map(e => e.scanDepth || 0));
     if (maxDepth > depth0) scan = scanWindow(items, maxDepth);
-    const rng = opts.rng;
+    const loreSt = loreStateOf(st);
+    const turn = opts.turn != null ? opts.turn | 0 : loreSt.turn | 0;
+    const convId = opts.convId || '';
+    const anchorId = opts.anchorId || ((items[items.length - 1] || {}).id) || '';
+    // sticky 中的条目视为已激活，不重复追加；cooldown 中跳过；delay 未到跳过
+    const stickyLive = new Set();
+    lore.forEach(e => {
+      const es = loreSt.entries[e.id];
+      if (es && (es.stickyUntil | 0) > turn) stickyLive.add(e.id);
+    });
+    stickyLive.forEach(id => live.add(id));
     let activated = [];
     function runPass(scanText) {
       const hit = [];
       for (const e of lore) {
         if (live.has(e.id) || activated.some(x => x.id === e.id)) continue;
+        const es = loreSt.entries[e.id] || {};
+        if ((e.delay | 0) > 0 && turn < (e.delay | 0)) continue;
+        if ((es.cooldownUntil | 0) > turn && (es.stickyUntil | 0) <= turn) continue;
         const depth = e.scanDepth || depth0;
         const localScan = depth === maxDepth ? scanText : scanWindow(items, depth);
         if (!matchPrimary(localScan, e)) continue;
         if (!matchSecondary(localScan, e)) continue;
+        const seed = loreSeedKey(convId, anchorId, e.id);
+        const rng = opts.rng || rngForSeed(seed);
         if (!rollProbability(e.probability, rng)) continue;
         hit.push(e);
       }
@@ -545,12 +628,16 @@
     activated = ung.concat(Object.keys(byGroup).map(k => byGroup[k]));
     activated.sort((a, b) => (b.priority - a.priority) || (a.order - b.order));
     const ctx = opts.ctxTokens || (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
-    const budget = Math.max(200, Math.floor(ctx * (ls.budgetPct != null ? ls.budgetPct : 0.25)));
+    let budget = Math.max(200, Math.floor(ctx * (ls.budgetPct != null ? ls.budgetPct : 0.25)));
+    // P1：可用剩余额度（已用常量等占位）+ 装不下则 continue 试下一条
+    if (opts.usedBudget != null) budget = Math.max(0, budget - (opts.usedBudget | 0));
+    const remaining0 = opts.remainingBudget != null ? opts.remainingBudget | 0 : budget;
+    let remaining = Math.max(0, remaining0);
     const out = []; let used = 0;
     for (const e of activated) {
       const t = estimateLoreTokens(e);
-      if (out.length && used + t > budget) break;
-      out.push(e); used += t;
+      if (t > remaining) continue; // 装不下就跳过，继续试下一条
+      out.push(e); used += t; remaining -= t;
     }
     return out;
   }
@@ -565,14 +652,44 @@
     const active = activeFired(st, items);
     if (active.some(r => r.anchorId === last.id)) return { state: st, fired: [] };
     const live = new Set(active.map(r => r.entryId));
-    const picked = activateLore(st, items, Object.assign({ excludeIds: [...live] }, opts));
+    const loreSt0 = loreStateOf(st);
+    const turn = (loreSt0.turn | 0) + 1;
+    const convId = opts.convId || '';
+    const picked = activateLore(st, items, Object.assign({
+      excludeIds: [...live],
+      turn,
+      convId,
+      anchorId: last.id,
+    }, opts));
+    // 更新 sticky / cooldown 状态机
+    const entries = Object.assign({}, loreSt0.entries);
+    picked.forEach(e => {
+      const sticky = e.sticky | 0;
+      const cooldown = e.cooldown | 0;
+      const stickyUntil = sticky > 0 ? turn + sticky : turn;
+      const cooldownUntil = stickyUntil + (cooldown > 0 ? cooldown : 0);
+      entries[e.id] = {
+        stickyUntil,
+        cooldownUntil: cooldown > 0 || sticky > 0 ? cooldownUntil : (entries[e.id] && entries[e.id].cooldownUntil) || 0,
+        lastAnchorId: last.id,
+      };
+    });
+    // 过期清理：sticky/cooldown 都已过的条目可删
+    Object.keys(entries).forEach(id => {
+      const es = entries[id];
+      if ((es.stickyUntil | 0) <= turn && (es.cooldownUntil | 0) <= turn && !picked.some(e => e.id === id) && !live.has(id)) {
+        // 保留最近一次记录一小段，避免无限膨胀：仅删双过期且非 live
+        delete entries[id];
+      }
+    });
+    const loreState = { turn, entries };
     const fired = picked.map(e => ({
       entryId: e.id, name: e.name, anchorId: last.id, content: e.content,
       hash: sha256(e.content), at: at || 0, priority: e.priority | 0,
     }));
-    if (!fired.length) return { state: st, fired };
+    if (!fired.length) return { state: Object.assign({}, st, { loreState }), fired };
     const old = firedOf(st).slice(-200);
-    return { state: Object.assign({}, st, { loreFired: old.concat(fired) }), fired };
+    return { state: Object.assign({}, st, { loreFired: old.concat(fired), loreState }), fired };
   }
   /** 把有效的冻结记录拼到各自锚点消息上（顺序 = 触发顺序；逐字节稳定） */
   function applyFrozenLore(st, items) {
@@ -586,9 +703,13 @@
    */
   function rebuildLore(st, items, at, opts) {
     opts = opts || {};
-    let state = Object.assign({}, st, { loreFired: [], loreNeedsRebuild: false, loreEditedWhileFrozen: false });
+    let state = Object.assign({}, st, {
+      loreFired: [], loreNeedsRebuild: false, loreEditedWhileFrozen: false,
+      loreState: { turn: 0, entries: {} }, // 重建清理状态机
+    });
     const list = items || [];
     const allFired = [];
+    const convId = opts.convId || '';
     for (let i = 0; i < list.length; i++) {
       if (list[i].role !== 'user' || !list[i].id) continue;
       const prefix = list.slice(0, i + 1);
@@ -596,14 +717,26 @@
         const covered = new Set(coveredIds(state));
         return !covered.has(r.anchorId);
       }).map(r => r.entryId));
+      const turn = (loreStateOf(state).turn | 0) + 1;
       // 临时 state 供 activate 读 lore；用 prefix 作扫描窗口
-      const picked = activateLore(state, prefix, Object.assign({ excludeIds: [...live], recursionDepth: loreSettings(state).recursionDepth }, opts));
+      const picked = activateLore(state, prefix, Object.assign({
+        excludeIds: [...live],
+        recursionDepth: loreSettings(state).recursionDepth,
+        turn, convId, anchorId: list[i].id,
+      }, opts));
+      const entries = Object.assign({}, loreStateOf(state).entries);
       picked.forEach(e => {
+        const sticky = e.sticky | 0;
+        const cooldown = e.cooldown | 0;
+        const stickyUntil = sticky > 0 ? turn + sticky : turn;
+        const cooldownUntil = stickyUntil + (cooldown > 0 ? cooldown : 0);
+        entries[e.id] = { stickyUntil, cooldownUntil: cooldown > 0 || sticky > 0 ? cooldownUntil : 0, lastAnchorId: list[i].id };
         allFired.push({
           entryId: e.id, name: e.name, anchorId: list[i].id, content: e.content,
           hash: sha256(e.content), at: at || 0, priority: e.priority | 0, rebuilt: true,
         });
       });
+      state = Object.assign(state, { loreState: { turn, entries } });
     }
     state = Object.assign(state, { loreFired: allFired.slice(-200) });
     return { state, fired: allFired };
@@ -1306,7 +1439,7 @@
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
-    parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum };
+    parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

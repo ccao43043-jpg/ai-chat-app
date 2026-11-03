@@ -45,3 +45,13 @@ test('插件：只改最后一条用户消息；第 N 轮后台提取，失败�
   await assert.doesNotReject(M._extract(conv, host, false));
   assert.strictEqual(mem[M.FILE]['persona:p1'].lastError, 'boom');
 });
+
+test('中文关键词不截断成长词前两字；相关性可命中长词', () => {
+  const M = require('../app/src/main/assets/www/rpmemory.js');
+  const kws = M.autoKeywords('艾琳是王城东郊的药剂师');
+  assert.ok(kws.some(k => k.includes('药剂师') || k === '药剂师' || k.length >= 3), '应保留有意义中文词');
+  assert.ok(!kws.every(k => k.length <= 2 && /[\u4e00-\u9fff]/.test(k)), '不应只剩两字截断');
+  const list = [{ id: '1', type: 'fact', text: '艾琳是王城东郊的药剂师', keywords: M.autoKeywords('艾琳是王城东郊的药剂师'), seq: 1, pinned: false }];
+  const hit = M.selectRelevant(list, '去找药剂师', { maxInject: 4, minScore: 1 });
+  assert.ok(hit.length >= 1, '查询「药剂师」应命中');
+});

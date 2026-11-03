@@ -303,12 +303,12 @@
         let items = ti.items;
         // v0.12：冷路径 — 修改世界书后勾选「立即重建」时完整重排冻结
         if (st.loreNeedsRebuild && typeof R.rebuildLore === 'function') {
-          const rb = R.rebuildLore(st, items, Date.now());
+          const rb = R.rebuildLore(st, items, Date.now(), { convId: ctx.conv && ctx.conv.id });
           st = rb.state || rb;
           host.toast('世界书已按新设定重建冻结片段（缓存可能未命中一次）');
         }
-        // 热路径：触发条目首次触发 → 冻结到本轮用户消息末尾（不重排已冻结）
-        const fl = R.fireLore(st, items, Date.now());
+        // 热路径：触发条目首次触发 → 冻结到本轮用户消息末尾（不重排已冻结）；概率种子=convId+anchorId+entryId
+        const fl = R.fireLore(st, items, Date.now(), { convId: ctx.conv && ctx.conv.id });
         if (fl.fired.length) { st = fl.state; host.toast('世界书触发：' + fl.fired.map(r => r.name).join('、') + '（已冻结进本轮消息，之后位置固定）'); }
         if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
         const logs0 = loadLogs(host, ctx.conv);
@@ -520,14 +520,14 @@
       }
       if (this.panel.view) { this.panel.view(box); return; }
       const seg = document.createElement('div'); seg.className = 'seg in-body';
-      [['blocks', '分层设定'], ['summary', '章节摘要'], ['monitor', '缓存监控'], ['opts', '预算设置']].forEach(([k, t]) => {
+      [['blocks', '分层设定'], ['summary', '章节摘要'], ['monitor', '缓存监控'], ['health', '上下文体检'], ['opts', '预算设置']].forEach(([k, t]) => {
         const b = document.createElement('button'); b.textContent = t; b.dataset.tab = k; if (k === this.panel.tab) b.className = 'active';
         b.onclick = () => { this.panel.tab = k; this._render(); };
         seg.appendChild(b);
       });
       box.appendChild(seg);
       const body = document.createElement('div'); box.appendChild(body);
-      ({ blocks: this._blocks, summary: this._summary, monitor: this._monitor, opts: this._opts })[this.panel.tab].call(this, body, conv, host);
+      ({ blocks: this._blocks, summary: this._summary, monitor: this._monitor, health: this._health, opts: this._opts })[this.panel.tab].call(this, body, conv, host);
     },
 
     // ----- 分层设定 -----
@@ -674,7 +674,7 @@
         applyLoreSettings();
         let st = R.setLore(d.state, ta.value);
         if (typeof R.rebuildLore === 'function') {
-          const r = R.rebuildLore(st, conv.messages || [], Date.now());
+          const r = R.rebuildLore(st, conv.messages || [], Date.now(), { convId: conv && conv.id });
           st = r.state || r;
         }
         d.state = st; normalized.add(st); host.saveConv(conv); host.refresh();
@@ -861,6 +861,30 @@
     },
 
     // ----- 缓存监控（第 22 / 24 / 39 节） -----
+    _health(body, conv, host) {
+      const d = data(conv); const st = d.state; const p = planConv(conv, host);
+      const tok = p.tokens || {};
+      const lore = (st.loreFired || []).slice(-8);
+      const ls = (R.loreStateOf && R.loreStateOf(st)) || { turn: 0, entries: {} };
+      const stickyN = Object.keys(ls.entries || {}).filter(id => (ls.entries[id].stickyUntil | 0) > (ls.turn | 0)).length;
+      const cdN = Object.keys(ls.entries || {}).filter(id => (ls.entries[id].cooldownUntil | 0) > (ls.turn | 0)).length;
+      const card = document.createElement('div'); card.className = 'rp-health';
+      card.innerHTML =
+        '<div class="layer-head"><span class="lh-no">体检</span><span class="lh-t">上下文简化体检</span><span class="lh-sub">只读摘要</span></div>' +
+        '<div class="rp-block"><div class="rb-top"><span class="rb-title">Token 占用</span></div>' +
+        '<div class="rb-prev">合计约 ' + (tok.total || 0) + ' · 预算 ' + ((st.settings && st.settings.max_context) || '—') +
+        (p.overBudget ? ' · <b style="color:#f66">超预算</b>' : ' · 正常') + '</div></div>' +
+        '<div class="rp-block"><div class="rb-top"><span class="rb-title">分层指纹</span></div>' +
+        '<div class="rb-prev">' + (R.LAYERS || []).map(k => R.LAYER_TITLES[k] + ' ' + ((p.fp && p.fp[k]) ? String(p.fp[k]).slice(0, 8) : '—')).join(' · ') + '</div></div>' +
+        '<div class="rp-block"><div class="rb-top"><span class="rb-title">世界书状态机</span></div>' +
+        '<div class="rb-prev">回合 ' + (ls.turn | 0) + ' · sticky 中 ' + stickyN + ' · cooldown 中 ' + cdN +
+        ' · 冻结 ' + ((st.loreFired || []).length) + ' 条</div></div>' +
+        (lore.length ? '<div class="rp-block"><div class="rb-top"><span class="rb-title">最近触发</span></div><div class="rb-prev">' +
+          lore.map(x => host.esc(x.name || x.entryId)).join('、') + '</div></div>' : '') +
+        (st.loreEditedWhileFrozen ? '<div class="rp-block"><div class="rb-prev">⚠ 世界书已编辑但冻结未重建（可到世界书卡片点重建）</div></div>' : '');
+      body.appendChild(card);
+    },
+
     _monitor(body, conv, host) {
       const c = cfg(host);
       const logs = loadLogs(host, conv);

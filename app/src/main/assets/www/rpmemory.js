@@ -25,12 +25,19 @@
     return o;
   }
 
-  /** 自动关键词：英文单词 + 中文 2–4 字片段里出现的「名字样」词，粗略即可（用户可编辑） */
+  /** 自动关键词：英文单词 + 中文词（不截断成长词的前 2 字；长段保留 2/3/4 字滑窗） */
   function autoKeywords(text) {
     const t = String(text || ''); const out = new Set();
     (t.match(/[A-Za-z][A-Za-z0-9_-]{2,}/g) || []).forEach(w => out.add(w.toLowerCase()));
-    (t.match(/[\u4e00-\u9fff]{2,}/g) || []).forEach(seg => { if (seg.length <= 4) out.add(seg); else out.add(seg.slice(0, 2)); });
-    return [...out].slice(0, 8);
+    (t.match(/[\u4e00-\u9fff]{2,}/g) || []).forEach(seg => {
+      if (seg.length <= 4) { out.add(seg); return; }
+      // 长中文段：保留完整 4 字前缀 + 2/3/4 字滑窗，避免只剩无意义的前两字
+      out.add(seg.slice(0, 4));
+      for (let n = 2; n <= 4; n++) {
+        for (let i = 0; i <= seg.length - n; i++) out.add(seg.slice(i, i + n));
+      }
+    });
+    return [...out].slice(0, 16);
   }
 
   function buildExtractPrompt(turns, existing) {
@@ -88,12 +95,18 @@
     return { list: out, added, merged };
   }
 
-  /** 相关性：关键词命中（权重 2）+ 文本 bigram 重叠（权重 1）；置顶条目始终注入。结果按 seq 排序，保证同一组条目注入文本稳定 */
+  /** 相关性：关键词命中（权重 2，含中文子串互含）+ 文本 bigram 重叠；置顶条目始终注入。结果按 seq 排序，保证同一组条目注入文本稳定 */
   function selectRelevant(list, query, o) {
     o = settingsOf(o); const q = String(query || ''), qn = norm(q), qg = bigrams(q);
+    // 查询侧也抽中文关键词，避免长句 norm 后关键词被「吃掉」匹配
+    const qKeys = new Set(autoKeywords(q).map(norm).filter(Boolean));
     const scored = (list || []).filter(e => !e.disabled).map(e => {
       let s = 0;
-      (e.keywords || []).forEach(k => { const kn = norm(k); if (kn && qn.includes(kn)) s += 2; });
+      (e.keywords || []).forEach(k => {
+        const kn = norm(k); if (!kn) return;
+        if (qn.includes(kn) || kn.includes(qn) && qn.length >= 2) s += 2;
+        else if ([...qKeys].some(qk => qk.includes(kn) || kn.includes(qk))) s += 2;
+      });
       let ov = 0; bigrams(e.text).forEach(g => { if (qg.has(g)) ov++; }); s += Math.min(3, ov / 3);
       return { e, s: e.pinned ? 1e9 : s };
     }).filter(x => x.s >= o.minScore);
