@@ -60,3 +60,16 @@ test('app.js 不再整体清空重建虚拟窗口、spacer 不按实测重算', 
   assert.ok(!/topH2|botH2/.test(virt));
   assert.ok(fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/index.html'), 'utf8').includes('vscroll.js'));
 });
+
+test('v0.13.2：回收重建的消息不再播放 opacity:0 入场动画（向上滑一黑一黑）', () => {
+  const s = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/www/app.css'), 'utf8');
+  assert.match(css, /\.msg\.no-anim\s*\{\s*animation:\s*none/);
+  const fill = s.slice(s.indexOf('function fillMsgEl'), s.indexOf('function fillMsgEl') + 600);
+  assert.ok(fill.includes("vsSeen.has(m.id)) el.classList.add('no-anim')"), 'fillMsgEl 设置 className 后补 no-anim');
+  assert.ok(/VS_OVERSCAN = 3/.test(s));
+});
+test('v0.13.2：overscan 3 时窗口覆盖视口上下各 ≥3 屏（除边界）', () => {
+  const r = V.computeRange(hs(500), 20000, 600, 3);
+  assert.ok(20000 - r.topH >= 1800 && r.topH + (r.end - r.start) * 100 >= 20000 + 600 * 4);
+});

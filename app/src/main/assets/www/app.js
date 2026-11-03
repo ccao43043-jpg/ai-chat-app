@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.13.1';
+  const APP_VERSION = '0.13.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -707,7 +707,8 @@
   ];
   // ---- 虚拟滚动：长列表只渲染可视区；流式仍走 updateMsg 定点 patch ----
   const VS_EST = 140;           // 未实测前的预估高度
-  const VS_OVERSCAN = 2;        // 上下各多渲几条
+  const VS_OVERSCAN = 3;        // 上下各多渲几条（v0.13.2：2→3，减少 range 切换）
+  const vsSeen = new Set();     // 已渲染过的消息 id：再次进入视口不播放入场淡入（否则 opacity:0 露出黑底）
   const vsHeight = new Map();   // msgId → 实测高度
   let vsScrollBound = false;
   let vsRaf = 0;
@@ -863,6 +864,8 @@
   }
   function fillMsgEl(el, m) {
     el.className = 'msg ' + m.role + (m.error ? ' error' : '');
+    // 入场动画只给首次出现的消息；虚拟滚动回收/重建的节点不能再从 opacity:0 淡入
+    if (m.id) { if (vsSeen.has(m.id)) el.classList.add('no-anim'); else vsSeen.add(m.id); }
     el.innerHTML = '';
     const pst = !m.pending ? Plugins.registry.messageState(m, settings, conv, pluginHost) : null;
     if (pst && pst.dim) el.classList.add(pst.light ? 'dim-light' : 'dim');
