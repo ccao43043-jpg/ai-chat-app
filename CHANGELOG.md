@@ -1,3 +1,18 @@
+**v0.20.0：第四轮剩余四分支合并（A 拉格朗日预算 / D KF affect / E 事实账本 / F 块级渲染差分）**
+
+合并分支（基线 6efe25b / v0.19.0）
+1. **A 拉格朗日预算**（`feat/budget-lagrange` @ 812ac7c，PR #6）：层间拉格朗日价格 μ + 层内 history 连续性前缀；`budget_mode` 默认 `lagrangian`，`greedy` 回退与 v0.19.0 逐字段一致
+2. **D KF affect**（`feat/affect-kf` @ 11b4cc8，PR #7）：隐状态 KF 平滑 + CUSUM 档位 + 词典融合 + 自报一致性（§5.2）
+3. **E 事实账本**（`feat/fact-ledger` @ aca5b7d，PR #5）：rpmemory ledger（生效区间 + 摘要一致性校验）；rpcache 经 `resolveRPMemory` 接入
+4. **F 渲染差分**（`feat/render-diff` @ 791e34b，PR #8）：块级差分 + 多槽流缓存 + rAF，治理渲染/滚动复杂度
+
+合并：按 A → D → E → F 顺序 `--no-ff`；E 与 A 在 `rpcache.js` API 导出列表冲突一次（同时保留拉格朗日符号与 `resolveRPMemory`），其余无冲突
+
+未做
+- **G（op log）** 本轮仍未做
+
+测试：`npm test` 全绿；`npm run eval` gate pass；Android `0.20.0`（versionCode 58）/ 桌面 / npm `0.20.0`
+
 **v0.19.0：第四轮三分支合并（H 评测门禁 / B BM25F 检索 / C 缓存经济）**
 
 合并分支（基线 537e856 / v0.18.0）

@@ -48,6 +48,15 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.20.0：第四轮剩余合并（A 拉格朗日预算 / D KF affect / E 事实账本 / F 块级渲染差分）**
+
+- A：层间拉格朗日预算分配（`budget_mode=lagrangian`，可回退 greedy）
+- D：affect 隐状态 KF 平滑 + CUSUM 档位 + 词典融合 + 自报一致性
+- E：事实账本 ledger（生效区间 + 摘要一致性校验）
+- F：块级渲染差分 + 多槽流缓存 + rAF（滚动/渲染复杂度治理）
+- 未做：**G（op log）** 本轮仍未做
+- Android `0.20.0`（versionCode 58）/ 桌面 / npm `0.20.0`
+
 **v0.19.0：第四轮合并（H 评测门禁 / B BM25F 检索 / C 缓存经济）**
 
 - H：golden 集 + `npm run eval` + baseline + eval-gate 门禁测试
