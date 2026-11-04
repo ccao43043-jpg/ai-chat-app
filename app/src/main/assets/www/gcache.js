@@ -128,7 +128,35 @@
     blocks.forEach(b => { if (b.kind === 'dynamic') seenDyn = true; else if (seenDyn) ordered = false; });
     return { blocks, staticText: st, dynamicText: dy, static_hash: staticHash(st), dynamic_hash: hash(dy), layered: known >= 2, ordered, static_prompt_version: STATIC_PROMPT_VERSION };
   }
-  const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, hash, staticHash, STATIC_PROMPT_VERSION };
+  /**
+   * v0.21.3（P6）：用 rpcache 的结构化分段定位动态层（按文本精确定位，不解析正文【标题】）。
+   * prefix 可能被前插 RP_ANCHOR、后接 [AFFECT_RULE] 等——不在分段里的文本一律算固定层。找不到任一动态段 → 回退 analyzeLayers。
+   */
+  function layersFromSegments(text, segments) {
+    text = String(text || '');
+    if (!Array.isArray(segments) || !segments.length) return analyzeLayers(text);
+    const dyn = segments.filter(x => x && x.kind === 'dynamic' && x.text);
+    const ranges = [];
+    for (const d of dyn) {
+      const at = text.lastIndexOf(d.text); if (at < 0) return analyzeLayers(text);
+      ranges.push({ at, end: at + d.text.length, seg: d });
+    }
+    ranges.sort((a, b) => a.at - b.at);
+    const blocks = []; let pos = 0;
+    const pushStatic = (a, b) => { const t = text.slice(a, b); if (t.trim()) blocks.push({ layer: '-', kind: 'static', title: '', text: t }); };
+    ranges.forEach(r => { if (r.at < pos) return; pushStatic(pos, r.at); blocks.push({ layer: r.seg.gl || 'E', kind: 'dynamic', title: r.seg.title || '', text: r.seg.text }); pos = r.end; });
+    pushStatic(pos, text.length);
+    // 固定段里登记 L0 用的世界 / 角色分段（按文本定位到的才标层）
+    segments.filter(x => x && x.kind === 'static' && (x.gl === 'B' || x.gl === 'C') && x.text && text.indexOf(x.text) >= 0)
+      .forEach(x => blocks.push({ layer: x.gl, kind: 'ref', title: x.title, text: x.text }));
+    const stat = blocks.filter(b => b.kind === 'static');
+    const st = stat.map(b => b.text.replace(/^\s+|\s+$/g, '')).join('\n\n');
+    const dy = blocks.filter(b => b.kind === 'dynamic').map(b => b.text).join('\n');
+    let seenDyn = false, ordered = true;
+    blocks.forEach(b => { if (b.kind === 'dynamic') seenDyn = true; else if (b.kind === 'static' && seenDyn) ordered = false; });
+    return { blocks, staticText: st, dynamicText: dy, static_hash: staticHash(st), dynamic_hash: hash(dy), layered: true, ordered, structured: true, static_prompt_version: STATIC_PROMPT_VERSION };
+  }
+  const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, layersFromSegments, hash, staticHash, STATIC_PROMPT_VERSION };
 
   // ───────────────────────── CachePolicyEngine：隐式优先 ─────────────────────────
   /** Gemini 显式缓存最小前缀（Token，保守取值）：Pro 4096 / Flash-Lite 2048 / Flash 等 1024 */
@@ -233,6 +261,7 @@
     return { from, to, fp: batchFp(turns.slice(from, to)), text, level: 2, at: k[k.length - 1].at };
   }
   /** 仅剥「带秒或带时区」的机器时间戳；纯 HH:MM（如剧情「下午 13:45」）原样保留 */
+  const localDate = now => (root.TimeUtil || (typeof require === 'function' ? require('./timeutil.js') : null)).localDateStr(now); // v0.21.3：本地日期
   function normalizeDates(s) {
     return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]|\s*)(?:\d{1,2}[:：]\d{2}[:：]\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{1,2}[:：]\d{2}(?:Z|[+-]\d{2}:?\d{2}))/g, '$1');
   }
@@ -407,7 +436,7 @@
       summaryQuality = quality;
       // 永久质量门：不达标绝不推进 cut（fast_local 也不能绕过）
       if (quality >= HYBRID_SUMMARY_MIN_QUALITY) {
-        state.summaries.push({ from, to, fp: batchFp(batch), text, at: new Date().toISOString().slice(0, 10), quality, strategy: strategy === 'fast_local' ? 'fast_local' : 'semantic', sourceFp: batchFp(batch), permanent: true });
+        state.summaries.push({ from, to, fp: batchFp(batch), text, at: localDate(), quality, strategy: strategy === 'fast_local' ? 'fast_local' : 'semantic', sourceFp: batchFp(batch), permanent: true });
         state.cut = to; summaryCreated = true; prefixChanged = true;
       } else {
         // fast_local 仅作本轮临时上下文压缩兜底，不写入永久 summaries、不推进 cut
@@ -548,7 +577,7 @@
       hybrid = { prefixChanged: w.prefixChanged, summaryCreated: w.summaryCreated, earlyCompressed: !!w.earlyCompressed, rawTurns: w.rawTurns, totalTurns: w.totalTurns, untilNext: w.untilNext, summaries: st.summaries.length, movedDynamic: !!dyn };
     }
     const prefix = msgs.slice(0, k).map(m => partsText(m.content)).join('\n\0\n');
-    const layers = analyzeLayers(prefix);
+    const layers = extra.segments ? layersFromSegments(prefix, extra.segments) : analyzeLayers(prefix); // v0.21.3 P6：rpcache 生效时用结构化分段
     let lastU = -1; for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { lastU = i; break; }
     const autoHist = cfg.mode === 'auto' && hybrid && cfg.autoTarget !== 'prefix' && lastU > k;
     const decision = autoHist
@@ -609,11 +638,20 @@
   // ───────────────────────── KeepAlive：保活收益分析（只分析，不自动 ping） ─────────────────────────
   // 以前缀 L 为单位：命中 0.25L，未命中 1L；一次 ping（max_tokens=1）≈ 0.25L。仅当间隔 > TTL 且 ping 能覆盖到回复时有收益。
   // 前提：ping 会刷新 TTL（OpenRouter 未写明，需实测）。
-  function pingsForGap(gap, interval, maxP) { return gap <= interval ? 0 : Math.min(Math.ceil(gap / interval) - 1, maxP); }
+  // v0.21.3（方案 4.3）：n(g)=ceil(g/p)−1；g ≤ TTL 不会 miss → 不 ping，net=0；n(g) > N_max 覆盖不了 → 不 ping，net=0
+  //   否则 net = (1−r)·q(g) − r·n(g)，q 取阶跃（g > TTL 即 1）
+  function pingsForGap(gap, interval, maxP, ttl) {
+    if (ttl != null && gap <= ttl) return 0;
+    if (!(interval > 0) || gap <= interval) return 0;
+    const n = Math.ceil(gap / interval) - 1;
+    return n > maxP ? 0 : n;
+  }
   function netForGap(gap, ttl, interval, maxP, read) {
     read = read == null ? PRICE.read : read;
-    const cost = pingsForGap(gap, interval, maxP) * read, covered = gap <= maxP * interval + ttl;
-    return (gap > ttl && covered ? 1 - read : 0) - cost;
+    if (gap <= ttl || !(interval > 0)) return 0;
+    const n = Math.ceil(gap / interval) - 1;
+    if (n > maxP) return 0;
+    return (1 - read) * 1 - read * n;
   }
   function keepaliveRecommend(gaps, ttl, interval, maxP, read) {
     gaps = (gaps || []).filter(g => g > 0);
@@ -770,7 +808,7 @@
       const now = Date.now();
       const idleSec = s.lastT ? (now - s.lastT) / 1000 : null;
       const ttlEff = TTL_EFF_DEFAULT; // A1 未实现：冷窗口 / 应命中 用审查默认 240s
-      const r = applyToRequest(req, o, { adapter, sessionId: full && ctx.conv ? sessionIdFor(ctx.conv.id) : '', rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined), idleSec, ttlEff });
+      const r = applyToRequest(req, o, { adapter, sessionId: full && ctx.conv ? sessionIdFor(ctx.conv.id) : '', rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined), idleSec, ttlEff, segments: ctx.meta && ctx.meta.gcacheRpcache && ctx.meta.rpSegments ? ctx.meta.rpSegments : null });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
       if (s.lastT) s.gaps = (s.gaps || []).concat([Math.round((now - s.lastT) / 100) / 10]).slice(-50);

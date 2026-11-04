@@ -372,6 +372,7 @@
           if (marks.count) ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true, cacheSystem: marks.system, cacheSystemSplit: marks.systemSplit });
         }
         ctx.systemPrompt = a.system; ctx.messages = a.messages;
+        if (R.buildSystemSegments) ctx.meta.rpSegments = R.buildSystemSegments(st, base); // v0.21.3 P6：结构化分层交给 gcache
         const fp = R.fingerprints(p, base);
         const prev = logs0[logs0.length - 1] || null;
         ctx.meta.rp = {

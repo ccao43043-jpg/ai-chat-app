@@ -822,6 +822,21 @@
   function deltaText(st) { const c = getBlock(st, 'delta').content; return c ? '[MEMORY_UPDATE]\n' + c : ''; }
   // C-2：层序按变更频率从低到高：static → summary（按章变）→ memory（每轮可能变），memory 变动不再毒化 summary 缓存
   function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st), memoryText(st)].filter(Boolean).join('\n\n'); }
+  /**
+   * v0.21.3（P6）：结构化分段——与 buildSystem 逐字节一致（segments.map(x=>x.text).join('\n\n') === buildSystem），
+   * 供 gcache 直接区分固定 / 动态层，不再用【标题】正则解析正文（角色卡正文里的【状态】【场景】不会被误判）。
+   * 返回 [{ layer, kind: 'static'|'dynamic', title, gl, text }]；gl = gcache 层字母（A–G）。
+   */
+  function buildSystemSegments(st, baseSystem) {
+    const out = [];
+    const b = canonicalize(baseSystem); if (b) out.push({ layer: 'L1', kind: 'static', title: 'base', gl: '-', text: b });
+    const GL = { world: 'B', character: 'C' };
+    STATIC_DEFS.forEach(d => { const c = getBlock(st, d.id).content; if (c) out.push({ layer: 'L1', kind: 'static', title: d.tag, id: d.id, gl: GL[d.id] || 'D', text: '[' + d.tag + ']\n' + c }); });
+    const lb = constantLoreText(st); if (lb) out.push({ layer: 'L1', kind: 'static', title: 'LORE', gl: 'D', text: lb });
+    const sm = summaryText(st); if (sm) out.push({ layer: 'L3', kind: 'static', title: 'CHAPTER_SUMMARY', gl: 'S', text: sm }); // 按章追加、前文不变 → 计入稳定前缀（与 systemStablePrefix 一致）
+    const mm = memoryText(st); if (mm) out.push({ layer: 'L2', kind: 'dynamic', title: 'LONG_TERM_MEMORY', gl: 'E', text: mm });
+    return out;
+  }
   /** C-2：system 中「static + summary」稳定前缀（summary|memory 交界之前的部分），供第二个缓存断点使用 */
   function systemStablePrefix(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st)].filter(Boolean).join('\n\n'); }
   /**
@@ -1980,7 +1995,7 @@
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, hitPosterior, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
-    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, systemStablePrefix, finalUserContent, serializeHistory,
+    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, buildSystemSegments, systemStablePrefix, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     TAU_LAYER, extractEntities, recentEntitySet, itemSalience, itemDecay, itemValue, splitMemoryItems, joinMemoryItems, splitSummaryItems, collectLagrangeCandidates, selectLagrangeOptional, applyLagrangeBudget,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, resolveRPMemory, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
