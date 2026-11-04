@@ -98,21 +98,39 @@
 
   function remove(list, id) { return (list || []).filter(x => x.id !== id); }
 
+  /** 世界开聊默认套用的内置模板 id */
+  const WORLD_START_TEMPLATE_ID = 't-rp-immersive';
+
+  /**
+   * 解析内置沉浸式模板字段（templateId / Name / Emoji / fill 后的 systemPrompt）。
+   * TemplatesApi 可显式传入；浏览器下回退到 root.Templates。
+   */
+  function immersiveFields(TemplatesApi) {
+    const T = TemplatesApi || root.Templates;
+    if (!T || typeof T.applyToConv !== 'function') return {};
+    const list = typeof T.defaultTemplates === 'function' ? T.defaultTemplates()
+      : (T.BUILTIN_TEMPLATES || []).map(t => (T.normalizeTemplate ? T.normalizeTemplate(Object.assign({}, t, { builtin: true })) : t));
+    const tpl = (list || []).find(t => t && t.id === WORLD_START_TEMPLATE_ID);
+    if (!tpl) return {};
+    return T.applyToConv({}, tpl);
+  }
+
   /**
    * 由世界模板生成新建对话字段（不含 messages）。
-   * systemPrompt 不强制覆盖——调用方沿用 newConv / 全局设定即可（system/base 惯例）。
+   * 自动套用内置「沉浸式 RP（全自动）」模板（含 date/time fill）。
+   * 第四参 TemplatesApi 可选（Node 单测传入）；浏览器用全局 Templates。
    */
-  function conversationFromWorld(world, providers, fallback) {
+  function conversationFromWorld(world, providers, fallback, TemplatesApi) {
     const w = normalizeWorld(world);
     const fb = fallback || {};
     const prov = fb.providerId && (providers || []).find(x => x.id === fb.providerId);
     const providerId = prov ? prov.id : (fb.providerId || '');
     const model = fb.model || (prov && (prov.models || [])[0]) || '';
-    return {
+    return Object.assign({
       providerId, model,
       worldId: w.id, worldName: w.name, worldEmoji: w.emoji,
       title: (w.emoji + ' ' + w.name).trim(),
-    };
+    }, immersiveFields(TemplatesApi));
   }
 
   /**
@@ -168,7 +186,7 @@
   const api = {
     BLOCK_IDS, BLOCK_META, emptyBlocks, normalizeBlocks, normalizeWorld,
     defaultWorlds, upsert, duplicate, remove,
-    conversationFromWorld, applyWorldToState, applyWorldToConversation, filledBlockCount,
+    WORLD_START_TEMPLATE_ID, immersiveFields, conversationFromWorld, applyWorldToState, applyWorldToConversation, filledBlockCount,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Worlds = api;

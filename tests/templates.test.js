@@ -139,7 +139,8 @@ test('v0.7.6 RP 模板：变量完整、支持 date/time、留空省略、旧内
   assert.ok(!/\{\{/.test(out), '留空的变量行被省略、默认值生效'); assert.ok(out.includes('自然决定'));
   assert.ok(!out.includes('【世界背景】'), '空分段标题也省略');
   assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out));
-  assert.ok(out.includes('【扮演规则】') && out.includes('分层设定'));
+  assert.ok(out.includes('【扮演规则】') && out.includes('分层设定 / 世界模板'));
+  assert.ok(!out.includes('首条消息后自动生成'));
   assert.ok(T.fill('- {{x}}', {}).includes('{{x}}'), '默认仍保留原样');
   // 旧版内置原文（用户没改过）升级为新内容；改过的保留
   const oldNar = '你是一名沉浸式角色扮演的叙事者，扮演{{角色名}}，世界背景：{{世界背景}}。\n- 以第三人称描写环境、动作与神态，对话用引号；\n- 只描写{{角色名}}和 NPC 的言行，绝不替玩家决定行动或心理；\n- NPC 只知道自己应该知道的信息；\n- 每次回复 150–300 字，结尾留下可以继续互动的钩子。';
