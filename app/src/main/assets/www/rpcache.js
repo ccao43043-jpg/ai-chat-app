@@ -334,9 +334,9 @@
   }
   /** 事务提交：校验摘要质量 / 源指纹后再落章；失败不推进窗口 */
   function commitChapter(st, o) {
-    const ps = o.parsed || parseSummary(o.content);
-    if (!ps.ok) return { ok: false, state: st, reason: 'invalid_summary', parsed: ps };
-    if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY && !o.force) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
+    const ps = o.parsed || parseSummary(o.content, { ledger: o.ledger, RPMemory: o.RPMemory });
+    if (!ps.ok) return { ok: false, state: st, reason: ps.ledgerCheck && ps.ledgerCheck.conflictCount ? 'ledger_conflict' : 'invalid_summary', parsed: ps };
+    if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY && !o.force) return { ok: false, state: st, reason: ps.ledgerCheck && ps.ledgerCheck.conflictCount ? 'ledger_conflict' : 'low_quality', parsed: ps };
     const sourceFp = o.sourceFp || (o.batch ? chapterSourceFp(o.batch, o.coveredIds) : null);
     const next = addChapter(st, Object.assign({}, o, { content: ps.text || o.content, sourceFp, quality: ps.quality }));
     return { ok: true, state: next, chapter: chaptersOf(next)[chaptersOf(next).length - 1], parsed: ps };
@@ -366,9 +366,9 @@
   function consolidate(st, o) {
     // 与 commitChapter 一致：合并路径同样执行质量门（八分区 + SUMMARY_MIN_QUALITY）
     if (!o.force) {
-      const ps = o.parsed || parseSummary(o.content);
-      if (!ps.ok) return { ok: false, state: st, reason: 'invalid_summary', parsed: ps };
-      if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
+      const ps = o.parsed || parseSummary(o.content, { ledger: o.ledger, RPMemory: o.RPMemory });
+      if (!ps.ok) return { ok: false, state: st, reason: ps.ledgerCheck && ps.ledgerCheck.conflictCount ? 'ledger_conflict' : 'invalid_summary', parsed: ps };
+      if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY) return { ok: false, state: st, reason: ps.ledgerCheck && ps.ledgerCheck.conflictCount ? 'ledger_conflict' : 'low_quality', parsed: ps };
       o = Object.assign({}, o, { content: ps.text || o.content, quality: ps.quality, parsed: ps });
     }
     const old = chaptersOf(st);
@@ -1686,7 +1686,18 @@
     if (!critFilled) return 0;
     return Math.max(0, Math.min(1, Math.round((score + Math.min(0.2, filled * 0.02)) * 100) / 100));
   }
-  function parseSummary(text) {
+  /** 可选依赖 RPMemory 账本校验（浏览器 root / Node require） */
+  function resolveRPMemory() {
+    if (root && root.RPMemory) return root.RPMemory;
+    try { if (typeof require === 'function') return require('./rpmemory.js'); } catch (e) { /* 无记忆模块 */ }
+    return null;
+  }
+  /**
+   * 解析摘要；opts.ledger 时挂一致性校验（§6）：
+   * summaryQuality = base − 0.10·conflict − 0.03·unsupported；低于 SUMMARY_MIN_QUALITY 则 ok=false。
+   */
+  function parseSummary(text, opts) {
+    opts = opts || {};
     let t = String(text || '').trim();
     t = t.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
     t = t.replace(/^\[?CHAPTER[ _]SUMMARY[^\n]*\]?\s*\n/i, '');
@@ -1694,11 +1705,25 @@
     // 八分区必须完整
     const missing = SUMMARY_SECTIONS.filter(k => !new RegExp('(^|\\n)\\s*[#*]*\\s*' + k + '\\b', 'i').test(t));
     const critMissing = CRITICAL_SUMMARY.filter(k => missing.indexOf(k) >= 0);
-    const quality = scoreSummary(t);
+    let quality = scoreSummary(t);
     const critEmpty = CRITICAL_SUMMARY.filter(k => isEmptySectionBody(sectionBody(t, k)));
+    let ledgerCheck = null;
+    const Mem = opts.ledger ? (opts.RPMemory || resolveRPMemory()) : null;
+    if (opts.ledger && Mem && typeof Mem.checkSummaryAgainstLedger === 'function') {
+      ledgerCheck = Mem.checkSummaryAgainstLedger(t, opts.ledger, quality);
+      quality = ledgerCheck.summaryQuality;
+    }
     // 缺任一分区、质量不达标、或五个关键分区全空 → 拒
     const ok = !!t && !missing.length && quality >= SUMMARY_MIN_QUALITY && critEmpty.length < CRITICAL_SUMMARY.length;
-    return { ok, text: t, missing, critMissing, critEmpty, quality, minQuality: SUMMARY_MIN_QUALITY };
+    const out = { ok, text: t, missing, critMissing, critEmpty, quality, minQuality: SUMMARY_MIN_QUALITY };
+    if (ledgerCheck) {
+      out.ledgerCheck = ledgerCheck;
+      out.baseQuality = ledgerCheck.baseScore;
+      if (!ok && ledgerCheck.conflictCount && Mem && typeof Mem.buildLedgerConflictHint === 'function') {
+        out.retryHint = Mem.buildLedgerConflictHint(ledgerCheck);
+      }
+    }
+    return out;
   }
   function priceFor(model, prices) {
     return priceForRules(model, prices) || (model ? priceForRules(model, BUILTIN_PRICES, true) : null);
@@ -1958,7 +1983,7 @@
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, systemStablePrefix, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     TAU_LAYER, extractEntities, recentEntitySet, itemSalience, itemDecay, itemValue, splitMemoryItems, joinMemoryItems, splitSummaryItems, collectLagrangeCandidates, selectLagrangeOptional, applyLagrangeBudget,
-    buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
+    buildSummaryPrompt, buildConsolidatePrompt, parseSummary, resolveRPMemory, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
     LORE_REASON, parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
