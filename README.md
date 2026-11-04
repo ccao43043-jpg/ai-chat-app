@@ -48,6 +48,14 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.19.0：第四轮合并（H 评测门禁 / B BM25F 检索 / C 缓存经济）**
+
+- H：golden 集 + `npm run eval` + baseline + eval-gate 门禁测试
+- B：BM25F + 时间衰减 + MMR + mem_tokens 预算（`retrieval=legacy` 可回退）
+- C：C-2 system 层序 static→summary→memory 与第二断点；C-3 Beta(6,4) 后验命中率；C-1 摘要时机两分支折现比较
+- 未做：A / D / E / F / G
+- Android `0.19.0`（versionCode 57）/ 桌面 / npm `0.19.0`
+
 **v0.18.0：四路审查修复（R1 日期 / C1 适配器 / 缓存策略 / A6 affect）**
 
 - R1：`normalizeDates` 仅剥机器时间（秒/时区），保留剧情时分

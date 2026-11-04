@@ -1,3 +1,17 @@
+**v0.19.0：第四轮三分支合并（H 评测门禁 / B BM25F 检索 / C 缓存经济）**
+
+合并分支（基线 537e856 / v0.18.0）
+1. **H 评测门禁**（`feat/eval-golden` @ b987e3c）：`tests/golden/*.jsonl` golden 集 + `baseline.json`；`scripts/eval.mjs`（`npm run eval`）；`tests/eval-gate.test.js` 门禁，指标低于 baseline 即失败
+2. **B BM25F 检索**（`feat/retrieval-bm25` @ 6c1ed5c）：rpmemory 字段加权 BM25F + 时间衰减 + MMR 去冗余 + `mem_tokens` 预算；`retrieval=legacy` 可回退
+3. **C 缓存经济**（`feat/cache-econ` @ c848490）：C-2 system 层序 static → summary → memory，summary|memory 交界第二断点（≤ maxMarkers）；C-3 命中率改用 Beta(6,4) 后验悲观分位；C-1 adaptiveSummary 改为 H=12/γ=0.9 两分支折现成本比较（质量<0.60 罚 15%）
+
+合并：按 H → B → C 顺序 `--no-ff`，无文本冲突；三方测试同时全绿
+
+未做
+- **A / D / E / F / G** 本轮均未做
+
+测试：`npm test` 344/344 全绿；`npm run eval` gate pass；Android `0.19.0`（versionCode 57）/ 桌面 / npm `0.19.0`
+
 **v0.18.0：四路审查修复合并（R1 normalizeDates / C1 缓存适配器 / C4·A3·C7·A5 / A6 affect）**
 
 合并分支（基线 a0137b3 / v0.17.0）
