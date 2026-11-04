@@ -8,7 +8,8 @@
     "eval": "node scripts/eval.mjs",
     "test:ui": "node tests/ui-e2e.js",
     "test:autochar": "node tests/autochar-e2e.js",
-    "fixtures": "node tests/fixtures/make-fixtures.js"
+    "fixtures": "node tests/fixtures/make-fixtures.js",
+    "test:edit": "node tests/edit-msg-e2e.js"
   },
   "devDependencies": {
     "puppeteer-core": "^23.0.0"
