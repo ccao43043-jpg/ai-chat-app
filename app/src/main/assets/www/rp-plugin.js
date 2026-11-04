@@ -309,6 +309,7 @@
         }
         // 热路径：触发条目首次触发 → 冻结到本轮用户消息末尾（不重排已冻结）；概率种子=convId+anchorId+entryId
         const fl = R.fireLore(st, items, Date.now(), { convId: ctx.conv && ctx.conv.id });
+        if (!fl.fired.length && fl.state && fl.state.loreTrace) st = Object.assign({}, st, { loreTrace: fl.state.loreTrace }); // A4：未触发也保留 trace
         if (fl.fired.length) { st = fl.state; host.toast('世界书触发：' + fl.fired.map(r => r.name).join('、') + '（已冻结进本轮消息，之后位置固定）'); }
         if (ti.info.reused) host.toast('沿用这条消息首次发送的原文（含当时的联网 / 文件内容），以保持缓存；可在「预算设置」开启「重新生成时刷新」');
         const logs0 = loadLogs(host, ctx.conv);
@@ -400,7 +401,9 @@
         if (!ap.effective) return [];
         const logs = loadLogs(host, conv); const last = logs[logs.length - 1];
         if (!last || !last.supported || last.hit_rate == null) return [];
-        return [{ text: '命中 ' + pct(last.hit_rate), tone: tone(last.hit_rate), title: '缓存命中率（点击查看监控）', action: () => host.openPanel(ID, 'monitor'), kind: 'hit' }];
+        // E1：预算细线——上一轮输入 Token / 上下文预算上限
+        const st0 = data(conv).state, cap = (st0 && st0.settings && st0.settings.max_context) || 0, used = last.prompt_tokens || last.est_tokens || 0;
+        return [{ text: '命中 ' + pct(last.hit_rate), tone: tone(last.hit_rate), title: '缓存命中率（点击查看监控）', action: () => host.openPanel(ID, 'monitor'), kind: 'hit', budget: cap > 0 && used > 0 ? { used, cap } : null }];
       },
       messageState(msg, conv, host) {
         if (host && !effectiveFor(host, conv)) return null; // 不适用时完全不影响界面（不变灰、不冻结）
@@ -587,7 +590,15 @@
         () => host.dialog({ title: '对话系统提示词 / 助手设定', body: (base || '（空）') + '\n\n这是本对话的系统提示词（或所选助手的设定），作为 L1 固定设定的第一部分。可在顶部模型菜单 →「本对话系统提示词」或「提示词模板」中修改；修改后固定设定版本 +1。', okText: '知道了', info: true }), 'base');
       R.STATIC_DEFS.forEach(def => blockCard(def.id));
       { const lore = st.lore || []; const nc = lore.filter(e => e.mode === 'constant').length; const act = R.activeFired(st, convItems(conv, host)).length;
-        card('世界书', '<span class="rb-tag soft">常驻 ' + nc + ' · 触发 ' + (lore.length - nc) + ' · 已冻结 ' + act + '</span>', st.loreText || '', '', () => { this.panel.view = box => this._editLore(box, conv, host); this._render(); }); }
+        card('世界书', '<span class="rb-tag soft">常驻 ' + nc + ' · 触发 ' + (lore.length - nc) + ' · 已冻结 ' + act + '</span>', st.loreText || '', '', () => { this.panel.view = box => this._editLore(box, conv, host); this._render(); });
+        const lt = st.loreTrace; // A4：最近一轮触发 trace
+        if (lt && lt.items && lt.items.length) {
+          const d = document.createElement('details'); d.className = 'rp-lore-trace';
+          const fired = lt.items.filter(x => x.status === 'fired').length;
+          d.innerHTML = '<summary class="hint small">世界书触发 trace（第 ' + lt.turn + ' 轮：触发 ' + fired + ' · 未触发 ' + (lt.items.length - fired) + '）</summary>' +
+            lt.items.map(x => '<div class="kv"><span>' + host.esc(x.name) + '</span><b class="' + (x.status === 'fired' ? 'good' : x.reason === 'no_key' ? '' : 'bad') + '">' + (x.status === 'fired' ? '✓ ' : '✗ ') + host.esc((R.LORE_REASON && R.LORE_REASON[x.reason]) || x.reason) + '</b></div>').join('');
+          body.appendChild(d);
+        } }
       layer('L2', '长期记忆', R.verLabel('memory', R.getBlock(st, 'memory').version) + ' · ≈' + fmtN(p.tokens.memory) + ' Token');
       blockCard('memory');
       const chs = R.chaptersOf(st);

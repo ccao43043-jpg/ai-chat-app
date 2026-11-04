@@ -1043,3 +1043,9 @@ html, body { background: var(--bg); }
 /* v0.7.5：带操作按钮的提示（首条消息设定：查看 / 撤销） */
 #toast.show.has-actions { pointer-events: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 88vw; }
 #toast .toast-act { background: transparent; border: 1px solid currentColor; color: inherit; border-radius: 999px; padding: 2px 10px; font-size: 13px; cursor: pointer; opacity: .9; }
+/* v0.15.0 E1 预算细线 / E2 sparkline / A4 trace */
+.budget-line{height:2px;margin:2px 12px 0;border-radius:2px;background:color-mix(in srgb,currentColor 12%,transparent);overflow:hidden}
+.budget-line>i{display:block;height:100%;background:var(--accent,#4f8cff);transition:width .3s}
+.budget-line.warn>i{background:#e0a100}.budget-line.over>i{background:#e5484d}
+.af-spark{display:block;margin-top:4px;color:var(--accent,#4f8cff)}
+.rp-lore-trace{margin:4px 0 8px}.rp-lore-trace summary{cursor:pointer}

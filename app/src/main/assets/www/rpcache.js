@@ -588,20 +588,24 @@
     });
     stickyLive.forEach(id => live.add(id));
     let activated = [];
+    // A4：触发 trace（opts.trace 为数组时记录每条的 fired / rejected 原因；同一条只记最后一次判定）
+    const tr = Array.isArray(opts.trace) ? opts.trace : null;
+    const why = (e, status, reason) => { if (!tr) return; const i = tr.findIndex(x => x.id === e.id); const r = { id: e.id, name: e.name || e.id, status, reason }; if (i >= 0) tr[i] = r; else tr.push(r); };
+    if (tr) lore.forEach(e => { if (live.has(e.id)) why(e, 'rejected', stickyLive.has(e.id) ? 'sticky_live' : 'already_live'); });
     function runPass(scanText) {
       const hit = [];
       for (const e of lore) {
         if (live.has(e.id) || activated.some(x => x.id === e.id)) continue;
         const es = loreSt.entries[e.id] || {};
-        if ((e.delay | 0) > 0 && turn < (e.delay | 0)) continue;
-        if ((es.cooldownUntil | 0) > turn && (es.stickyUntil | 0) <= turn) continue;
+        if ((e.delay | 0) > 0 && turn < (e.delay | 0)) { why(e, 'rejected', 'delay'); continue; }
+        if ((es.cooldownUntil | 0) > turn && (es.stickyUntil | 0) <= turn) { why(e, 'rejected', 'cooldown'); continue; }
         const depth = e.scanDepth || depth0;
         const localScan = depth === maxDepth ? scanText : scanWindow(items, depth);
-        if (!matchPrimary(localScan, e)) continue;
-        if (!matchSecondary(localScan, e)) continue;
+        if (!matchPrimary(localScan, e)) { why(e, 'rejected', 'no_key'); continue; }
+        if (!matchSecondary(localScan, e)) { why(e, 'rejected', 'secondary'); continue; }
         const seed = loreSeedKey(convId, anchorId, e.id);
         const rng = opts.rng || rngForSeed(seed);
-        if (!rollProbability(e.probability, rng)) continue;
+        if (!rollProbability(e.probability, rng)) { why(e, 'rejected', 'probability'); continue; }
         hit.push(e);
       }
       return hit;
@@ -625,6 +629,7 @@
         if (!byGroup[g] || e.priority > byGroup[g].priority) byGroup[g] = e;
       } else ung.push(e);
     });
+    if (tr) activated.forEach(e => { if (e.inclusionGroup && byGroup[e.inclusionGroup] !== e) why(e, 'rejected', 'group'); });
     activated = ung.concat(Object.keys(byGroup).map(k => byGroup[k]));
     activated.sort((a, b) => (b.priority - a.priority) || (a.order - b.order));
     const ctx = opts.ctxTokens || (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
@@ -636,8 +641,8 @@
     const out = []; let used = 0;
     for (const e of activated) {
       const t = estimateLoreTokens(e);
-      if (t > remaining) continue; // 装不下就跳过，继续试下一条
-      out.push(e); used += t; remaining -= t;
+      if (t > remaining) { why(e, 'rejected', 'budget'); continue; } // 装不下就跳过，继续试下一条
+      out.push(e); used += t; remaining -= t; why(e, 'fired', 'ok');
     }
     return out;
   }
@@ -655,12 +660,14 @@
     const loreSt0 = loreStateOf(st);
     const turn = (loreSt0.turn | 0) + 1;
     const convId = opts.convId || '';
+    const trace = [];
     const picked = activateLore(st, items, Object.assign({
       excludeIds: [...live],
       turn,
       convId,
       anchorId: last.id,
-    }, opts));
+    }, opts, { trace }));
+    const loreTrace = { turn, anchorId: last.id, at: at || 0, items: trace.slice(0, 60) };
     // 更新 sticky / cooldown 状态机
     const entries = Object.assign({}, loreSt0.entries);
     picked.forEach(e => {
@@ -687,10 +694,11 @@
       entryId: e.id, name: e.name, anchorId: last.id, content: e.content,
       hash: sha256(e.content), at: at || 0, priority: e.priority | 0,
     }));
-    if (!fired.length) return { state: Object.assign({}, st, { loreState }), fired };
+    if (!fired.length) return { state: Object.assign({}, st, { loreState, loreTrace }), fired, trace };
     const old = firedOf(st).slice(-200);
-    return { state: Object.assign({}, st, { loreFired: old.concat(fired), loreState }), fired };
+    return { state: Object.assign({}, st, { loreFired: old.concat(fired), loreState, loreTrace }), fired, trace };
   }
+  const LORE_REASON = { ok: '已触发', already_live: '已在上下文中', sticky_live: 'sticky 保持中', delay: 'delay 未到', cooldown: '冷却中', no_key: '未命中关键词', secondary: '次要关键词不满足', probability: '概率未中', group: '同组被更高优先级取代', budget: '超出预算' };
   /** 把有效的冻结记录拼到各自锚点消息上（顺序 = 触发顺序；逐字节稳定） */
   function applyFrozenLore(st, items) {
     const act = activeFired(st, items); if (!act.length) return items;
@@ -1439,7 +1447,7 @@
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
-    parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };
+    LORE_REASON, parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RPCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

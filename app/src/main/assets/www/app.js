@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.14.0';
+  const APP_VERSION = '0.15.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -659,6 +659,15 @@
       strip.appendChild(el);
     });
     bar.appendChild(strip);
+    // E1：预算细线（2px，>80% 警示，>100% 超预算）
+    const bud = hit && hit.budget;
+    if (bud) {
+      const r = bud.used / bud.cap, ln = document.createElement('div');
+      ln.className = 'budget-line' + (r > 1 ? ' over' : r > 0.8 ? ' warn' : '');
+      ln.title = '上下文预算：' + bud.used + ' / ' + bud.cap + ' Token（' + Math.round(r * 100) + '%）';
+      ln.innerHTML = '<i style="width:' + Math.min(100, Math.round(r * 1000) / 10) + '%"></i>';
+      bar.appendChild(ln);
+    }
   }
   function renderHeader() {
     const p = getProvider(conv.providerId);
@@ -724,19 +733,52 @@
   const VS_EST = 140;           // 未实测前的预估高度
   const VS_OVERSCAN = 3;        // 上下各多渲几条（v0.13.2：2→3，减少 range 切换）
   const vsSeen = new Set();     // 已渲染过的消息 id：再次进入视口不播放入场淡入（否则 opacity:0 露出黑底）
-  const vsHeight = new Map();   // msgId → 实测高度
+  const vsHeight = VScroll.createHeightCache(); // msgId → {实测高度, 内容签名}（v0.15.0：签名不符即失效）
   let vsScrollBound = false;
   let vsRaf = 0;
   let vsLastRange = { start: -1, end: -1, empty: true };
   function vsEstimate(m) {
-    if (m && m.id && vsHeight.has(m.id)) return vsHeight.get(m.id);
-    const len = ((m && m.content) || '').length + ((m && m.reasoning) || '').length;
-    return Math.min(1200, Math.max(72, VS_EST + Math.floor(len / 80) * 18));
+    const h = vsHeight.get(m);
+    if (h != null) return h;
+    const box = $('#messages');
+    return VScroll.estimateHeight(m, (box && box.clientWidth) || 360);
   }
-  function vsMeasure(el, m) {
+  /** 实测并写缓存；高度变化发生在视口上方时补偿 scrollTop（P0-1 上方插入 / 重测补偿） */
+  function vsMeasure(el, m, compensate) {
     if (!el || !m || !m.id) return;
     const h = el.offsetHeight;
-    if (h > 0) vsHeight.set(m.id, h);
+    if (!(h > 0)) return;
+    const old = vsHeight.get(m);
+    vsHeight.set(m, h);
+    if (compensate && old != null && old !== h && !stickState.on) {
+      const box = $('#messages');
+      const d = VScroll.scrollCompensation(el.getBoundingClientRect().top, box.getBoundingClientRect().top, old, h);
+      if (d) box.scrollTop += d;
+    }
+  }
+  // ---- P0-5：贴底稳定：rAF + 延迟复查 + ResizeObserver（图片 / 代码高亮 / 字体晚到导致的高度增长）----
+  const stickState = { on: false, until: 0, ro: null, t: 0 };
+  function stickToBottom(ms) {
+    const box = $('#messages'); if (!box) return;
+    const go = () => { box.scrollTop = box.scrollHeight; };
+    go();
+    stickState.on = true; stickState.until = Date.now() + (ms || 1200);
+    requestAnimationFrame(() => { go(); requestAnimationFrame(go); });
+    clearTimeout(stickState.t);
+    stickState.t = setTimeout(() => { if (stickState.on) go(); stickState.on = false; }, ms || 1200);
+    if (!stickState.ro && typeof ResizeObserver === 'function') {
+      stickState.ro = new ResizeObserver(() => { if (stickState.on && Date.now() < stickState.until) go(); });
+    }
+    if (stickState.ro) { stickState.ro.disconnect(); const w = box.querySelector(':scope > .vs-window') || box; stickState.ro.observe(w); Array.from(w.children).slice(-3).forEach(c => stickState.ro.observe(c)); }
+  }
+  // 用户主动向上滑：立刻退出贴底保持
+  ['wheel', 'touchmove'].forEach(ev => document.addEventListener(ev, e => { if (stickState.on && e.target.closest && e.target.closest('#messages') && !nearBottom()) stickState.on = false; }, { passive: true }));
+  /** P0-1：图片 onload 后重测所在消息（贴底时保持贴底，否则在视口上方时补偿 scrollTop） */
+  function onMsgImgLoad(img) {
+    const el = img.closest('.msg'); if (!el || !conv) return;
+    const m = conv.messages.find(x => x.id === el.dataset.id); if (!m) return;
+    if (stickState.on || nearBottom()) { vsMeasure(el, m, false); stickToBottom(600); }
+    else vsMeasure(el, m, true);
   }
   function vsTotalHeight(list) {
     let t = 0; for (let i = 0; i < list.length; i++) t += vsEstimate(list[i]); return t;
@@ -813,9 +855,9 @@
         box.innerHTML = '';
         list.forEach(m => { const el = buildMsgEl(m); box.appendChild(el); vsMeasure(el, m); });
         vsLastRange = { start: 0, end: list.length, empty: false };
-        if (stick) box.scrollTop = box.scrollHeight;
+        if (stick) stickToBottom();
         else box.scrollTop = keepScroll;
-      } else if (stick) box.scrollTop = box.scrollHeight;
+      } else if (stick) stickToBottom();
       return;
     }
     const viewH = box.clientHeight || 600;
@@ -827,7 +869,7 @@
     const { start, end, topH, bottomH } = VScroll.computeRange(heights, scrollTop, viewH, VS_OVERSCAN);
     // 范围未变且非强制：跳过 DOM 重建（流式靠 updateMsg）
     if (!opts.force && !vsLastRange.empty && vsLastRange.start === start && vsLastRange.end === end && hasWin) {
-      if (stick) box.scrollTop = box.scrollHeight;
+      if (stick) stickToBottom();
       return;
     }
     const prevStick = stick || (box.scrollHeight - box.scrollTop - box.clientHeight < 140);
@@ -861,7 +903,7 @@
     topSp.style.height = topH + 'px';
     botSp.style.height = bottomH + 'px';
     vsLastRange = { start, end, empty: false };
-    if (prevStick) box.scrollTop = box.scrollHeight;
+    if (prevStick) stickToBottom();
     else if (anchorId) {
       let el2 = null;
       win.querySelectorAll(':scope > .msg').forEach(el => { if (!el2 && el.dataset.id === anchorId) el2 = el; });
@@ -909,7 +951,7 @@
     if (m.files && m.files.length) attachTarget.appendChild(buildFileChips(m.files));
     if (m.images && m.images.length) {
       const imgs = document.createElement('div'); imgs.className = 'msg-images';
-      m.images.forEach(src => { const i = document.createElement('img'); i.src = src; i.onclick = () => openViewer(src); imgs.appendChild(i); });
+      m.images.forEach(src => { const i = document.createElement('img'); i.onload = () => onMsgImgLoad(i); i.src = src; i.onclick = () => openViewer(src); imgs.appendChild(i); });
       attachTarget.appendChild(imgs);
     }
     if (m.role === 'user') {
@@ -1029,7 +1071,7 @@
     const stick = nearBottom();
     if (el) {
       fillMsgEl(el, m);
-      vsMeasure(el, m);
+      vsMeasure(el, m, !stick);
       if (stick) $('#messages').scrollTop = $('#messages').scrollHeight;
       return;
     }
@@ -1044,7 +1086,7 @@
     rafTimer = setTimeout(() => { rafTimer = null; const s = rafPending; rafPending = new Set(); s.forEach(updateMsg); }, 70);
   }
 
-  function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); if (m && m.id) vsHeight.delete(m.id); saveConv(); renderMessages({ force: true }); }
+  function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); if (m && m.id) vsHeight.drop(m.id); saveConv(); renderMessages({ force: true }); }
 
   // ---------------- 回复版本 / 对话分支 ----------------
   /** RP：已写入章节摘要（或超出预算未发送）的消息不能切换版本 */
@@ -1086,6 +1128,13 @@
     const el2 = box.querySelector('.msg[data-id="' + m.id + '"]');
     if (el2 && top != null) box.scrollTop = box.scrollTop + (el2.getBoundingClientRect().top - top);
   }
+  /** P0-2 方案 A：切版本 / 编辑时清除该消息及之后的 affect 与 affectInj（插件未启用则不动） */
+  function affectReset(i) {
+    if (!window.Affect || i < 0) return 0;
+    const n = Affect.invalidateFrom(conv, i);
+    if (n) renderConvBar();
+    return n;
+  }
   async function switchVersion(m, k) {
     if (running) { toast('请先停止当前生成'); return; }
     const n = Versions.count(m); if (k < 0 || k >= n || k === Versions.index(m)) return;
@@ -1094,9 +1143,11 @@
     const before = conv.messages.length - i - 1;
     if (!(await confirmHistoryChange(m, '切换到第 ' + (k + 1) + ' 个版本？', null, 'version'))) return;
     conv.messages = Versions.select(conv.messages, i, k);
+    const afN = affectReset(i);
     saveConv(conv, false); rerenderKeeping(m); renderConvBar();
     const after = conv.messages.length - i - 1;
-    if (before || after) toast('已切换到第 ' + (k + 1) + ' 个版本' + (after ? '，后面显示该版本的 ' + after + ' 条对话' : '（该版本之后还没有对话）'));
+    if (afN) toast('已切换到第 ' + (k + 1) + ' 个版本 · 好感/心情状态已从此处清除，下一轮重新累计');
+    else if (before || after) toast('已切换到第 ' + (k + 1) + ' 个版本' + (after ? '，后面显示该版本的 ' + after + ' 条对话' : '（该版本之后还没有对话）'));
   }
   function versionMenu(m) {
     if (running) { toast('请先停止当前生成'); return; }
@@ -1168,6 +1219,7 @@
       if (m.images && m.images.length) init.images = m.images.slice();
       if (m.files && m.files.length) init.files = m.files.slice();
       conv.messages = Versions.addVersion(conv.messages, conv.messages.indexOf(m), init);
+      if (affectReset(conv.messages.indexOf(m))) toast('好感/心情状态已从编辑处清除，将重新累计');
       saveConv(); renderMessages(); runChat(p);
       return;
     }
@@ -1175,7 +1227,8 @@
     if (user && !t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
     m.content = t; m.edited = true;
     delete m.rpSent; // RP：冻结的发送原文作废，下一轮按修改后的内容进入历史
-    saveConv(); renderMessages(); toast('已保存');
+    const afN = affectReset(conv.messages.indexOf(m));
+    saveConv(); renderMessages(); toast(afN ? '已保存 · 好感/心情状态已从此处清除' : '已保存');
   }
   const editUserMsg = editMsg;
 
@@ -1425,7 +1478,7 @@
       bot.pending = false; delete bot.searching; delete bot.pluginStatus;
       setRunning(null);
       saveConv(thisConv);
-      if (conv === thisConv) { renderMessages(); renderConvBar(); }
+      if (conv === thisConv) { updateMsg(bot); renderMessages(); renderConvBar(); } // v0.15.0：先定点刷新末条（错误 / 停止态），短列表 renderMessages 不会重建
       renderConvList();
     };
 
@@ -1477,26 +1530,43 @@
       else if (d.kind === 'reasoning') bot.reasoning += d.text;
       else if (d.kind === 'error') bot.error = (bot.error ? bot.error + '\n' : '') + d.text;
     });
-    const h = httpRequest(req, {
-      onStatus: v => { status = v; },
-      onChunk: t => {
-        raw += t;
-        if (status >= 200 && status < 300 && stream) { apply(parser.push(t)); refresh(); }
-      },
-    });
-    cur = h.cancel;
-    try {
-      await h.promise;
-      if (status >= 400 || (status === 0 && !bot.stopped)) {
-        bot.error = status ? Providers.parseError(status, raw) : '请求失败：没有收到响应';
-      } else if (stream) {
-        apply(parser.end());
-        if (!gotDelta && raw.trim() && !bot.stopped) apply(Providers.parseFullResponse(p.type, raw));
-      } else if (!bot.stopped) {
-        apply(Providers.parseFullResponse(p.type, raw));
+    // A6：失败分类 + 指数退避重试（仅在还没收到正文时）
+    for (let attempt = 0; ; attempt++) {
+      status = 0; raw = ''; let netErr = null;
+      const h = httpRequest(req, {
+        onStatus: v => { status = v; },
+        onChunk: t => {
+          raw += t;
+          if (status >= 200 && status < 300 && stream) { apply(parser.push(t)); refresh(); }
+        },
+      });
+      cur = h.cancel;
+      try { await h.promise; } catch (e) { netErr = e; }
+      const failed = !!netErr || status >= 400 || (status === 0 && !bot.stopped);
+      if (failed && window.NetRetry) {
+        const c = NetRetry.classify(status, raw, netErr);
+        if (NetRetry.shouldRetry(c, attempt, gotDelta, bot.stopped)) {
+          const wait = NetRetry.backoff(attempt, c.kind);
+          bot.pluginStatus = c.label + '，' + Math.round(wait / 100) / 10 + ' 秒后重试（' + (attempt + 1) + '/' + NetRetry.MAX_RETRIES + '）'; refresh();
+          await new Promise(r => { const t = setTimeout(r, wait); cur = () => { clearTimeout(t); r(); }; });
+          delete bot.pluginStatus;
+          if (bot.stopped) break;
+          continue;
+        }
+        if (attempt) bot.retries = attempt;
       }
-    } catch (e) {
-      bot.error = '网络错误：' + e.message + '\n请检查网络连接和 Base URL。';
+      if (netErr) bot.error = '网络错误：' + netErr.message + '\n请检查网络连接和 Base URL。' + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
+      else if (status >= 400 || (status === 0 && !bot.stopped)) {
+        bot.error = (status ? Providers.parseError(status, raw) : '请求失败：没有收到响应') + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
+      } else if (stream) {
+        try {
+          apply(parser.end());
+          if (!gotDelta && raw.trim() && !bot.stopped) apply(Providers.parseFullResponse(p.type, raw));
+        } catch (e) { bot.error = '解析响应失败：' + e.message; }
+      } else if (!bot.stopped) {
+        try { apply(Providers.parseFullResponse(p.type, raw)); } catch (e) { bot.error = '解析响应失败：' + e.message; }
+      }
+      break;
     }
     const okResp = !bot.error && !bot.stopped && status >= 200 && status < 300;
     Plugins.registry.runAfterResponse(rctx, { ok: okResp, usage: bot.usage || null, bot, status }, pluginHost);

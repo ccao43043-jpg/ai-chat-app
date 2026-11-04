@@ -231,6 +231,7 @@ async function scenario(browser, theme) {
   await sleep(200);
   await page.evaluate(() => { const i = document.querySelector('#input'); i.value = '再来一次'; i.dispatchEvent(new Event('input')); });
   await page.click('#btn-send'); await sleep(700);
+  await page.waitForSelector('.msg.error .err', { timeout: 5000 }).catch(() => {});
   r.claude = await page.evaluate(() => ({ req: window.__reqs.filter(x => x.method === 'POST').pop(), err: (document.querySelector('.msg.error .err') || {}).textContent }));
   assert.strictEqual(r.claude.req.url, 'https://api.anthropic.com/v1/messages');
   assert.strictEqual(r.claude.req.body.model, 'claude-opus-5-5');
@@ -261,7 +262,7 @@ async function scenario(browser, theme) {
   await page.evaluate(() => [...document.querySelectorAll('.persona-card')].find(e => e.textContent.includes('代码助手')).querySelector('.ci-more').click());
   await sleep(350);
   r.personaActions = await page.$$eval('#action-list .action-item', els => els.map(e => e.textContent.trim()));
-  assert.deepStrictEqual(r.personaActions, ['开始对话', '编辑', '复制一份', '删除']);
+  assert.deepStrictEqual(r.personaActions, ['开始对话', '编辑', '导出角色卡 PNG', '复制一份', '删除']);
   await page.evaluate(() => [...document.querySelectorAll('#action-list .action-item')].find(e => e.textContent.includes('复制')).click());
   await sleep(400);
   r.dupCount = await page.$$eval('#persona-grid .persona-card:not(.add)', e => e.length);
@@ -389,14 +390,14 @@ async function scenario(browser, theme) {
 
   // 13) 插件：DeepSeek RP 缓存优化器 V2
   const rpConv = () => page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache && c.plugins.rpcache.enabled) return c; } return null; });
-  const rpLogs = async () => { const c = await rpConv(); return JSON.parse(await page.evaluate(k => window.__mem[k] || '[]', 'rplog_' + c.id + '.json')); };
+  const rpLogs = async () => { const c = await rpConv(); return page.evaluate(id => { const l = window.__mem['rplog_' + id + '.jsonl']; if (l != null) return l.split('\n').filter(x => x.trim()).map(x => JSON.parse(x)); return JSON.parse(window.__mem['rplog_' + id + '.json'] || '[]'); }, c.id); }; // v0.9.0 起日志为 JSONL
   const waitIdle = () => page.waitForFunction(() => !document.querySelector('#btn-send').classList.contains('stop'), { timeout: 20000 });
   const panelClick = sel => page.evaluate(s => document.querySelector('#pp-body ' + s).click(), sel);
   const openBlock = t => page.evaluate(t => [...document.querySelectorAll('#pp-body .rp-block')].find(e => e.querySelector('.rb-title').textContent === t).click(), t);
   const typeBlock = v => page.evaluate(v => { const t = document.querySelector('#rb-text'); t.value = v; t.dispatchEvent(new Event('input')); }, v);
   const tab = k => page.evaluate(k => document.querySelector('#pp-body .seg button[data-tab="' + k + '"]').click(), k);
   // 面板里不应残留英文界面文字（允许：品牌 / 模型名、Token、RP，以及发送给模型的全大写标记如 [WORLD]、FACTS）
-  const ALLOW_EN = new Set(['Token', 'DeepSeek', 'RP', 'OpenAI', 'Claude', 'NPC', 'cache_control']);
+  const ALLOW_EN = new Set(['Token', 'DeepSeek', 'RP', 'OpenAI', 'Claude', 'NPC', 'cache_control', 'Skill']);
   const englishLeft = () => page.evaluate(() => {
     const c = document.querySelector('#pp-body').cloneNode(true);
     c.querySelectorAll('.rb-prev, textarea, .l20-r').forEach(e => e.remove()); // 用户自己写的设定 / 摘要内容
@@ -428,7 +429,7 @@ async function scenario(browser, theme) {
   assert.ok(await page.$eval('#page-plugin', e => e.classList.contains('show')));
   await page.click('#rp-on'); await sleep(300);
   r.tabs = await page.$$eval('#pp-body .seg button', e => e.map(x => x.textContent));
-  assert.deepStrictEqual(r.tabs, ['分层设定', '章节摘要', '缓存监控', '预算设置']);
+  assert.deepStrictEqual(r.tabs, ['分层设定', '章节摘要', '缓存监控', '上下文体检', '预算设置']);
   r.layers = await page.$$eval('#pp-body .layer-head .lh-no', e => e.map(x => x.textContent));
   assert.deepStrictEqual(r.layers, ['L1', 'L2', 'L3', 'L4', 'L4+', 'L5', 'L6']);
   // 编辑 L1 / L2 / L5
@@ -493,15 +494,16 @@ async function scenario(browser, theme) {
     if (i) {
       const prev = rq[i - 1].body.messages; const k = prev.length - 1;
       assert.deepStrictEqual(m.slice(0, k), prev.slice(0, k), '第 ' + (i + 1) + ' 轮的前缀与上一轮完全一致');
-      assert.strictEqual(m[k].content, prev[k].content.split('\n\n[CURRENT_STATE]\n')[0], '上一轮输入以原文进入历史');
-      assert.ok(q.raw.startsWith(rq[i - 1].raw.slice(0, rq[i - 1].raw.lastIndexOf(m[k].content) + m[k].content.length)), '请求体公共前缀延伸到上一轮输入末尾');
+      const body = t => t.replace(/^\[AFFECT\][^\n]*\n(?:[\s\S]*?\n\n)?/, ''); // v0.15.0 P0-3：历史只回放情感标签行
+      assert.ok(prev[k].content.split('\n\n[CURRENT_STATE]\n')[0].endsWith(body(m[k].content)) && /^\[AFFECT\][^\n]*\n/.test(m[k].content), '上一轮输入以原文进入历史（仅保留情感标签行）');
+      assert.ok(q.raw.startsWith(rq[i - 1].raw.slice(0, rq[i - 1].raw.indexOf(JSON.stringify(prev[k].content).slice(0, 12)))), '请求体公共前缀延伸到上一轮用户消息前');
     }
   });
   let logs = await rpLogs();
   assert.strictEqual(logs.length, 4);
   assert.deepStrictEqual(logs[3].diag, { static: 'SAME', memory: 'SAME', summary: 'SAME', delta: 'SAME', state: 'SAME', input: 'CHANGED', history: 'APPEND' });
   assert.strictEqual(logs[2].diag.state, 'CHANGED'); assert.strictEqual(logs[2].diag.history, 'APPEND');
-  assert.ok(logs[3].hit_rate > 0.7, 'hit ' + logs[3].hit_rate);
+  assert.ok(logs[3].hit_rate > 0.6, 'hit（v0.15.0 P0-3 上一轮用户消息裁剪致前缀短一截）' + logs[3].hit_rate);
   assert.strictEqual(logs[3].reason, '正常动态更新');
   assert.ok(!JSON.stringify(logs).includes('账本'), '日志默认不含 Prompt 文本');
   r.mbadges = await page.$$eval('.msg.assistant .mbadge', e => e.map(x => x.textContent));

@@ -1,4 +1,4 @@
-/* 好感度 / 心情（affect，v0.14.0）：取代旧 liveliness 关键词规则引擎。
+/* 好感度 / 心情（affect，v0.15.0）：取代旧 liveliness 关键词规则引擎。
  * 状态挂在 assistant 消息上：bot.affect = { v:1, aff, vec:{val,aro}, mood, ts, a, m, g, p }
  *   最新有效状态 = 最新一条带 affect 的 assistant 消息（显示前按 ts 衰减）。
  * 模型协议：回复最末尾单独一行 <state>{"a":1,"m":"开心"}</state>，a∈{-2..2}，m∈MOODS；解析后从正文剥离。
@@ -60,7 +60,9 @@
     if (!o || typeof o !== 'object') return null;
     const a = Math.round(Number(o.a));
     if (!isFinite(a)) return null;
-    return { a: clamp(a, -2, 2), m: MOODS.includes(o.m) ? o.m : null };
+    const r = { a: clamp(a, -2, 2), m: MOODS.includes(o.m) ? o.m : null };
+    if (typeof o.why === 'string' && o.why.trim()) r.why = o.why.trim().slice(0, 80); // A1：证据锚
+    return r;
   }
   /** 剥离所有 <state>…</state>（含流式中途未闭合的尾巴）及其所在空行 */
   function stripState(text) {
@@ -74,18 +76,70 @@
     return add + '\n' + (c || '');
   }
 
-  /** 护栏：返回修正后的 a/m 与命中的规则 */
-  function guard(a, m, userText) {
-    const u = String(userText || ''), hit = [];
-    if (RX_BOUNDARY.test(u)) { a = -2; hit.push('boundary'); if (!NEG_MOODS.includes(m)) m = '愤怒'; }
-    else if (RX_ABUSE.test(u)) { if (a > -1) a = -1; hit.push('abuse'); if (!NEG_MOODS.includes(m)) m = '不悦'; }
-    else if (a === 2 && !RX_PRAISE.test(u)) { a = 1; hit.push('a2_unfounded'); }
+  // ---- A1：证据锚 Jaccard（字符 bigram，中英混排友好）----
+  function grams(t) {
+    const x = String(t || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+    const g = new Set(); if (x.length === 1) g.add(x);
+    for (let i = 0; i + 1 < x.length; i++) g.add(x.slice(i, i + 2));
+    return g;
+  }
+  /** why 与用户原话的重合度：|why∩user| / |why|（包含度）与标准 Jaccard 取大，避免短引用被长原文稀释 */
+  function jaccard(a, b) {
+    const A = grams(a), B = grams(b); if (!A.size || !B.size) return 0;
+    let n = 0; A.forEach(x => { if (B.has(x)) n++; });
+    return r4(Math.max(n / (A.size + B.size - n), n / A.size * 0.8));
+  }
+  const WHY_TH = 0.3;
+  // ---- P0-4：护栏分档 ----
+  /** 去掉剧情引用：引号 / 书名号 / *动作* / （旁白） / > 引用行 内的内容不算「对 AI 说的话」 */
+  function directText(u) {
+    return String(u || '').replace(/「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"|‘[^’]*’|《[^》]*》|\*[^*\n]+\*|（[^）]*）|\([^)]*\)|【[^】]*】/g, ' ')
+      .split('\n').filter(l => !/^\s*>/.test(l)).join('\n');
+  }
+  /** 关键词命中分档：'direct' 指向 AI（含「你」或无引用包裹）、'story' 只出现在剧情引用 / 旁白里、null 未命中 */
+  function hitLevel(rx, u) {
+    if (!rx.test(u)) return null;
+    const d = directText(u);
+    if (!rx.test(d)) return 'story';
+    return 'direct';
+  }
+  const MODES = ['normal', 'dark', 'nsfw'];
+  /** 会话模式：conv.affectMode 显式设置优先；否则角色 / 会话标签含 dark/nsfw 时自动降级 */
+  function modeOf(conv) {
+    if (!conv) return 'normal';
+    if (MODES.includes(conv.affectMode)) return conv.affectMode;
+    const tags = [].concat(conv.tags || [], conv.personaTags || [], (conv.charCard && conv.charCard.tags) || []).map(t => String(t).toLowerCase());
+    if (tags.some(t => /nsfw|r18|18\+/.test(t))) return 'nsfw';
+    if (tags.some(t => /dark|黑暗|致郁|暗黑/.test(t))) return 'dark';
+    return 'normal';
+  }
+  /**
+   * 护栏：返回修正后的 a/m 与命中的规则。
+   * opts.mode：normal（默认）| dark（越界词不强制；辱骂只封顶 0，不强制负向心情）| nsfw（越界词不强制；辱骂同 normal）
+   * opts.why：A1 证据锚，a=±2 时与用户原话 Jaccard ≥ WHY_TH 视为有据
+   */
+  function guard(a, m, userText, opts) {
+    opts = opts || {};
+    const u = String(userText || ''), hit = [], mode = MODES.includes(opts.mode) ? opts.mode : 'normal';
+    const bd = hitLevel(RX_BOUNDARY, u), ab = hitLevel(RX_ABUSE, u);
+    const why = opts.why, wj = why ? jaccard(why, u) : 0;
+    const founded = why ? wj >= WHY_TH : null; // null = 未给 why
+    if (bd === 'direct' && mode === 'normal') { a = -2; hit.push('boundary'); if (!NEG_MOODS.includes(m)) m = '愤怒'; }
+    else if (ab === 'direct' && mode !== 'dark') { if (a > -1) a = -1; hit.push('abuse'); if (!NEG_MOODS.includes(m)) m = '不悦'; }
+    else if (ab === 'direct' && mode === 'dark') { if (a > 0) a = 0; hit.push('abuse_dark'); }
+    else {
+      if (bd === 'story' || ab === 'story') hit.push('story_ref');
+      else if (bd === 'direct') hit.push('boundary_' + mode);
+      if (a === 2 && !RX_PRAISE.test(directText(u)) && founded !== true) { a = 1; hit.push('a2_unfounded'); }
+      else if (a === -2 && founded === false) { a = -1; hit.push('why_weak'); }
+    }
+    if (why) hit.push('why:' + wj.toFixed(2));
     return { a, m, hit };
   }
   /** 一轮更新：prev（上一快照，可空）+ 解析结果（可空）+ 用户本轮话 → 新快照 */
-  function step(prev, parsed, userText, now) {
+  function step(prev, parsed, userText, now, opts) {
     const s = decay(prev, now);
-    const gd = guard(parsed ? parsed.a : 0, parsed ? parsed.m : null, userText);
+    const gd = guard(parsed ? parsed.a : 0, parsed ? parsed.m : null, userText, Object.assign({}, opts, { why: parsed && parsed.why }));
     const a = gd.a, m = gd.m;
     const day = dayKey(now);
     let net = prev && prev.g && prev.g.day === day ? prev.g.net || 0 : 0;
@@ -96,7 +150,7 @@
     net = r4(net + (aff - s.aff));
     const tg = m ? TARGET[m] : BASE_VEC;
     const vec = { val: r4(s.vec.val + INERTIA * (tg.val - s.vec.val)), aro: r4(s.vec.aro + INERTIA * (tg.aro - s.vec.aro)) };
-    return { v: 1, aff: r4(aff), vec, mood: classify(vec, s.mood), ts: now, a, m, g: { day, net, guard: gd.hit }, p: parsed ? (gd.hit.length ? 'model+guard' : 'model') : (gd.hit.length ? 'guard' : 'none') };
+    return { v: 1, aff: r4(aff), vec, mood: classify(vec, s.mood), ts: now, a, m, g: { day, net, guard: gd.hit }, p: parsed ? (gd.hit.some(h => !/^why:/.test(h)) ? 'model+guard' : 'model') : (gd.hit.length ? 'guard' : 'none'), ...(parsed && parsed.why ? { why: parsed.why } : {}) };
   }
   /** 最新有效状态（可传 before：只看该消息之前） */
   function latest(conv, before) {
@@ -105,8 +159,33 @@
     for (let i = end - 1; i >= 0; i--) if (ms[i] && ms[i].role === 'assistant' && ms[i].affect) return ms[i].affect;
     return null;
   }
-  const PROTOCOL = '[AFFECT_RULE] 回复最末尾单独一行输出 <state>{"a":好感变化-2~2整数,"m":"' + MOODS.join('|') + '"}</state>，正文不要提及该标签或状态。';
-  function renderInjection(st) { return '[AFFECT] mood=' + st.mood + ' aff_tier=' + tier(st.aff) + '\n' + PROTOCOL; }
+  const PROTOCOL = '[AFFECT_RULE] 回复最末尾单独一行输出 <state>{"a":好感变化-2~2整数,"m":"' + MOODS.join('|') + '","why":"a≠0 时摘用户原话 ≤12 字作依据"}</state>，正文不要提及该标签或状态。';
+  function renderTag(st) { return '[AFFECT] mood=' + st.mood + ' aff_tier=' + tier(st.aff); }
+  function renderInjection(st) { return renderTag(st) + '\n' + PROTOCOL; }
+  /** P0-3：历史只挂短 tag（冻结注入的首行），完整协议只在本轮 */
+  const tagOf = inj => String(inj || '').split('\n')[0];
+  /** P0-2 方案 A：切版本 / 编辑后，从 idx 起清除 affect 与 affectInj（含各版本快照），返回清除条数 */
+  function invalidateFrom(conv, idx) {
+    const ms = (conv && conv.messages) || []; let n = 0;
+    for (let i = Math.max(0, idx | 0); i < ms.length; i++) {
+      const m = ms[i]; if (!m) continue;
+      if (m.affect || m.affectInj) n++;
+      delete m.affect; delete m.affectInj;
+      if (Array.isArray(m.versions)) m.versions.forEach(v => { if (v && (v.affect || v.affectInj)) { delete v.affect; delete v.affectInj; } });
+    }
+    return n;
+  }
+  /** E2：最近 n 条 affect 好感序列（sparkline 用） */
+  function series(conv, n) {
+    const out = []; ((conv && conv.messages) || []).forEach(m => { if (m && m.role === 'assistant' && m.affect) out.push(m.affect.aff); });
+    return out.slice(-(n || 30));
+  }
+  function sparkline(vals, w, h) {
+    w = w || 160; h = h || 32; if (!vals || vals.length < 2) return '';
+    const pts = vals.map((v, i) => (i * (w - 4) / (vals.length - 1) + 2).toFixed(1) + ',' + (h - 2 - clamp(v, 0, 1) * (h - 4)).toFixed(1)).join(' ');
+    const by = (h - 2 - BASE_AFF * (h - 4)).toFixed(1);
+    return '<svg class="af-spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"><line x1="0" x2="' + w + '" y1="' + by + '" y2="' + by + '" stroke="currentColor" stroke-opacity=".25" stroke-dasharray="2 3"/><polyline fill="none" stroke="currentColor" stroke-width="1.5" points="' + pts + '"/></svg>';
+  }
 
   /** 改写请求消息：历史 assistant 剥离 <state>；历史 user 回放冻结的注入；本轮 user 前置注入（首发冻结） */
   function applyToMessages(msgs, lastUser, inj) {
@@ -117,14 +196,14 @@
       const src = m._src;
       let add = null;
       if (i === idx) add = (lastUser && lastUser.affectInj) || inj;
-      else if (src && src.affectInj) add = src.affectInj;
+      else if (src && src.affectInj) add = tagOf(src.affectInj); // P0-3：历史只回放短 tag
       if (!add || textOf(m.content).startsWith(add)) return m;
       return Object.assign({}, m, { content: prependToContent(m.content, add) });
     });
   }
 
   const Affect = { BASE_AFF, AFF_HALF_LIFE, MOOD_HALF_LIFE, BASE_VEC, DELTA, NEG_MULT, DAILY_GAIN_CAP, INERTIA, HYS, TIER_TH, MOODS, TARGET,
-    tier, classify, decay, parseState, stripState, stripContent, guard, step, latest, renderInjection, applyToMessages, dayKey, textOf };
+    tier, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, MODES, WHY_TH, stripState, stripContent, guard, step, latest, renderInjection, applyToMessages, dayKey, textOf };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;
@@ -151,7 +230,7 @@
           const parsed = parseState(raw);
           bot.content = stripContent(bot.content);
           if (!result.ok) return;
-          bot.affect = step(latest(ctx.conv, bot), parsed, textOf(ctx.lastUser && ctx.lastUser.content), Date.now());
+          bot.affect = step(latest(ctx.conv, bot), parsed, textOf(ctx.lastUser && ctx.lastUser.content), Date.now(), { mode: modeOf(ctx.conv) });
           if (host && host.saveConv) host.saveConv(ctx.conv);
         },
         headerBadges(conv, host) {
@@ -164,12 +243,18 @@
         const conv = host.conv(), lt = latest(conv);
         if (!lt) { box.innerHTML = '<div class="hint">本对话还没有好感 / 心情状态（模型回复末尾输出 &lt;state&gt; 后出现）。</div>'; return; }
         const s = decay(lt, Date.now());
+        const md = modeOf(conv), sp = sparkline(series(conv, 30));
         box.innerHTML = '<div class="hint">当前心情：' + host.esc(s.mood) + ' · 好感 ' + s.aff.toFixed(3) + '（档位 ' + tier(s.aff) + '/5）</div>' +
+          (sp ? '<div class="hint">好感走势（近 30 轮，虚线 = 基线）<br>' + sp + '</div>' : '') +
+          (lt.why ? '<div class="hint">依据：' + host.esc(lt.why) + '</div>' : '') +
+          '<label class="field inline"><span>护栏档位<small>黑暗向：越界词不强制、辱骂只封顶 0；NSFW：越界词不强制。剧情引用（引号 / *动作* / 括号旁白）在任何档位都不触发护栏</small></span><select class="af-mode">' +
+          MODES.map(x => '<option value="' + x + '"' + (x === md ? ' selected' : '') + '>' + ({ normal: '标准', dark: '黑暗向', nsfw: 'NSFW' }[x]) + '</option>').join('') + '</select></label>' +
           '<div class="hint">最近一轮：a=' + lt.a + ' · m=' + host.esc(lt.m || '-') + ' · 来源 ' + host.esc(lt.p || '-') + (lt.g && lt.g.guard && lt.g.guard.length ? ' · 护栏 ' + host.esc(lt.g.guard.join(',')) : '') + (lt.g ? ' · 今日净增 ' + (lt.g.net || 0).toFixed(3) : '') + '</div>' +
           '<div class="hint">注入示例：<br><code>' + host.esc(renderInjection(s)).replace(/\n/g, '<br>') + '</code></div>' +
           '<button class="chip-btn af-reset">重置本对话状态</button>';
+        box.querySelector('.af-mode').onchange = e => { conv.affectMode = e.target.value; host.saveConv(conv); host.toast('护栏档位：' + e.target.selectedOptions[0].textContent); };
         box.querySelector('.af-reset').onclick = () => {
-          (conv.messages || []).forEach(m => { delete m.affect; });
+          invalidateFrom(conv, 0);
           host.saveConv(conv); host.toast('已重置'); this.renderPanel(box, host);
         };
       },
