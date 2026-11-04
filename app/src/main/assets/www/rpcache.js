@@ -93,6 +93,8 @@
     'qwen3-vl-plus': qp(1, 10, 'qwen3-vl-plus,qwen-vl'),
     'qwen-plus-character': qp(0.8, 2, 'qwen-plus-character,character'),
     'qwen-long': qp(0.5, 2, 'qwen-long'),
+    // Gemini 2.5 Flash-Lite（美元 / 百万 Token）：输入 miss $0.10、输出 $0.40、缓存读 0.25× → hit $0.025；隐式写入按 miss（省略 write）
+    'gemini-2.5-flash-lite': { hit: 0.025, miss: 0.10, out: 0.40, match: 'gemini-2.5-flash-lite,flash-lite', peak: false, builtin: true },
   };
   const HISTORY_LIMIT = 30;
   const LOG_LIMIT = 500;

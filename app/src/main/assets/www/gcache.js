@@ -108,8 +108,19 @@
   const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, hash, staticHash, STATIC_PROMPT_VERSION };
 
   // ───────────────────────── CachePolicyEngine：隐式优先 ─────────────────────────
-  /** Gemini 显式缓存最小前缀（Token，保守取值）：Flash 系 1024，Pro 系 4096 */
-  function minCacheTokens(model) { return /pro/i.test(String(model || '')) ? 4096 : 1024; }
+  /** Gemini 显式缓存最小前缀（Token，保守取值）：Pro 4096 / Flash-Lite 2048 / Flash 等 1024 */
+  function minCacheTokens(model) {
+    const m = String(model || '');
+    if (/pro/i.test(m)) return 4096;
+    if (/flash[-_]?lite|lite/i.test(m)) return 2048;
+    return 1024;
+  }
+  function isFlashLite(model) { return /flash[-_]?lite|lite/i.test(String(model || '')) && !/pro/i.test(String(model || '')); }
+  /** Flash-Lite 隐式命中在短前缀下不稳的诊断文案（不编造命中率；以真实 cached_tokens 为准） */
+  function flashLitePrefixNote(model, est) {
+    if (!isFlashLite(model) || !(est < 3000)) return null;
+    return 'Flash-Lite 系统/固定前缀约 ' + est + ' Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率';
+  }
   /** 粗估 Token（仅用于决策门槛，不用于统计）：CJK 约 1 字 1 Token，其他约 4 字符 1 Token */
   function estTokens(s) { s = String(s || ''); const cjk = (s.match(/[\u3000-\u9fff\uff00-\uffef]/g) || []).length; return Math.ceil(cjk + (s.length - cjk) / 4); }
   /**
@@ -121,7 +132,10 @@
     if (mode === 'off') return { explicit: false, reason: '已关闭显式断点，仅隐式缓存' };
     if (mode === 'prefix' || mode === 'history') return { explicit: true, reason: '手动模式：' + mode };
     const need = minCacheTokens(info.model), have = estTokens(info.staticText);
-    if (have < need) return { explicit: false, reason: '固定前缀约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存（不填充凑门槛）' };
+    if (have < need) {
+      const note = flashLitePrefixNote(info.model, have);
+      return { explicit: false, reason: '固定前缀约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存（不填充凑门槛）' + (note ? '；' + note : '') };
+    }
     if (!info.prevStaticHash) return { explicit: false, reason: '首轮先走隐式缓存，确认前缀稳定后再写显式缓存' };
     if (info.prevStaticHash !== info.static_hash) return { explicit: false, reason: '固定层刚发生变化，本轮不写显式缓存' };
     return { explicit: true, reason: '固定前缀约 ' + have + ' Token 且稳定，启用显式断点' };
@@ -129,12 +143,15 @@
   /** v1.3：auto + Hybrid 时断点放到「本轮 user 之前」（等价 history），门槛按「固定前缀+历史」估算，仍要求固定层稳定 */
   function decideHistory(cfg, info) {
     const need = minCacheTokens(info.model), have = estTokens(info.cacheText);
-    if (have < need) return { explicit: false, reason: '固定前缀+历史约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存' };
+    if (have < need) {
+      const note = flashLitePrefixNote(info.model, have);
+      return { explicit: false, reason: '固定前缀+历史约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存' + (note ? '；' + note : '') };
+    }
     if (!info.prevStaticHash) return { explicit: false, reason: '首轮先走隐式缓存，确认前缀稳定后再写显式缓存' };
     if (info.prevStaticHash !== info.static_hash) return { explicit: false, reason: '固定层刚发生变化，本轮不写显式缓存' };
     return { explicit: true, history: true, reason: '固定前缀+历史约 ' + have + ' Token 且固定层稳定，断点放在本轮 user 之前（历史进缓存）' };
   }
-  const CachePolicyEngine = { decide, decideHistory, minCacheTokens, estTokens, DIAG_LOW, DIAG_GOOD };
+  const CachePolicyEngine = { decide, decideHistory, minCacheTokens, estTokens, isFlashLite, flashLitePrefixNote, DIAG_LOW, DIAG_GOOD };
 
   // ───────────────────────── ProviderAdapters：OpenRouter ─────────────────────────
   /** 由对话 id 生成稳定 session_id（≤256 字符，UUID 形状）；同一对话恒定，换对话即换 */
@@ -178,7 +195,7 @@
   // ───────────────────────── HybridWindow（Hybrid-5：Zip 迟滞滑动窗口） ─────────────────────────
   // 历史原文保留 RAW_MIN~RAW_MAX 轮：满 RAW_MAX 时把最早 (RAW_MAX-RAW_MIN) 轮压成一段摘要（只生成一次、持久化、冻结），之后保留 RAW_MIN 轮。
   // 「摘要+窗口」前缀每 20 轮才变化一次。摘要为本地启发式（离线、确定性），不调用模型。
-  const RAW_MIN = 20, RAW_MAX = 40, SUM_HEAD = '【前情提要（冻结摘要）】';
+  const RAW_MIN = 20, RAW_MAX = 40, SOFT = RAW_MIN + 0.6 * (RAW_MAX - RAW_MIN), HARD = RAW_MAX, TTL_EFF_DEFAULT = 240, SUM_HEAD = '【前情提要（冻结摘要）】';
   const HW_SENT_MAX = 120;
   // 问题 1：冻结摘要上限。总长（字符）超 SUM_CAP 时，在 20 轮边界把最早 SUM_MERGE_K 段合并为一段更短的二级摘要
   const SUM_CAP = 8000, SUM_MERGE_K = 4, SUM_L2_LINE = 36, SUM_L2_MIN = 8;
@@ -345,14 +362,22 @@
     state.summaries = state.summaries || []; hwMigrateSent(state);
     const strategy = opts.summaryStrategy || state.summaryStrategy || 'semantic';
     const turns = splitTurns(history || []);
-    let prefixChanged = false, summaryCreated = false, summaryFailed = false, summaryQuality = null;
+    let prefixChanged = false, summaryCreated = false, summaryFailed = false, summaryQuality = null, earlyCompressed = false;
     if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; }
     for (let i = 0; i < state.summaries.length; i++) {
       const s0 = state.summaries[i];
       if (!batchValid(s0, turns.slice(s0.from, s0.to))) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
     }
     let temporaryFallback = null;
-    while (turns.length - state.cut >= RAW_MAX) {
+    // A3 冷窗口：HARD=RAW_MAX 强制压；SOFT 且 idle>TTL_eff 时提前压（缓存已冷，重建不额外花钱）。RAW_MIN/RAW_MAX 不变。
+    const ttlEff = opts.ttlEff != null ? Number(opts.ttlEff) : TTL_EFF_DEFAULT;
+    const idleSec = opts.idleSec != null ? Number(opts.idleSec) : null;
+    while (true) {
+      const raw = turns.length - state.cut;
+      const force = raw >= HARD;
+      const early = raw >= SOFT && idleSec != null && idleSec > ttlEff;
+      if (!force && !early) break;
+      if (early && !force) earlyCompressed = true;
       const from = state.cut, to = from + (RAW_MAX - RAW_MIN), batch = turns.slice(from, to);
       const text = summarizeTurns(batch, from, { strategy: strategy === 'fast_local' ? 'fast_local' : 'semantic' });
       const quality = scoreHybridSummary(text, batch);
@@ -389,7 +414,7 @@
       const tmpRaw = turns.slice(temporaryFallback.to).flat();
       messagesForRequest = [{ role: 'system', content: SUM_HEAD + '\n' + parts.join('\n') }].concat(tmpRaw);
     }
-    return { messagesForRequest, state, prefixChanged, summaryCreated, summaryMerged, summaryFailed, summaryQuality, temporaryFallback, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
+    return { messagesForRequest, state, prefixChanged, summaryCreated, summaryMerged, summaryFailed, summaryQuality, temporaryFallback, earlyCompressed, rawTurns, totalTurns: turns.length, untilNext: HARD - rawTurns };
   }
 
   // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
@@ -413,7 +438,7 @@
   }
   /** 清掉旧版（以内容哈希为键、值为字符串）的条目 */
   function hwMigrateSent(state) { const o = state.sent || {}; Object.keys(o).forEach(k => { if (!o[k] || typeof o[k] !== 'object') delete o[k]; }); state.sent = o; }
-  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, HYBRID_SUMMARY_MIN_QUALITY, apply: hwApply, splitTurns, summarizeTurns, summarizeTurnsFast, summarizeTurnsSemantic, scoreHybridSummary, extractHybridEvidence, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
+  const HybridWindow = { RAW_MIN, RAW_MAX, SOFT, HARD, TTL_EFF_DEFAULT, SUM_HEAD, SUM_CAP, SUM_MERGE_K, HYBRID_SUMMARY_MIN_QUALITY, apply: hwApply, splitTurns, summarizeTurns, summarizeTurnsFast, summarizeTurnsSemantic, scoreHybridSummary, extractHybridEvidence, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
 
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */
@@ -434,7 +459,13 @@
     if (h.length && !h[h.length - 1].session_id) issues.push('未发送 session_id，OpenRouter 只能在命中后才 sticky');
     for (let i = 1; i < h.length; i++) if (h[i].t - h[i - 1].t > 5 * 60 * 1000) { issues.push('请求间隔超过 5 分钟，隐式缓存可能已过期（sticky 会话 10 分钟失效）'); break; }
     if (h.length && h[h.length - 1].tokens < 1024) issues.push('固定前缀较短（约 ' + h[h.length - 1].tokens + ' Token），低于 Gemini 缓存门槛，命中率低属正常');
-    if (stat.lastDiff) issues.push('最近前缀变化位置 #' + stat.lastDiff.pos);
+    if (h.length) {
+      const last = h[h.length - 1];
+      const fl = flashLitePrefixNote(last.model, last.tokens);
+      if (fl) issues.push(fl);
+    }
+    if (stat.hitAttr && stat.hitAttr.text) issues.push(stat.hitAttr.text);
+    if (stat.lastDiff) issues.push('最近前缀变化位置 #' + stat.lastDiff.pos + (stat.hitAttr && stat.hitAttr.code === 'prefix_broken' ? '（firstDiff）' : ''));
     if (!issues.length) issues.push('未发现明显原因：可能是供应商侧缓存未命中或刚写入');
     return { level: 'low', rate, issues };
   }
@@ -480,7 +511,7 @@
       const tail = lastUser > 0 ? msgs[lastUser] : null;
       let ord = 0;
       const hist = msgs.slice(k, lastUser > 0 ? lastUser : msgs.length).map((m, i) => hwOutbound(st, m, m.role === 'user' ? sentKey(ids[k + i], ord++) : null));
-      const w = hwApply(hist, st, { summaryStrategy: cfg.summaryStrategy || 'semantic' });
+      const w = hwApply(hist, st, { summaryStrategy: cfg.summaryStrategy || 'semantic', idleSec: extra.idleSec, ttlEff: extra.ttlEff != null ? extra.ttlEff : TTL_EFF_DEFAULT });
       let sentUser = null;
       if (tail) {
         const orig = tail.content;
@@ -488,7 +519,7 @@
         else sentUser = tail;
       }
       msgs.splice(k, msgs.length - k, ...w.messagesForRequest.concat(sentUser ? [sentUser] : []));
-      hybrid = { prefixChanged: w.prefixChanged, summaryCreated: w.summaryCreated, rawTurns: w.rawTurns, totalTurns: w.totalTurns, untilNext: w.untilNext, summaries: st.summaries.length, movedDynamic: !!dyn };
+      hybrid = { prefixChanged: w.prefixChanged, summaryCreated: w.summaryCreated, earlyCompressed: !!w.earlyCompressed, rawTurns: w.rawTurns, totalTurns: w.totalTurns, untilNext: w.untilNext, summaries: st.summaries.length, movedDynamic: !!dyn };
     }
     const prefix = msgs.slice(0, k).map(m => partsText(m.content)).join('\n\0\n');
     const layers = analyzeLayers(prefix);
@@ -568,8 +599,46 @@
   }
   const ttlSec = cfg => cfg && cfg.ttl === '1h' ? 3600 : 300;
   const KeepAlive = { pingsForGap, netForGap, recommend: keepaliveRecommend, ttlSec };
-  /** 「应命中却未命中」：上一轮已打显式断点、本轮前缀未变、间隔 < TTL，但 cached_tokens=0 */
-  function expectedHit(prev, cur, ttl) { return !!(prev && prev.explicit && cur && cur.prefix_hash === prev.prefix_hash && cur.t - prev.t < ttl * 1000); }
+  /** 字符级最长公共前缀长度 / 占比（A5：expected = LCP(req_t, req_{t-1}) / len(req_t)） */
+  function lcpLen(a, b) {
+    a = String(a == null ? '' : a); b = String(b == null ? '' : b);
+    const n = Math.min(a.length, b.length); let i = 0;
+    while (i < n && a[i] === b[i]) i++;
+    return i;
+  }
+  function lcpRatio(prev, cur) {
+    cur = String(cur == null ? '' : cur);
+    if (!cur.length) return 0;
+    return lcpLen(prev, cur) / cur.length;
+  }
+  /**
+   * A5 命中归因（仅诊断文案）：expected=LCP 占比，actual=cached_tokens/prompt_tokens。
+   * expected≥0.9 且 gap<TTL → 「应命中」（取代旧的 system prefix_hash 未变判定）。
+   */
+  function attributeCacheHit(o) {
+    o = o || {};
+    const expected = o.expected, actual = o.actual, gap = o.gapSec, compressed = !!o.compressed;
+    const ttlEff = o.ttlEff != null ? Number(o.ttlEff) : TTL_EFF_DEFAULT;
+    if (expected == null || actual == null) return { code: 'unknown', text: null, shouldHit: false };
+    if (expected < 0.5 && compressed) return { code: 'normal_compress', text: '正常（压缩轮预期 miss：LCP 占比 ' + (expected * 100).toFixed(0) + '%）', shouldHit: false };
+    if (expected < 0.8 && !compressed) return { code: 'prefix_broken', text: '客户端前缀被破坏（LCP 占比 ' + (expected * 100).toFixed(0) + '% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层', shouldHit: false };
+    const shouldHit = expected >= 0.9 && (gap == null || gap < ttlEff);
+    if (expected >= 0.9 && actual < 0.3) {
+      if (gap != null && gap >= ttlEff) return { code: 'ttl_expired', text: 'TTL 过期（正常：间隔 ' + Math.round(gap) + 's ≥ TTL_eff ' + ttlEff + 's）', shouldHit: false };
+      return { code: 'provider_miss', text: '服务商侧未命中（路由/驱逐/门槛；LCP≥90% 且间隔在 TTL 内，实际命中 ' + (actual * 100).toFixed(0) + '%）', shouldHit: true };
+    }
+    return { code: shouldHit ? 'expect_hit' : 'observe', text: null, shouldHit };
+  }
+  /** 「应命中」：expected(LCP 占比) ≥ 0.9 且间隔 < TTL；兼容传入 body 对或直接 lcpRatio */
+  function expectedHit(prev, cur, ttl) {
+    if (!prev || !cur) return false;
+    const expected = cur.lcpRatio != null ? cur.lcpRatio
+      : (prev.body != null && cur.body != null) ? lcpRatio(prev.body, cur.body)
+      : null;
+    if (expected == null) return false;
+    const ttlEff = ttl != null ? ttl : TTL_EFF_DEFAULT;
+    return expected >= 0.9 && (cur.t - prev.t) < ttlEff * 1000;
+  }
 
   /** 是否 RP 对话：rpcache 插件对本对话生效 / 存有分层设定 / 系统提示识别到 ≥2 个分层标题 */
   function isRpConv(conv, rpActive) {
@@ -579,13 +648,14 @@
     return !!(conv && analyzeLayers(conv.systemPrompt || '').layered);
   }
 
-  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates, KeepAlive, expectedHit };
+  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, lcpLen, lcpRatio, attributeCacheHit, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates, KeepAlive, expectedHit };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   root.GeminiCache = api;
 
   const reg = root.Plugins && root.Plugins.registry; if (!reg) return;
   const cfgOf = host => Object.assign({}, DEFAULTS, reg.config(host.settings(), ID));
   const lastPrefix = new Map(); // convId -> 上一轮 system 前缀（仅运行时）
+  const lastReqBody = new Map(); // convId -> 上一轮完整请求 body 字符串（仅运行时，供 A5 LCP）
   const statOf = conv => {
     const d = reg.convData(conv, ID);
     d.stat = Object.assign({ requests: 0, hits: 0, prompt: 0, cached: 0, write: 0, unknown: 0, prefixChanges: 0, prefixLen: 0, lastDiff: null, roll: [], hist: [], static_hash: '', static_prompt_version: STATIC_PROMPT_VERSION, session_id: '', decision: '', diag: null }, d.stat);
@@ -618,11 +688,31 @@
           result.bot.gcache = i;
           const prev = s.diag && s.diag.level;
           s.diag = diagnose(s);
-          if (i.known !== false && s.expect) {
-            s.missStreak = i.hit ? 0 : (s.missStreak | 0) + 1;
-            if (s.missStreak === 2 && ctx.opts.orGemini.missAlert !== false) host.toast('💎 连续 2 轮应命中却未命中：前缀未变且在 TTL 内，可能被路由到不同供应商或缓存被驱逐');
+          if (i.known !== false) {
+            const actual = i.prompt ? i.hit / i.prompt : 0;
+            const gapForAttr = s.gaps && s.gaps.length ? s.gaps[s.gaps.length - 1] : null;
+            s.hitAttr = attributeCacheHit({
+              expected: s.lastLcp != null ? s.lastLcp : (s.lastReq && s.lastReq.lcpRatio),
+              actual,
+              gapSec: gapForAttr,
+              compressed: !!(s.lastReq && s.lastReq.compressed),
+              ttlEff: TTL_EFF_DEFAULT,
+            });
+            s.diag = diagnose(s);
+            const should = s.expect || (s.hitAttr && s.hitAttr.shouldHit);
+            if (should) {
+              s.missStreak = i.hit ? 0 : (s.missStreak | 0) + 1;
+              if (s.missStreak === 2 && ctx.opts.orGemini.missAlert !== false) {
+                const why = (s.hitAttr && s.hitAttr.text) || 'LCP≥90% 且在 TTL 内，可能被路由到不同供应商或缓存被驱逐';
+                host.toast('💎 连续 2 轮应命中却未命中：' + why);
+              }
+            } else if (i.hit) s.missStreak = 0;
           } else if (i.hit) s.missStreak = 0;
-          if (ctx.opts.orGemini.toast) host.toast(usageText(i));
+          if (ctx.opts.orGemini.toast) {
+            let t = usageText(i);
+            if (s.hitAttr && s.hitAttr.text) t += ' · ' + s.hitAttr.text;
+            host.toast(t);
+          }
           if (ctx.opts.orGemini.diagToast && s.diag.level === 'low' && prev !== 'low') host.toast('💎 缓存命中率 ' + s.diag.rate + '%：' + s.diag.issues[0]);
         }
         host.saveConv(ctx.conv);
@@ -649,14 +739,22 @@
       const hyOn = o.hybrid !== false && !(ctx.meta && ctx.meta.gcacheRpcache) && ctx.conv;
       const hd = ctx.conv && reg.convData(ctx.conv, ID);
       if (hyOn) hd.hybrid = hd.hybrid && hd.hybrid.v ? hd.hybrid : HybridWindow.empty();
-      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined) });
+      const now = Date.now();
+      const idleSec = s.lastT ? (now - s.lastT) / 1000 : null;
+      const ttlEff = TTL_EFF_DEFAULT; // A1 未实现：冷窗口 / 应命中 用审查默认 240s
+      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined), idleSec, ttlEff });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
-      const now = Date.now();
       if (s.lastT) s.gaps = (s.gaps || []).concat([Math.round((now - s.lastT) / 100) / 10]).slice(-50);
+      const curBody = r.req && r.req.body != null ? String(r.req.body) : '';
+      const prevBody = ctx.conv ? lastReqBody.get(ctx.conv.id) : null;
+      const ratio = prevBody != null ? lcpRatio(prevBody, curBody) : null;
+      const curMeta = { prefix_hash: hash(r.prefix), t: now, body: curBody, lcpRatio: ratio, compressed: !!(r.hybrid && r.hybrid.summaryCreated) };
+      s.expect = expectedHit(s.lastReq, curMeta, ttlEff);
+      s.lastLcp = ratio;
+      s.lastReq = { explicit: !!r.applied, prefix_hash: curMeta.prefix_hash, t: now, lcpRatio: ratio, compressed: curMeta.compressed };
+      if (ctx.conv) lastReqBody.set(ctx.conv.id, curBody);
       s.lastT = now;
-      s.expect = expectedHit(s.lastReq, { prefix_hash: hash(r.prefix), t: now }, ttlSec(o));
-      s.lastReq = { explicit: !!r.applied, prefix_hash: hash(r.prefix), t: now };
       s.applied = r.applied;
       // v1.4.0：上一轮前缀只留在内存（不再随对话持久化整段 system）；持久化的只有 prefix_hash 与 lastDiff 样本
       const prevPrefix = ctx.conv ? lastPrefix.get(ctx.conv.id) : null, ph = hash(r.prefix);
@@ -731,7 +829,9 @@
         if (hy) L.push('Hybrid-5：' + (hy.off ? (hy.off === 'rpcache' ? '本对话由 RP 缓存优化器管理历史（不启用 Zip 窗口）' : '已关闭') : '窗口原文 ' + hy.rawTurns + ' 轮 / 共 ' + hy.totalTurns + ' 轮　冻结摘要：' + (hy.summaries ? hy.summaries + ' 段' : '无') + '　下次压缩还剩 ' + hy.untilNext + ' 轮' + (hy.movedDynamic ? '　动态层已移到尾部' : '')));
         const ttl = ttlSec(c), ka = keepaliveRecommend(s.gaps, ttl, Math.max(30, ttl - 30), c.keepaliveMaxPings | 0);
         L.push('保活分析（TTL ' + ttl + 's，间隔 ' + Math.max(30, ttl - 30) + 's，最多 ' + (c.keepaliveMaxPings | 0) + ' 次 ping）：' + (ka.samples < 3 ? '样本不足（' + ka.samples + ' 个间隔）' : '中位间隔 ' + ka.median + 's，超 TTL ' + ka.overTtl + '/' + ka.samples + '，每轮净收益 ' + ka.net + ' L → ' + (ka.enable ? '建议保活（本插件不自动 ping）' : '不建议保活')));
-        if (s.missStreak >= 2) L.push('⚠️ 连续 ' + s.missStreak + ' 轮应命中却未命中');
+        if (s.missStreak >= 2) L.push('⚠️ 连续 ' + s.missStreak + ' 轮应命中却未命中（判定：LCP≥90% 且间隔 < TTL_eff）');
+        if (s.hitAttr && s.hitAttr.text) L.push('命中归因：' + e(s.hitAttr.text));
+        if (s.lastLcp != null) L.push('本轮 LCP 占比（expected）：' + Math.round(s.lastLcp * 1000) / 10 + '%');
         if (s.decision) L.push('本轮缓存决策：' + e(s.decision));
         L.push('固定前缀长度：约 ' + s.prefixLen + ' 字符（Gemini 显式缓存通常需 ≥1024~4096 Token）　前缀变化次数：' + s.prefixChanges);
         const mem = reg.convData(conv, ID).memory;
