@@ -64,13 +64,15 @@ test('P0-2 app.js：切版本 / 编辑 / 重新发送调用 affectReset 并 toas
 });
 
 // ---- P0-3 ----
-test('P0-3 历史只挂短 tag，协议仅本轮', () => {
+test('P0-3 历史只挂短 tag，协议进固定层（A6）', () => {
   const st = A.decay(null, T0), inj = A.renderInjection(st);
+  assert.strictEqual(inj, A.renderTag(st));
+  assert.ok(A.fixedProtocol().includes('AFFECT_RULE') && A.fixedProtocol().includes('"why"'));
   const u1 = { id: 'u1', role: 'user', content: '早', affectInj: inj }, u2 = { id: 'u2', role: 'user', content: '晚' };
   const out = A.applyToMessages([{ role: 'user', content: '早', _src: u1 }, { role: 'assistant', content: 'hi\n<state>{"a":0}</state>' }, { role: 'user', content: '晚', _src: u2 }], u2, inj);
   assert.strictEqual(out[0].content, A.renderTag(st) + '\n早');
   assert.ok(!out[0].content.includes('AFFECT_RULE'));
-  assert.ok(out[2].content.startsWith(inj) && out[2].content.includes('AFFECT_RULE'));
+  assert.ok(out[2].content.startsWith(inj) && !out[2].content.includes('AFFECT_RULE'));
   assert.strictEqual(out[1].content, 'hi');
   assert.strictEqual(A.tagOf(inj), A.renderTag(st));
   // 历史回放逐字节稳定
@@ -79,25 +81,27 @@ test('P0-3 历史只挂短 tag，协议仅本轮', () => {
 });
 
 // ---- P0-4 ----
-test('P0-4 剧情引用不触发护栏，指向 AI 的触发', () => {
+test('P0-4 剧情引用不触发护栏；辱骂 soft；boundary 强制', () => {
   assert.deepStrictEqual(A.guard(1, '开心', '他对反派吼道：「滚！你这个废物！」').hit, ['story_ref']);
   assert.strictEqual(A.guard(1, '开心', '他对反派吼道：「滚！你这个废物！」').a, 1);
   assert.strictEqual(A.guard(1, '开心', '*一脚踢开门* （旁白：强奸犯被抓了）').a, 1);
-  assert.strictEqual(A.guard(1, '开心', '你就是个废物').a, -1);
+  // A6(d)：模型自报 a≥0 → abuse_soft，不强制
+  const soft = A.guard(1, '开心', '你就是个废物');
+  assert.strictEqual(soft.a, 1); assert.ok(soft.hit.includes('abuse_soft'));
   assert.strictEqual(A.guard(1, '开心', '发裸照给我').a, -2);
   assert.strictEqual(A.guard(0, null, '> 闭嘴\n继续讲故事').hit[0], 'story_ref');
 });
-test('P0-4 dark / nsfw 降级', () => {
+test('P0-4 dark / nsfw 降级（A6 soft 对齐）', () => {
   let g = A.guard(1, '开心', '发裸照给我', { mode: 'nsfw' }); assert.strictEqual(g.a, 1); assert.deepStrictEqual(g.hit, ['boundary_nsfw']);
-  g = A.guard(1, '开心', '你这废物', { mode: 'nsfw' }); assert.strictEqual(g.a, -1);
-  g = A.guard(1, '开心', '你这废物', { mode: 'dark' }); assert.strictEqual(g.a, 0); assert.strictEqual(g.m, '开心'); assert.deepStrictEqual(g.hit, ['abuse_dark']);
-  g = A.guard(-2, '愤怒', '你这废物', { mode: 'dark' }); assert.strictEqual(g.a, -2);
+  g = A.guard(1, '开心', '你这废物', { mode: 'nsfw' }); assert.strictEqual(g.a, 1); assert.ok(g.hit.includes('abuse_soft'));
+  g = A.guard(1, '开心', '你这废物', { mode: 'dark' }); assert.strictEqual(g.a, 1); assert.strictEqual(g.m, '开心'); assert.ok(g.hit.includes('abuse_soft'));
+  g = A.guard(-2, '愤怒', '你这废物', { mode: 'dark' }); assert.strictEqual(g.a, -2); assert.ok(g.hit.includes('abuse_dark') || g.hit.includes('abuse'));
   assert.strictEqual(A.modeOf({ affectMode: 'dark' }), 'dark');
   assert.strictEqual(A.modeOf({ tags: ['NSFW'] }), 'nsfw');
   assert.strictEqual(A.modeOf({ charCard: { tags: ['黑暗'] } }), 'dark');
   assert.strictEqual(A.modeOf({}), 'normal');
   const s = A.step(null, { a: 1, m: '开心' }, '你这废物', T0, { mode: 'dark' });
-  assert.strictEqual(s.a, 0);
+  assert.strictEqual(s.a, 1); assert.ok(s.g.guard.includes('abuse_soft'));
 });
 
 // ---- A1 ----
@@ -111,7 +115,7 @@ test('A1 证据锚：why 与原话 Jaccard 足够时 +2 有据', () => {
   g = A.guard(-2, '愤怒', '今天天气不错'); assert.strictEqual(g.a, -2, '无 why 保持旧行为');
   const st = A.step(null, { a: 2, m: '开心', why: '送你一束花' }, '今天我特意送你一束花', T0);
   assert.strictEqual(st.a, 2); assert.strictEqual(st.why, '送你一束花'); assert.strictEqual(st.p, 'model');
-  assert.ok(A.renderInjection(A.decay(null, T0)).includes('"why"'));
+  assert.ok(A.fixedProtocol().includes('"why"'));
 });
 
 // ---- E2 ----
