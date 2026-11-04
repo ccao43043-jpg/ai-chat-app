@@ -119,3 +119,85 @@ test('affToX / deltaFromA 映射自洽', () => {
   const mid = A.deltaFromA(0.5);
   assert.ok(mid > 0 && mid < A.DELTA['1']);
 });
+
+test('estimatorOf：conv 优先于 settings；非法回落 kf', () => {
+  assert.strictEqual(A.estimatorOf(null, null), 'kf');
+  assert.strictEqual(A.estimatorOf({ affectEstimator: 'legacy' }, { affectEstimator: 'kf' }), 'legacy');
+  assert.strictEqual(A.estimatorOf({}, { affectEstimator: 'legacy' }), 'legacy');
+  assert.strictEqual(A.estimatorOf({ affectKf: false }, null), 'legacy');
+  assert.strictEqual(A.estimatorOf({ affectEstimator: 'nope' }, null), 'kf');
+  assert.strictEqual(A.useKfEstimator({ conv: { affectEstimator: 'legacy' } }), false);
+});
+
+test('vecStepKf：â 驱动目标；增益夹在 G_MIN..G_MAX；classify 滞回仍可用', () => {
+  const base = { val: 0, aro: 0.2 };
+  const hi = A.vecStepKf(base, '开心', { x: 2, K: 0.5 });
+  // tg 应介于 TARGET.开心 与 â→val=1 之间，val 高于纯 mood*INERTIA 起跑点
+  assert.ok(hi.vec.val > 0.2, 'val=' + hi.vec.val);
+  assert.ok(hi.g >= A.VEC_KF_G_MIN && hi.g <= A.VEC_KF_G_MAX, 'g=' + hi.g);
+  assert.ok(hi.tg.val > A.TARGET['开心'].val * 0.5, 'tg.val=' + hi.tg.val);
+  // â 负向应拉低 valence
+  const lo = A.vecStepKf(base, '平静', { x: -2, K: 0.4 });
+  assert.ok(lo.vec.val < 0, 'neg val=' + lo.vec.val);
+  // 无 K 时仍可算
+  const nk = A.vecStepKf(base, '开心', { x: 1 });
+  assert.ok(nk.vec.val > 0);
+  // 滞回：中间点不轻易切
+  const mid = A.classify({ val: 0.28, aro: 0.31 }, '开心');
+  assert.strictEqual(mid, '开心');
+});
+
+test('step KF：vec 不再等于纯 INERTIA；legacy 仍纯 INERTIA', () => {
+  const leg = A.step(null, { a: 1, m: '开心' }, '谢谢你', T0, LEGACY);
+  assert.deepStrictEqual(leg.vec, { val: 0.3, aro: 0.325 }); // INERTIA*TARGET 钉死
+  const kf = A.step(null, { a: 1, m: '开心' }, '谢谢你', T0, KF);
+  assert.ok(kf.kf && kf.kf.K != null);
+  assert.ok(kf.g.vecG >= A.VEC_KF_G_MIN && kf.g.vecG <= A.VEC_KF_G_MAX);
+  // 与 legacy 同输入时 vec 应有差异（â 拉目标）或至少不全等 INERTIA 公式的偶然重合时仍带 kf 元数据
+  const pureInertia = {
+    val: Math.round((0 + A.INERTIA * (0.6 - 0)) * 1e4) / 1e4,
+    aro: Math.round((0.2 + A.INERTIA * (0.45 - 0.2)) * 1e4) / 1e4
+  };
+  assert.deepStrictEqual(leg.vec, pureInertia);
+  // KF 路径：合成目标含 â，通常 ≠ 纯 INERTIA；若数值碰巧接近，至少 vecG 存在且 p 含 kf
+  assert.ok(String(kf.p).includes('kf'));
+  assert.ok(kf.g.vecG != null);
+  assert.ok(Math.abs(kf.vec.val - pureInertia.val) > 1e-6 || Math.abs(kf.vec.aro - pureInertia.aro) > 1e-6,
+    'KF vec should differ from pure INERTIA: ' + JSON.stringify(kf.vec));
+});
+
+test('formatKfHint / formatCusumHint：短可读，无状态返回空', () => {
+  assert.strictEqual(A.formatKfHint(null), '');
+  assert.strictEqual(A.formatCusumHint(null), '');
+  const st = {
+    kf: { x: 0.5, P: 0.2 },
+    g: { yT: 0.8, yModel: 1, yLex: 0.4, w: 0.65 },
+    cusum: { tier: 3, dwell: 2, sp: 0.12, sm: 0 }
+  };
+  const kh = A.formatKfHint(st);
+  assert.ok(kh.includes('â=0.50') && kh.includes('P=0.200') && kh.includes('yT=0.80') && kh.includes('w=0.65'));
+  const ch = A.formatCusumHint(st);
+  assert.ok(ch.includes('档3/5') && ch.includes('dwell=2') && ch.includes('S+=0.12'));
+});
+
+test('合成稳定性：振荡 a 下 KF vec 步长均值 ≤ legacy INERTIA 路径（无人工金标）', () => {
+  // 交替 a=+1/-1，比较 |Δvec| 均值；KF 用滤波 â 平滑，期望不比纯 INERTIA 更抖
+  function traj(est) {
+    let s = null;
+    const deltas = [];
+    for (let i = 0; i < 24; i++) {
+      const a = i % 2 === 0 ? 1 : -1;
+      const m = a > 0 ? '开心' : '不悦';
+      const n = A.step(s, { a, m }, a > 0 ? '谢谢' : '有点烦', T0 + i * 1000, { estimator: est });
+      if (s && s.vec) {
+        deltas.push(Math.hypot(n.vec.val - s.vec.val, n.vec.aro - s.vec.aro));
+      }
+      s = n;
+    }
+    return deltas.reduce((x, y) => x + y, 0) / deltas.length;
+  }
+  const maeKf = traj('kf');
+  const maeLeg = traj('legacy');
+  // 允许 KF 略大，但不应显著更抖（阈值 1.25×）；主要是回归哨兵而非金标
+  assert.ok(maeKf <= maeLeg * 1.25 + 1e-9, 'kf=' + maeKf + ' legacy=' + maeLeg);
+});
