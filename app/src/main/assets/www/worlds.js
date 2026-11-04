@@ -64,6 +64,7 @@
       emoji: String(w.emoji || '🌍').trim().slice(0, 4) || '🌍',
       name: String(w.name || '').trim() || '未命名世界',
       desc: String(w.desc || '').trim(),
+      greeting: String(w.greeting || '').replace(/\r\n/g, '\n').trim(),
       blocks: normalizeBlocks(w.blocks),
       updatedAt: w.updatedAt || 0,
       createdAt: w.createdAt || 0,
@@ -178,6 +179,12 @@
     };
   }
 
+  function greetingMessage(world, conv, now, idFn) {
+    const g = normalizeWorld(world).greeting;
+    if (!g || !conv || (conv.messages && conv.messages.length)) return null;
+    return { id: idFn ? idFn() : 'm-' + uid(), role: 'assistant', content: g, model: conv.model, createdAt: now || Date.now() };
+  }
+
   function filledBlockCount(world) {
     const b = normalizeWorld(world).blocks;
     return BLOCK_IDS.filter(id => (b[id] || '').trim()).length;
@@ -186,7 +193,7 @@
   const api = {
     BLOCK_IDS, BLOCK_META, emptyBlocks, normalizeBlocks, normalizeWorld,
     defaultWorlds, upsert, duplicate, remove,
-    WORLD_START_TEMPLATE_ID, immersiveFields, conversationFromWorld, applyWorldToState, applyWorldToConversation, filledBlockCount,
+    WORLD_START_TEMPLATE_ID, immersiveFields, conversationFromWorld, applyWorldToState, applyWorldToConversation, greetingMessage, filledBlockCount,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Worlds = api;

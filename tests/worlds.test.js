@@ -146,3 +146,18 @@ test('applyWorldToState 空块可清空已有内容', () => {
 test('filledBlockCount', () => {
   assert.strictEqual(W.filledBlockCount({ name: 'x', blocks: { world: 'a', style: '  ' } }), 1);
 });
+
+test('开场白：normalize 保留内部换行、缺省为空', () => {
+  assert.strictEqual(W.normalizeWorld({}).greeting, '');
+  assert.strictEqual(W.normalizeWorld({ greeting: '  *雨夜*\r\n\r\n「……又是新面孔。」 ' }).greeting, '*雨夜*\n\n「……又是新面孔。」');
+  assert.strictEqual(W.normalizeWorld(JSON.parse(JSON.stringify(W.normalizeWorld({ greeting: 'hi' })))).greeting, 'hi');
+});
+
+test('开场白：空则不插；有则生成首条助手消息；已有消息不插（同步路径）', () => {
+  assert.strictEqual(W.greetingMessage({ greeting: '  ' }, { model: 'm', messages: [] }), null);
+  const m = W.greetingMessage({ greeting: '「你好」' }, { model: 'gpt', messages: [] }, 123, () => 'id1');
+  assert.deepStrictEqual(m, { id: 'id1', role: 'assistant', content: '「你好」', model: 'gpt', createdAt: 123 });
+  assert.strictEqual(W.greetingMessage({ greeting: 'x' }, { model: 'gpt', messages: [{ role: 'user', content: 'a' }] }), null);
+  const conv = W.applyWorldToConversation({ messages: [] }, { greeting: 'x', blocks: { world: 'w' } }, RPCache, 1).conv;
+  assert.ok(!(conv.messages || []).length, '套用世界本身不插开场白');
+});
