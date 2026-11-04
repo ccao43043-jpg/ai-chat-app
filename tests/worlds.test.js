@@ -67,7 +67,7 @@ test('开聊创建字段：worldId / 名称 / emoji / title + 沉浸式模板', 
   assert.ok(typeof c.systemPrompt === 'string' && c.systemPrompt.length > 40);
   assert.ok(c.systemPrompt.includes('分层设定 / 世界模板'));
   assert.ok(!c.systemPrompt.includes('首条消息后自动生成'));
-  assert.ok(/\d{4}-\d{2}-\d{2}/.test(c.systemPrompt) && /\d{2}:\d{2}/.test(c.systemPrompt), 'date/time filled');
+  assert.ok(!/\d{4}-\d{2}-\d{2}/.test(c.systemPrompt) && c.systemPrompt.includes('本轮动态信息'), 'v0.21.3：时间不冻进 system');
   const imm = T.BUILTIN_TEMPLATES.find(x => x.id === 't-rp-immersive');
   const expected = T.applyToConv({}, imm);
   assert.strictEqual(c.systemPrompt, expected.systemPrompt);

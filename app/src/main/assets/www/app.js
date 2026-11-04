@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.2';
+  const APP_VERSION = '0.21.3';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -1574,6 +1574,13 @@
   }
 
   /** 把存储的消息转换为请求消息：展开文件内容，最新一条用户消息注入搜索结果 */
+  /** v0.21.3：固定 system 写「见本轮动态信息」的对话，每轮把「现在是 …」追加到本轮 user 消息尾部（动态段，不进固定前缀、不写回历史） */
+  function injectNowLine(msgs, sys) {
+    if (!Array.isArray(msgs) || String(sys || '').indexOf(TimeUtil.NOW_MARKER) < 0) return msgs;
+    let i = msgs.length - 1; if (i < 0 || msgs[i].role !== 'user' || typeof msgs[i].content !== 'string') return msgs;
+    const out = msgs.slice(); out[i] = Object.assign({}, msgs[i], { content: (msgs[i].content ? msgs[i].content + '\n\n' : '') + TimeUtil.nowLine() });
+    return out;
+  }
   function toRequestMsg(m, injectSearch) {
     let content = m.content || '';
     if (m.role === 'user' && m.files && m.files.length) {
@@ -1583,7 +1590,7 @@
       if (scanned.length) content = '（附带的 ' + scanned.map(f => '「' + f.name + '」').join('、') + ' 为扫描版 PDF，已转成图片附上，请识别图片中的文字。）\n' + (content || '请识别并概括这些图片中的内容。');
     }
     if (injectSearch && m.search && m.search.results && m.search.results.length) {
-      const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const today = TimeUtil.localDateStr();
       content = Search.buildSearchContext(m.search.results, content, { today });
     }
     return { role: m.role, content, images: m.images };
@@ -1648,6 +1655,7 @@
     delete bot.pluginStatus;
     if (bot.stopped) { finish(); return; }
     if (rctx.plugins.length) bot.plugins = rctx.plugins;
+    rctx.messages = injectNowLine(rctx.messages, rctx.systemPrompt || thisConv.systemPrompt);
     let req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
     const gcp = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache'); // v0.8.2：OpenRouter Gemini 提示缓存
     if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }

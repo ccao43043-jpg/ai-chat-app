@@ -134,11 +134,11 @@ test('v0.7.6 RP 模板：变量完整、支持 date/time、留空省略、旧内
   const imm = by('t-rp-immersive');
   assert.deepStrictEqual(T.variables(imm.content), [], 'v0.8.4 全自动模板无需手填变量');
   assert.ok(!T.variables(imm.content).includes('回复长度')); assert.ok(!T.variables(by('t-rp-longform').content).includes('字数'));
-  assert.ok(/\{\{date\}\}/.test(imm.content) && /\{\{time\}\}/.test(imm.content));
+  assert.ok(!/\{\{(date|time)\}\}/.test(imm.content) && imm.content.includes('本轮动态信息'), 'v0.21.3：时间改为每轮动态注入');
   const out = T.fill(imm.content, { 角色名: '艾琳', 用户名: '阿杰' }, { dropEmpty: true });
   assert.ok(!/\{\{/.test(out), '留空的变量行被省略、默认值生效'); assert.ok(out.includes('自然决定'));
   assert.ok(!out.includes('【世界背景】'), '空分段标题也省略');
-  assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out));
+  assert.ok(!/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(out), "v0.21.3：固定 system 不含具体时刻");
   assert.ok(out.includes('【扮演规则】') && out.includes('分层设定 / 世界模板'));
   assert.ok(!out.includes('首条消息后自动生成'));
   assert.ok(T.fill('- {{x}}', {}).includes('{{x}}'), '默认仍保留原样');

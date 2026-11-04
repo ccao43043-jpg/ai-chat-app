@@ -83,7 +83,8 @@
   /** 把搜索结果拼成注入到用户消息前的上下文 */
   function buildSearchContext(results, question, opts) {
     opts = opts || {};
-    const today = opts.today || new Date().toISOString().slice(0, 10);
+    const TU = root.TimeUtil || (typeof require === 'function' ? require('./timeutil.js') : null);
+    const today = opts.today || TU.localDateStr(opts.now, opts.timeZone); // v0.21.3：本地日期（原为 UTC，北京时间 0–8 点会报成前一天）
     const maxChars = opts.maxChars || 6000;
     let used = 0;
     const blocks = [];
