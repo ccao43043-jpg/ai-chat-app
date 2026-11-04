@@ -41,7 +41,7 @@
   const dayKey = ms => { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   const tier = aff => { let t = 1; TIER_TH.forEach(th => { if (aff >= th) t++; }); return t; };
   const tierLabel = t => TIER_LABELS[t] || TIER_LABELS[1];
-  const relationOf = st => tierLabel(tier(st && st.aff != null ? st.aff : BASE_AFF));
+  const relationOf = st => tierLabel((st && st.cusum && st.cusum.tier) ? st.cusum.tier : tier(st && st.aff != null ? st.aff : BASE_AFF));
   const dist = (v, m) => Math.hypot(v.val - TARGET[m].val, v.aro - TARGET[m].aro);
   /** vec → 离散心情，带滞回 */
   function classify(vec, prev) {
@@ -134,6 +134,26 @@
     return r4(Math.max(n / (A.size + B.size - n), n / A.size * 0.8));
   }
   const WHY_TH = 0.3;
+  // ---- D/KF：观测融合 + 卡尔曼 + CUSUM（§5.2）----
+  const KF_Q = 0.04;           // 过程噪声
+  const KF_R = 0.30;           // 观测噪声
+  const KF_W = 0.65;           // 默认模型权重
+  const KF_W_WHY = 0.75;       // 有 why 证据时
+  const KF_W_INCONSISTENT = 0.7; // 自报不一致时再乘
+  const CUSUM_K_UP = 0.15;
+  const CUSUM_K_DN = -0.15;
+  const CUSUM_H_UP = 0.45;
+  const CUSUM_H_DN = 0.45;
+  const CUSUM_D = 4;           // 驻留轮数
+  const CHAR_SELF_W = 0.70;    // 多角色：自身权重
+  const CHAR_SCENE_W = 0.30;   // 场景氛围权重
+  // 词典（轻量）：正/负词、否定、程度
+  const LEX_POS = ['谢谢', '感谢', '喜欢', '爱你', '真棒', '厉害', '可爱', '开心', '高兴', '棒', '贴心', '抱抱', '亲亲', '想你', '优秀', '温柔', 'thank', 'love', 'great', 'amazing', 'cute', 'sweet', 'nice'];
+  const LEX_NEG = ['滚', '闭嘴', '讨厌', '恨', '烦', '蠢', '白痴', '废物', '垃圾', '去死', '恶心', '失望', '分手', '生气', '伤心', '难过', '恨你', 'stupid', 'idiot', 'hate', 'fuck', 'shut'];
+  const LEX_NEGATE = ['并非', '不是', '没有', '不要', '别再', '绝不', '毫无', '不', '没', '别', '未', '勿']; // 不含单字「非」，避免误伤「非常」
+  const LEX_DEGREE = { '很': 1.5, '太': 1.6, '非常': 1.7, '超级': 1.8, '极其': 1.8, '特别': 1.5, '真': 1.3, '有点': 0.6, '有些': 0.6, '稍': 0.5, '略': 0.5, '比较': 0.8, 'so': 1.4, 'very': 1.5, 'really': 1.4, 'extremely': 1.8, 'slightly': 0.5 };
+  const RX_CARE = /(担心你|我担心|抱歉|对不起|不好意思|想你|抱抱|亲亲|心疼|照顾|爱你|安慰|别难过|没事的|我在|陪伴)/;
+  const RX_REBUKE = /(滚开|闭嘴|讨厌你|恶心|无聊透|失望透顶|分手吧|你滚|别烦我|受够了|恨你)/;
   // ---- P0-4：护栏分档 ----
   /** 去掉剧情引用：引号 / 书名号 / *动作* / （旁白） / > 引用行 内的内容不算「对 AI 说的话」 */
   function directText(u) {
@@ -208,11 +228,8 @@
     if (why) hit.push('why:' + wj.toFixed(2));
     return { a, m, hit };
   }
-  /** 一轮更新：prev（上一快照，可空）+ 解析结果（可空）+ 用户本轮话 → 新快照。
-   * parsed===null → 未输出 <state>（missing_state），不等于明确中性 a:0。
-   * opts.clock / opts.turn：与 decay 一致。
-   */
-  function step(prev, parsed, userText, now, opts) {
+  /** 旧路径：观测直用 + DELTA/INERTIA（可回退）。parsed===null → missing_state。 */
+  function stepLegacy(prev, parsed, userText, now, opts) {
     opts = opts || {};
     const clock = opts.clock === 'turn' ? 'turn' : 'wall';
     const turnNow = clock === 'turn'
@@ -266,6 +283,251 @@
     if (clock === 'turn') out.turn = turnNow;
     return out;
   }
+
+  // ---- 词典观测：正词−负词，否定翻转，程度加权，夹到 [-2,2] ----
+  function lexiconScore(userText) {
+    const u = String(userText || '');
+    if (!u.trim()) return 0;
+    const lower = u.toLowerCase();
+    let score = 0;
+    function windowBefore(idx, n) {
+      return lower.slice(Math.max(0, idx - n), idx);
+    }
+    function weightAt(idx) {
+      let w = 1;
+      // 含关键词前若干字，便于匹配「非常喜欢」
+      const prev = windowBefore(idx, 10);
+      const degKeys = Object.keys(LEX_DEGREE).sort((a, b) => b.length - a.length);
+      for (let i = 0; i < degKeys.length; i++) {
+        const adv = degKeys[i];
+        const p = prev.lastIndexOf(adv);
+        if (p >= 0 && prev.length - (p + adv.length) <= 2) { w *= LEX_DEGREE[adv]; break; }
+      }
+      let neg = false;
+      for (let i = 0; i < LEX_NEGATE.length; i++) {
+        const ng = LEX_NEGATE[i];
+        const p = prev.lastIndexOf(ng);
+        if (p < 0 || prev.length - (p + ng.length) > 3) continue;
+        // 若否定词是某程度副词的前缀（如「非」⊂「非常」），跳过
+        const after = prev.slice(p);
+        if (degKeys.some(adv => adv.indexOf(ng) === 0 && adv.length > ng.length && after.indexOf(adv) === 0)) continue;
+        neg = true; break;
+      }
+      return neg ? -w : w;
+    }
+    function addAll(words, sign) {
+      words.forEach(w => {
+        const key = w.toLowerCase();
+        let from = 0, idx;
+        while ((idx = lower.indexOf(key, from)) >= 0) {
+          score += sign * weightAt(idx);
+          from = idx + Math.max(key.length, 1);
+        }
+      });
+    }
+    addAll(LEX_POS, 1);
+    addAll(LEX_NEG, -1);
+    return r4(clamp(score, -2, 2));
+  }
+
+  /**
+   * 映射说明（KF 状态空间）：
+   * - 观测 y_model / y_lex / y_t 均在 a 尺度 [-2, 2]（与护栏后自报 a 同域）
+   * - KF 状态 x=â 同在 [-2, 2]；缺省用 affToX(当前 aff) 初始化（BASE_AFF→0，aff=1→+2）
+   * - 滤波后 â 经 deltaFromA（DELTA 表分段线性）映到 Δaff，再套饱和 / NEG_MULT / DAILY_GAIN_CAP
+   * - CUSUM 也在 â（a 尺度）上累积，档位对齐 relation 五档
+   */
+  function affToX(aff) {
+    const a = aff == null ? BASE_AFF : aff;
+    return r4(clamp((a - BASE_AFF) / ((1 - BASE_AFF) / 2), -2, 2));
+  }
+  function deltaFromA(a) {
+    const x = clamp(a, -2, 2);
+    const lo = Math.floor(x), hi = Math.ceil(x);
+    if (lo === hi) return DELTA[String(lo)];
+    const t = x - lo;
+    return DELTA[String(lo)] * (1 - t) + DELTA[String(hi)] * t;
+  }
+
+  /** 一维卡尔曼更新；返回 { x, P, yUsed, K, robust } */
+  function kfUpdate(prevKf, y, affHint) {
+    let x = prevKf && prevKf.x != null && isFinite(prevKf.x) ? prevKf.x : affToX(affHint);
+    let P = prevKf && prevKf.P != null && isFinite(prevKf.P) && prevKf.P > 0 ? prevKf.P : 1;
+    const xPrior = x;
+    const PPrior = P + KF_Q;
+    let yUsed = y, robust = false;
+    const gate = 3 * Math.sqrt(PPrior + KF_R);
+    if (Math.abs(y - xPrior) > gate) {
+      yUsed = xPrior + 0.5 * (y - xPrior);
+      robust = true;
+    }
+    const K = PPrior / (PPrior + KF_R);
+    const xPost = xPrior + K * (yUsed - xPrior);
+    const PPost = (1 - K) * PPrior;
+    return { x: r4(clamp(xPost, -2, 2)), P: r4(Math.max(PPost, 1e-6)), yUsed: r4(yUsed), K: r4(K), robust: robust, xPrior: r4(xPrior), PPrior: r4(PPrior) };
+  }
+
+  /** CUSUM 关系档：S 超 h 且当前档驻留 ≥ D 才升/降一档 */
+  function cusumUpdate(prevCu, x, affHint) {
+    const prev = prevCu || {};
+    let sp = prev.sp || 0, sm = prev.sm || 0;
+    let dwell = (prev.dwell != null ? prev.dwell : 0) + 1;
+    let t = prev.tier != null ? prev.tier : tier(affHint != null ? affHint : BASE_AFF);
+    t = clamp(t | 0, 1, 5);
+    sp = Math.max(0, sp + (x - CUSUM_K_UP));
+    sm = Math.max(0, sm + (CUSUM_K_DN - x));
+    let changed = false;
+    if (sp > CUSUM_H_UP && dwell >= CUSUM_D && t < 5) {
+      t += 1; sp = 0; sm = 0; dwell = 0; changed = true;
+    } else if (sm > CUSUM_H_DN && dwell >= CUSUM_D && t > 1) {
+      t -= 1; sp = 0; sm = 0; dwell = 0; changed = true;
+    }
+    return { sp: r4(sp), sm: r4(sm), dwell: dwell, tier: t, changed: changed };
+  }
+
+  /** 自报 vs 正文语气一致性；返回 { wMul, inconsistent, hit } */
+  function checkConsistency(assistantText, a, m) {
+    const t = String(assistantText || '');
+    if (!t) return { wMul: 1, inconsistent: false, hit: [] };
+    const hit = [];
+    const negMood = NEG_MOODS.includes(m);
+    if (RX_CARE.test(t) && (a <= -1 || negMood)) {
+      hit.push('inconsistent');
+      return { wMul: KF_W_INCONSISTENT, inconsistent: true, hit: hit };
+    }
+    if (RX_REBUKE.test(t) && a >= 1) {
+      hit.push('inconsistent');
+      return { wMul: KF_W_INCONSISTENT, inconsistent: true, hit: hit };
+    }
+    return { wMul: 1, inconsistent: false, hit: [] };
+  }
+
+  /** 是否走 KF：默认 on；opts.estimator==='legacy' 或 settings/conv 关闭则回退 */
+  function useKfEstimator(opts) {
+    opts = opts || {};
+    if (opts.estimator === 'legacy') return false;
+    if (opts.estimator === 'kf') return true;
+    const src = opts.settings || {};
+    if (src.affectKf === false || src.affectEstimator === 'legacy') return false;
+    if (opts.affectKf === false || opts.affectEstimator === 'legacy') return false;
+    return true;
+  }
+
+  // ---- 多角色隔离（轻量 API，UI 不做）----
+  function getAffectFor(conv, charId) {
+    if (!conv) return null;
+    const id = charId != null ? String(charId) : '';
+    const own = (conv.affectBy && id && conv.affectBy[id]) || null;
+    return blendAffect(own, conv.sceneMood);
+  }
+  function setAffectFor(conv, charId, state) {
+    if (!conv || charId == null) return null;
+    if (!conv.affectBy) conv.affectBy = {};
+    conv.affectBy[String(charId)] = state;
+    return state;
+  }
+  function setSceneMood(conv, scene) {
+    if (!conv) return null;
+    conv.sceneMood = scene;
+    return scene;
+  }
+  /** 角色有效状态 = 自身 70% + 场景 30%（对 aff / vec 混合） */
+  function blendAffect(own, scene) {
+    if (!own && !scene) return null;
+    if (!scene) return own ? Object.assign({}, own) : null;
+    if (!own) {
+      const s = Object.assign({}, scene);
+      if (s.aff == null) s.aff = BASE_AFF;
+      return s;
+    }
+    const aff = r4(CHAR_SELF_W * (own.aff != null ? own.aff : BASE_AFF) + CHAR_SCENE_W * (scene.aff != null ? scene.aff : BASE_AFF));
+    const ov = own.vec || BASE_VEC, sv = scene.vec || BASE_VEC;
+    const vec = {
+      val: r4(CHAR_SELF_W * ov.val + CHAR_SCENE_W * sv.val),
+      aro: r4(CHAR_SELF_W * ov.aro + CHAR_SCENE_W * sv.aro)
+    };
+    return Object.assign({}, own, { aff: aff, vec: vec, mood: classify(vec, own.mood), blended: true });
+  }
+
+  /**
+   * 一轮更新。默认 KF 路径（§5.2）；opts.estimator==='legacy' 回退 stepLegacy。
+   * opts.assistantText：assistant 正文（已剥 state）供一致性校验。
+   * opts.clock / opts.turn：与 decay 一致。
+   */
+  function step(prev, parsed, userText, now, opts) {
+    opts = opts || {};
+    if (!useKfEstimator(opts)) return stepLegacy(prev, parsed, userText, now, opts);
+
+    const clock = opts.clock === 'turn' ? 'turn' : 'wall';
+    const turnNow = clock === 'turn'
+      ? (opts.turn != null ? opts.turn : ((prev && prev.turn != null ? prev.turn : 0) + 1))
+      : undefined;
+    const s0 = decay(prev, now, { clock, turn: clock === 'turn' ? turnNow : undefined });
+    const day = dayKey(now);
+    let net = prev && prev.g && prev.g.day === day ? prev.g.net || 0 : 0;
+
+    let forcedMissing = false;
+    let guardHitForced = null;
+    let parsedUse = parsed;
+
+    if (parsedUse == null) {
+      const gd0 = guard(0, null, userText, Object.assign({}, opts, { why: null, missingState: true }));
+      const forced = gd0.hit.some(h => h === 'abuse' || h === 'boundary' || h === 'abuse_dark' || h === 'boundary_dark' || h === 'boundary_nsfw');
+      if (!forced) {
+        const out = { v: 1, aff: s0.aff, vec: s0.vec, mood: s0.mood, ts: now, a: null, m: null,
+          g: { day: day, net: net, guard: gd0.hit }, p: 'missing_state', stateMissing: true,
+          kf: prev && prev.kf ? Object.assign({}, prev.kf) : { x: affToX(s0.aff), P: 1 },
+          cusum: prev && prev.cusum ? Object.assign({}, prev.cusum) : { sp: 0, sm: 0, dwell: 0, tier: tier(s0.aff) } };
+        if (clock === 'turn') out.turn = turnNow;
+        return out;
+      }
+      parsedUse = { a: gd0.a, m: gd0.m };
+      forcedMissing = true;
+      guardHitForced = gd0.hit;
+    }
+
+    const gd = forcedMissing
+      ? { a: parsedUse.a, m: parsedUse.m, hit: guardHitForced || [] }
+      : guard(parsedUse.a, parsedUse.m, userText, Object.assign({}, opts, { why: parsedUse.why }));
+    const a = gd.a, m = gd.m;
+
+    const cons = checkConsistency(opts.assistantText, a, m);
+    const guardHit = gd.hit.slice();
+    if (cons.inconsistent) guardHit.push('inconsistent');
+
+    const yModel = a;
+    const yLex = lexiconScore(userText);
+    const why = parsedUse.why;
+    const founded = why ? jaccard(why, userText) >= WHY_TH : false;
+    let w = founded ? KF_W_WHY : KF_W;
+    w *= cons.wMul;
+    const yT = r4(w * yModel + (1 - w) * yLex);
+
+    const kf = kfUpdate(prev && prev.kf, yT, s0.aff);
+    let d = deltaFromA(kf.x);
+    if (d > 0) { d *= (1 - s0.aff) / (1 - BASE_AFF); d = Math.max(0, Math.min(d, DAILY_GAIN_CAP - net)); }
+    else if (d < 0) d *= NEG_MULT;
+    const aff = clamp(s0.aff + d, 0, 1);
+    net = r4(net + (aff - s0.aff));
+
+    const tg = m ? TARGET[m] : BASE_VEC;
+    const vec = { val: r4(s0.vec.val + INERTIA * (tg.val - s0.vec.val)), aro: r4(s0.vec.aro + INERTIA * (tg.aro - s0.vec.aro)) };
+    const cu = cusumUpdate(prev && prev.cusum, kf.x, s0.aff);
+    const whyLoc = parsedUse.why ? locateWhy(parsedUse.why, userText) : null;
+    const hardGuard = guardHit.some(h => !/^why:/.test(h) && h !== 'inconsistent');
+    const pBase = forcedMissing ? 'missing_state+guard' : (hardGuard ? 'model+guard' : 'model');
+    const out = { v: 1, aff: r4(aff), vec: vec, mood: classify(vec, s0.mood), ts: now, a: a, m: m,
+      g: { day: day, net: net, guard: guardHit, inconsistent: !!cons.inconsistent, w: r4(w), yModel: yModel, yLex: yLex, yT: yT, robust: !!kf.robust },
+      p: pBase + '+kf',
+      stateMissing: !!forcedMissing, explicitNeutral: a === 0,
+      kf: { x: kf.x, P: kf.P },
+      cusum: { sp: cu.sp, sm: cu.sm, dwell: cu.dwell, tier: cu.tier } };
+    if (parsedUse.why) out.why = parsedUse.why;
+    if (whyLoc) out.whyLoc = whyLoc;
+    if (clock === 'turn') out.turn = turnNow;
+    return out;
+  }
+
   /** why 证据尽量定位到用户原文中的起止下标（字符） */
   function locateWhy(why, userText) {
     const u = String(userText || ''), w = String(why || '').trim();
@@ -415,7 +677,10 @@
 
   const Affect = { BASE_AFF, AFF_HALF_LIFE, MOOD_HALF_LIFE, AFF_HALF_LIFE_TURN, MOOD_HALF_LIFE_TURN, BASE_VEC, DELTA, NEG_MULT, DAILY_GAIN_CAP, INERTIA, HYS, TIER_TH, TIER_LABELS, MOODS, TARGET,
     MISS_WINDOW, MISS_THRESHOLD, DEMO_K, STRONG_REMIND,
-    tier, tierLabel, relationOf, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, clockOf, MODES, WHY_TH, stripState, stripContent, guard, step, locateWhy, latest, fixedProtocol, renderInjection, applyToMessages, dayKey, textOf,
+    KF_Q, KF_R, KF_W, KF_W_WHY, KF_W_INCONSISTENT, CUSUM_K_UP, CUSUM_K_DN, CUSUM_H_UP, CUSUM_H_DN, CUSUM_D, CHAR_SELF_W, CHAR_SCENE_W,
+    tier, tierLabel, relationOf, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, clockOf, MODES, WHY_TH, stripState, stripContent, guard, step, stepLegacy, locateWhy, latest, fixedProtocol, renderInjection, applyToMessages, dayKey, textOf,
+    lexiconScore, kfUpdate, cusumUpdate, checkConsistency, useKfEstimator, affToX, deltaFromA,
+    getAffectFor, setAffectFor, setSceneMood, blendAffect,
     missingStats, shouldDemoState, rebuildStateTag, guardStats, affectSnapshots };
 
   // ---------------- 插件 ----------------
@@ -423,8 +688,8 @@
   if (reg) {
     const ID = 'affect';
     reg.register({
-      id: ID, icon: '💓', name: '好感度 / 心情', version: '1.1.0', perConversation: false, defaultEnabled: true,
-      desc: '模型每轮在回复末尾自报 <state>{"a","m"}</state>（好感变化 + 心情）。A6：relation 档位文案、固定协议进 system、漏标补偿、RP 默认按轮衰减、辱骂 soft。缓存零侵入。',
+      id: ID, icon: '💓', name: '好感度 / 心情', version: '1.2.0', perConversation: false, defaultEnabled: true,
+      desc: '模型每轮自报 <state>{"a","m"}</state>。v1.2：KF 平滑 + CUSUM 档位 + 词典融合 + 自报一致性；estimator=legacy 可回退。',
       hooks: {
         onBeforeRequest(ctx) {
           const msgs = ctx.messages || [];
@@ -454,7 +719,11 @@
           const clock = clockOf(ctx.conv, ctx.meta);
           const prev = latest(ctx.conv, bot);
           const turn = clock === 'turn' ? ((prev && prev.turn) || 0) + 1 : undefined;
-          bot.affect = step(prev, parsed, textOf(ctx.lastUser && ctx.lastUser.content), Date.now(), { mode: modeOf(ctx.conv), clock, turn });
+          const est = (ctx.conv && ctx.conv.affectEstimator) || (ctx.settings && ctx.settings.affectEstimator) || 'kf';
+          const asstText = textOf(bot.content);
+          bot.affect = step(prev, parsed, textOf(ctx.lastUser && ctx.lastUser.content), Date.now(), {
+            mode: modeOf(ctx.conv), clock, turn, estimator: est, assistantText: asstText, settings: ctx.settings
+          });
           if (host && host.saveConv) host.saveConv(ctx.conv);
         },
         headerBadges(conv, host) {
