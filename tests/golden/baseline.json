@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "gitBase": "537e856",
+  "memory": {
+    "pAt5": 1,
+    "mrr": 1,
+    "ndcgAt5": 1,
+    "n": 25
+  },
+  "summary": {
+    "factCoverage": 0.8917,
+    "hallucinationRate": 0.25,
+    "compressionRatio": 0.617,
+    "n": 12,
+    "note": "hallucinationRate = 摘要含 source/facts 均不支持的中文片段（2 字 bigram 启发式）的样例占比；评的是 golden 参考 summary 文本，非线上模型输出"
+  },
+  "cost": {
+    "totalPromptTokens": 67589,
+    "hitRate": 0.8069,
+    "summaryCount": 15,
+    "n": 5,
+    "note": "token 用 rpcache.estimateItems 估算；hit/miss 与摘要事件为按 seed 的确定性 stub，非真实 API"
+  },
+  "render": {
+    "skipped": true,
+    "note": "渲染性能本 PR 未跑"
+  },
+  "gate": "记忆 pAt5/mrr/ndcgAt5、summary.factCoverage 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens 不得高于本值（EPS=1e-9）"
+}
