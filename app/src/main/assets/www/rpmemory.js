@@ -7,7 +7,7 @@
   'use strict';
   const TYPES = ['fact', 'event', 'relation', 'detail'];
   const TYPE_CN = { fact: '事实', event: '事件', relation: '关系', detail: '细节' };
-  const DEFAULTS = { interval: 20, window: 40, maxInject: 8, pinBudget: 8, minScore: 1 };
+  const DEFAULTS = { interval: 20, window: 40, maxInject: 8, pinBudget: 8, minScore: 1, retrieval: 'bm25', memTokens: 600, tau: 20, mmrLambda: 0.7 };
   const FILE = 'rp-memory.json';
 
   const textOf = c => Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : String(c || '');
@@ -22,6 +22,8 @@
     o.interval = Math.max(5, Math.min(200, o.interval | 0 || DEFAULTS.interval));
     o.maxInject = Math.max(0, Math.min(50, o.maxInject | 0));
     o.pinBudget = Math.max(0, Math.min(50, o.pinBudget != null ? o.pinBudget | 0 : DEFAULTS.pinBudget));
+    o.retrieval = o.retrieval === 'legacy' ? 'legacy' : 'bm25';
+    o.memTokens = Math.max(0, Math.min(8000, o.memTokens != null ? o.memTokens | 0 : DEFAULTS.memTokens));
     o.window = Math.max(o.interval, Math.min(200, o.window | 0 || DEFAULTS.window));
     return o;
   }
@@ -217,6 +219,94 @@
     return { list: out, added, merged, conflicts, superseded };
   }
 
+  // ---------------- §3 BM25F + 时间衰减 + MMR + mem_tokens ----------------
+  const BM25 = { k1: 1.2, b: 0.75, w: { keywords: 3, text: 1, type: 0.5, entity: 2 }, openBoost: 1.25 };
+  const FIELDS = ['keywords', 'text', 'type', 'entity'];
+  /** term 切分：中文 bigram（单字段落保留单字），英文/数字 \w+ */
+  function terms(s) {
+    const out = [], str = String(s || '').toLowerCase();
+    (str.match(/[a-z0-9_]+/g) || []).forEach(w => out.push(w));
+    (str.match(/[\u4e00-\u9fff]+/g) || []).forEach(seg => {
+      if (seg.length === 1) out.push(seg); else for (let i = 0; i < seg.length - 1; i++) out.push(seg.slice(i, i + 2));
+    });
+    return out;
+  }
+  function entitiesOf(e) {
+    if (Array.isArray(e.entities)) return e.entities.join(' ');
+    const t = extractRelationTriple(e.text); return t ? [t.subject, t.object === '_' ? '' : t.object].join(' ') : '';
+  }
+  function fieldTerms(e) {
+    return { keywords: terms((e.keywords || []).join(' ')), text: terms(e.text), type: terms((TYPE_CN[e.type] || '') + ' ' + (e.type || '')), entity: terms(entitiesOf(e)) };
+  }
+  /** 会话级倒排：{ df, postings, len, avgLen, tf, N, sig }；按条目 id+updatedAt 签名增量判定是否重建 */
+  function buildIndex(list, prev) {
+    const sig = list.map(e => e.id + ':' + (e.updatedAt || 0)).join('|');
+    if (prev && prev.sig === sig) return prev;
+    const idx = { df: {}, postings: {}, len: {}, avgLen: {}, tf: {}, N: list.length, sig };
+    const sum = { keywords: 0, text: 0, type: 0, entity: 0 };
+    list.forEach(e => {
+      const ft = fieldTerms(e), tf = {}, seen = new Set(); idx.len[e.id] = {};
+      FIELDS.forEach(f => {
+        idx.len[e.id][f] = ft[f].length; sum[f] += ft[f].length; tf[f] = {};
+        ft[f].forEach(t => { tf[f][t] = (tf[f][t] || 0) + 1; seen.add(t); });
+      });
+      idx.tf[e.id] = tf;
+      seen.forEach(t => { idx.df[t] = (idx.df[t] || 0) + 1; (idx.postings[t] = idx.postings[t] || []).push(e.id); });
+    });
+    FIELDS.forEach(f => { idx.avgLen[f] = list.length ? sum[f] / list.length || 1 : 1; });
+    return idx;
+  }
+  const idf = (idx, t) => { const df = idx.df[t] || 0; return Math.log(1 + (idx.N - df + 0.5) / (df + 0.5)); };
+  /** 带权查询 Q：Map term→权重 */
+  function buildQuery(query, ext) {
+    const Q = new Map(), add = (s, w) => { const ts = terms(s); ts.forEach(t => Q.set(t, (Q.get(t) || 0) + w)); };
+    if (!ext) { add(query, 1); return Q; }
+    add(query, 0.6); add(ext.context || '', 0.3); add((ext.pinnedKeywords || []).join(' '), 0.1);
+    return Q;
+  }
+  function bm25f(idx, Q, e) {
+    const tf = idx.tf[e.id]; if (!tf) return 0; let s = 0;
+    Q.forEach((qw, t) => {
+      if (!idx.df[t]) return; const i = idf(idx, t);
+      FIELDS.forEach(f => {
+        const n = tf[f][t]; if (!n) return;
+        const L = idx.len[e.id][f] / idx.avgLen[f];
+        s += qw * BM25.w[f] * i * (n * (BM25.k1 + 1)) / (n + BM25.k1 * (1 - BM25.b + BM25.b * L));
+      });
+    });
+    return s;
+  }
+  const estTokens = e => Math.ceil(String(e.text || '').length * 0.7) + 6;
+  /** 时间：Δturns 优先 e.turn/o.nowTurn；缺失时用 seq 差作近似 */
+  function decay(e, o, maxSeq) {
+    const d = (o.nowTurn != null && e.turn != null) ? Math.max(0, o.nowTurn - e.turn) : Math.max(0, maxSeq - (e.seq || 0));
+    return Math.exp(-d / (o.tau || 20)) * (e.status === 'open' ? BM25.openBoost : 1);
+  }
+  function selectBM25(active, query, o, pinned) {
+    const idx = buildIndex(active, o.index); if (o.onIndex) o.onIndex(idx);
+    const Q = buildQuery(query, o.expand);
+    const maxSeq = active.reduce((m, e) => Math.max(m, e.seq || 0), 0);
+    const pinIds = new Set(pinned.map(e => e.id));
+    const cands = active.filter(e => !pinIds.has(e.id)).map(e => ({ e, s: bm25f(idx, Q, e) })).filter(x => x.s > 0)
+      .map(x => ({ e: x.e, s: x.s * decay(x.e, o, maxSeq) }));
+    if (!cands.length) return [];
+    const top = Math.max(...cands.map(x => x.s)); cands.forEach(x => { x.r = x.s / top; });
+    const lam = o.mmrLambda != null ? o.mmrLambda : 0.7, S = [];
+    let budget = o.memTokens, left = cands.slice();
+    while (left.length && S.length < Math.max(o.maxInject, 1) * 4) {
+      let best = null, bv = -Infinity;
+      left.forEach(x => {
+        const red = S.length ? Math.max(...S.map(y => similarity(x.e.text, y.e.text))) : 0;
+        const v = lam * x.r - (1 - lam) * red;
+        if (v > bv || v === bv && (x.e.seq || 0) > (best.e.seq || 0)) { bv = v; best = x; }
+      });
+      left = left.filter(x => x !== best);
+      const c = estTokens(best.e); if (c > budget) continue; // 放不下就跳过，继续找更短的
+      budget -= c; S.push(best);
+    }
+    return S.map(x => x.e);
+  }
+
   /** 相关性：置顶独立预算；普通条目用 maxInject；已失效(superseded)跳过 */
   function selectRelevant(list, query, o) {
     o = settingsOf(o); const q = String(query || ''), qn = norm(q), qg = bigrams(q);
@@ -234,6 +324,7 @@
     };
     const pinBudget = o.pinBudget != null ? o.pinBudget : DEFAULTS.pinBudget;
     const pinned = active.filter(e => e.pinned).sort((a, b) => (a.seq || 0) - (b.seq || 0)).slice(0, pinBudget);
+    if (o.retrieval === 'bm25') return pinned.concat(selectBM25(active, q, o, pinned)).sort((a, b) => (a.seq || 0) - (b.seq || 0));
     const pinIds = new Set(pinned.map(e => e.id));
     const normals = active.filter(e => !pinIds.has(e.id)).map(e => ({ e, s: scoreOne(e) })).filter(x => x.s >= o.minScore);
     normals.sort((a, b) => b.s - a.s || (b.e.seq || 0) - (a.e.seq || 0));
@@ -248,7 +339,7 @@
   const shouldExtract = (turns, lastTurn, interval) => turns - (lastTurn | 0) >= interval;
   function toMemoryText(entries) { return entries.map(e => '- [' + (TYPE_CN[e.type] || e.type) + '] ' + e.text).join('\n'); }
 
-  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, KW_MAX, autoKeywords, mergeKeywords, kwPriority, buildExtractPrompt, parseExtraction, similarity, detectConflict, extractRelationTriple, CONFLICT_PAIRS, REL_FAMILY, mergeEntries, selectRelevant, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
+  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, KW_MAX, autoKeywords, mergeKeywords, kwPriority, buildExtractPrompt, parseExtraction, similarity, detectConflict, extractRelationTriple, CONFLICT_PAIRS, REL_FAMILY, mergeEntries, selectRelevant, terms, buildIndex, buildQuery, bm25f, BM25, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;
@@ -293,7 +384,14 @@
           if (idx < 0) return ctx;
           const b = loadAll(host)[charKey(ctx.conv)]; if (!b || !b.entries.length) return ctx;
           const q = msgs.slice(Math.max(0, idx - 2), idx + 1).map(m => textOf(m.content)).join('\n');
-          const sel = selectRelevant(b.entries, q, cfgOf(host)); const inj = renderInjection(sel);
+          const cfg = cfgOf(host), conv = ctx.conv || {};
+          const lastA = msgs.slice(0, idx).reverse().find(m => m.role === 'assistant');
+          const pinKw = b.entries.filter(e => e.pinned && !e.disabled).flatMap(e => e.keywords || []);
+          const mood = conv.affect && (conv.affect.mood || conv.affect.label) || '';
+          const sel = selectRelevant(b.entries, q, Object.assign({}, cfg, {
+            index: conv.memIndex, onIndex: ix => { try { Object.defineProperty(conv, 'memIndex', { value: ix, writable: true, configurable: true, enumerable: false }); } catch (e) { /* 冻结对象：不缓存 */ } },
+            nowTurn: userTurns(conv), expand: { context: mood + ' ' + (lastA ? textOf(lastA.content).slice(-200) : ''), pinnedKeywords: pinKw },
+          })); const inj = renderInjection(sel);
           if (!inj) return ctx;
           msgs[idx] = Object.assign({}, msgs[idx], { content: appendToContent(msgs[idx].content, inj) });
           ctx.messages = msgs; ctx.meta.rpmemory = { ids: sel.map(e => e.id) };
