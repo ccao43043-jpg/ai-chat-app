@@ -192,9 +192,9 @@
     const text = '【二级摘要 第' + (from + 1) + '–' + to + '轮】\n' + lines.join('；');
     return { from, to, fp: batchFp(turns.slice(from, to)), text, level: 2, at: k[k.length - 1].at };
   }
-  /** 日期只精确到天：「2026-11-02 13:45(:10)」「2026年11月2日 13:45」→ 只保留日期部分 */
+  /** 仅剥「带秒或带时区」的机器时间戳；纯 HH:MM（如剧情「下午 13:45」）原样保留 */
   function normalizeDates(s) {
-    return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]?|\s*)\d{1,2}[:：]\d{2}(?:[:：]\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '$1');
+    return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]|\s*)(?:\d{1,2}[:：]\d{2}[:：]\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{1,2}[:：]\d{2}(?:Z|[+-]\d{2}:?\d{2}))/g, '$1');
   }
   /** 把历史消息切成轮：每条 user 开启一轮；首条 user 之前的消息（如开场白）并入第 0 轮 */
   function splitTurns(hist) {
@@ -466,7 +466,7 @@
       if (k > 0 && typeof msgs[0].content === 'string') { if (msgs[0].content.indexOf(RP_ANCHOR) < 0) msgs[0].content = RP_ANCHOR + '\n\n' + msgs[0].content; }
       else if (k === 0) { msgs.unshift({ role: 'system', content: RP_ANCHOR }); ids.unshift(undefined); k = 1; }
     }
-    // 2.5 Hybrid-5（仅调用方传入 extra.hybrid 状态时）：日期归一到天；动态层 E–G 从 system 移到本轮 user 尾部；历史走迟滞窗口
+    // 2.5 Hybrid-5（仅调用方传入 extra.hybrid 状态时）：system 固定层剥机器时间戳；动态层 E–G 从 system 移到本轮 user 尾部（不剥剧情时分）；历史走迟滞窗口
     let hybrid = null;
     if (extra.hybrid && cfg.hybrid !== false) {
       const st = extra.hybrid;
@@ -484,7 +484,7 @@
       let sentUser = null;
       if (tail) {
         const orig = tail.content;
-        if (typeof orig === 'string') { sentUser = Object.assign({}, tail, { content: normalizeDates(dyn ? dyn.replace(/\s+$/, '') + '\n\n' + orig : orig) }); hwRecordSent(st, sentKey(ids[lastUser], ord), orig, sentUser.content); }
+        if (typeof orig === 'string') { sentUser = Object.assign({}, tail, { content: dyn ? dyn.replace(/\s+$/, '') + '\n\n' + orig : orig }); hwRecordSent(st, sentKey(ids[lastUser], ord), orig, sentUser.content); }
         else sentUser = tail;
       }
       msgs.splice(k, msgs.length - k, ...w.messagesForRequest.concat(sentUser ? [sentUser] : []));

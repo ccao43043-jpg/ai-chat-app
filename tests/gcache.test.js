@@ -153,14 +153,15 @@ test('Hybrid-5：前缀（摘要+窗口头）在 41–59 轮之间稳定', () =>
   const a = JSON.stringify(H.apply(mkHist(45), st).messagesForRequest.slice(0, 30)), b = JSON.stringify(H.apply(mkHist(50), st).messagesForRequest.slice(0, 30));
   assert.strictEqual(a, b);
 });
-test('Hybrid-5：动态层移到本轮 user 尾部、固定层 hash 不变、日期只到天、session_id 保留', () => {
+test('Hybrid-5：动态层移到本轮 user 尾部、固定层 hash 不变、剧情时分保留、session_id 保留', () => {
   const st = H.empty();
   const sys = d => longWorld + '\n【当前状态】\n' + d;
   const r1 = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs, sys('2026-11-02 13:45 雨'), {}), {}, { hybrid: st, sessionId: 'sid1' });
   const b1 = JSON.parse(r1.req.body);
   assert.ok(!/当前状态/.test(b1.messages[0].content));
   const last = b1.messages[b1.messages.length - 1];
-  assert.ok(last.content.startsWith('【当前状态】\n2026-11-02 雨') && last.content.endsWith('继续'));
+  // 纯 HH:MM 无秒/无时区 → 不得抹掉（状态栏时分随动态层移到 user）
+  assert.ok(last.content.startsWith('【当前状态】\n2026-11-02 13:45 雨') && last.content.endsWith('继续'));
   assert.strictEqual(b1.session_id, 'sid1'); assert.ok(!b1.provider);
   const msgs2 = msgs.concat([{ role: 'assistant', content: '好' }, { role: 'user', content: '再来' }]);
   const r2 = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs2, sys('2026-11-03 08:00 晴'), {}), {}, { hybrid: st, prevStaticHash: r1.layers.static_hash });
@@ -173,7 +174,22 @@ test('Hybrid-5：动态层移到本轮 user 尾部、固定层 hash 不变、日
 test('Hybrid-5：未传 hybrid 状态时行为与 1.1.0 完全一致；日期归一', () => {
   const req = P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs, '短设定 2026-11-02 13:45', {});
   assert.strictEqual(G.applyToRequest(req, {}).req.body, req.body);
+  // 带秒 / 带 Z 的机器格式可剥；同一串里 T13:45Z 带 Z 可剥
   assert.strictEqual(G.normalizeDates('2026年11月2日 13:45:10 / 2026-11-02T13:45Z'), '2026年11月2日 / 2026-11-02');
+  // 纯 HH:MM（无秒、无时区）必须保留
+  assert.strictEqual(G.normalizeDates('2026-11-02 13:45'), '2026-11-02 13:45');
+  assert.strictEqual(G.normalizeDates('2026年11月2日 13:45'), '2026年11月2日 13:45');
+  // 带秒或完整 ISO 可归一到日期
+  assert.strictEqual(G.normalizeDates('2026-11-02 13:45:10'), '2026-11-02');
+  assert.strictEqual(G.normalizeDates('2026-11-02T13:45:10Z'), '2026-11-02');
+});
+test('Hybrid-5：user 尾部剧情时分不剥（约在 14:30）', () => {
+  const st = H.empty();
+  const sys = longWorld + '\n【世界观补充】稳定设定';
+  const userMsgs = [{ role: 'user', content: '我们约在 14:30 见面' }, { role: 'assistant', content: '好' }, { role: 'user', content: '记得约在 14:30' }];
+  const r = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', userMsgs, sys, {}), {}, { hybrid: st });
+  const last = JSON.parse(r.req.body).messages.slice(-1)[0];
+  assert.ok(typeof last.content === 'string' && last.content.includes('14:30'), '发出的 user content 仍含 14:30，实际=' + last.content);
 });
 test('Hybrid-5：非 OpenRouter+Gemini 不识别（插件不改请求）；冲突策略 A：rpcache 同开不启用 Zip', () => {
   assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'openai', baseUrl: 'https://api.openai.com/v1' }, 'gpt-4o'));
