@@ -117,9 +117,13 @@ test('只追加章节：生成章节那一轮仍命中 固定设定 + 长期记�
   assert.ok(chapterTurns.length >= 3, '生成了多个章节：' + chapterTurns.length);
   assert.strictEqual(s.host.calls.length, chapterTurns.length);
   chapterTurns.forEach(({ i, t, before }) => {
-    const prev = s.turns[i - 2].json.messages[0].content; // 上一轮 system
+    // C-2：层序 static → summary → memory；追加章节后保留的是旧 system 中 memory 之前的稳定前缀
+    const prevFull = s.turns[i - 2].json.messages[0].content; // 上一轮 system
+    const mem = '\n\n' + R.memoryText(st0(s));
+    assert.ok(prevFull.endsWith(mem), 'memory 在 system 末尾');
+    const prev = prevFull.slice(0, prevFull.length - mem.length);
     const cur = t.json.messages[0].content;
-    assert.ok(cur.startsWith(prev), '第 ' + i + ' 轮：新 system 以旧 system 为前缀（之前 ' + before + ' 章逐字保留）');
+    assert.ok(cur.startsWith(prev), '第 ' + i + ' 轮：新 system 以旧 system 稳定前缀（static + 章节）为前缀（之前 ' + before + ' 章逐字保留）');
     assert.ok(t.lcp >= s.turns[i - 2].body.indexOf(prev) + prev.length, '公共前缀覆盖旧 system');
     if (before) assert.ok(s.host.calls[s.host.calls.indexOf(s.host.calls.find(c => c.prompt.includes('#00' + before)))], '提示词带之前章节作为只读参考');
   });

@@ -807,7 +807,10 @@
   function summaryText(st) { return chaptersOf(st).filter(c => c.content).map(chapterText).join('\n\n'); }
   function stateText(st) { const c = getBlock(st, 'state').content; return c ? '[CURRENT_STATE]\n' + c : ''; }
   function deltaText(st) { const c = getBlock(st, 'delta').content; return c ? '[MEMORY_UPDATE]\n' + c : ''; }
-  function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), memoryText(st), summaryText(st)].filter(Boolean).join('\n\n'); }
+  // C-2：层序按变更频率从低到高：static → summary（按章变）→ memory（每轮可能变），memory 变动不再毒化 summary 缓存
+  function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st), memoryText(st)].filter(Boolean).join('\n\n'); }
+  /** C-2：system 中「static + summary」稳定前缀（summary|memory 交界之前的部分），供第二个缓存断点使用 */
+  function systemStablePrefix(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st)].filter(Boolean).join('\n\n'); }
   /**
    * 最后一条用户消息 = 本轮输入 + 记忆增量 + 当前状态（V2：输入在前）。
    * 这条消息进入历史后只保留输入原文；因为输入在开头，上一轮请求与本轮请求的公共前缀一直延伸到上一轮输入的末尾，
@@ -936,7 +939,7 @@
     }
     const chapterTokens = tokens.summary;
     const cap = Math.max(1000, sum.chapter_cap_tokens | 0 || DEFAULT_SETTINGS.summary.chapter_cap_tokens);
-    const p = { st, system, hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
+    const p = { st, system, stablePrefix: systemStablePrefix(st, baseSystem), hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
       summaryBlocked, sinceLast, minGap, rounds, chapterTokens, cap, needConsolidate: false, calib: k, trimmed: start > 0, dropped: start, settings: s, auto: null };
     // V3：自适应摘要时机（只在宿主提供 env 时启用；不传 env 与 v0.4 完全一致）
     if (env && s.auto_summary !== false && sum.enabled && batch.length && !summaryReason) {
@@ -968,7 +971,7 @@
   function adaptiveSummary(p, env) {
     const s = p.settings, sum = s.summary, k = p.calib || 1;
     const U = Math.round(estimateItems(p.unsummarized) * k), T = sum.trigger_tokens;
-    const r = { reason: null, why: '', breakEven: null, unsummarized: U, trigger: T };
+    const r = { reason: null, why: '', breakEven: null, unsummarized: U, trigger: T, choice: null, costNow: null, costLate: null, hitQ: null, qualityPenalty: false };
     const minRounds = Math.max(3, Math.ceil((sum.min_new_turns | 0) / 3));
     if (U < T * 0.5) { r.why = '未摘要历史不足阈值一半'; return r; }
     if (p.batchRounds < minRounds) { r.why = '可摘要的旧对话不足 ' + minRounds + ' 轮'; return r; }
@@ -980,17 +983,59 @@
     if (!pr) { r.why = '没有价格信息，按固定阈值'; return r; }
     const est = summaryCost(p, Object.assign({}, c, { warm: env.warm != null ? env.warm : 1 }));
     const batchTok = Math.round(estimateItems(p.batch) * k);
-    // v0.16：无真实命中样本时不做自适应成本决策（禁止默认 80%）
-    if (env.hitRate == null || !(env.hitSamples > 0)) { r.why = '尚无真实缓存命中样本，不做自适应摘要成本决策'; return r; }
-    const hr = env.hitRate;
+    // C-3：命中率用 Beta 后验悲观分位（替代 v0.16「无样本就禁用」：无样本时先验主导、逐步放开）
+    const post = hitPosteriorOf(env);
+    const hr = post.q; r.hitQ = hr; r.hitPost = post;
     const hitP = env.strategy === 'explicit' && pr.hit_explicit != null ? pr.hit_explicit : pr.hit;
-    const perTurn = Math.max(0, batchTok - est.callOut) * (hr * hitP + (1 - hr) * pr.miss) / 1e6 * factorFor(pr, c.at || Date.now(), c.mode, c.peak);
+    const f = factorFor(pr, c.at || Date.now(), c.mode, c.peak);
+    const mEff = (hr * hitP + (1 - hr) * pr.miss) / 1e6 * f; // 每 Token 期望输入单价
+    const saved = Math.max(0, batchTok - est.callOut);
+    const perTurn = saved * mEff;
     if (!(perTurn > 0) || est.usd == null) { r.why = '无法估算收益'; return r; }
-    r.breakEven = est.usd / perTurn;
-    const horizon = env.horizon || 12;
-    if (r.breakEven <= horizon) { r.reason = 'adaptive'; r.why = '摘要约 ' + r.breakEven.toFixed(1) + ' 轮回本（≤ ' + horizon + '），命中率 ' + Math.round(hr * 100) + '%（' + env.hitSamples + ' 样本）'; }
-    else r.why = '摘要需 ' + r.breakEven.toFixed(1) + ' 轮才回本，暂不摘要';
+    r.breakEven = est.usd / perTurn; // 兼容旧字段（展示用）
+    // C-1：两分支比较（H 轮、折扣 γ）。u_i = 当前未摘要历史 + 每轮增长 g·i；超预算的轮次按 miss×2 计（被迫裁剪/摘要的罚项）
+    const H = env.horizon || ADAPT_H, g = ADAPT_GAMMA;
+    const grow = p.batchRounds > 0 ? batchTok / p.batchRounds : 0;
+    const fixed = p.tokens ? p.tokens.total - p.tokens.history : 0;
+    const limit = p.limit || Infinity;
+    const mLate = u => (fixed + u > limit ? 2 * pr.miss / 1e6 * f : mEff);
+    let now = est.usd, late = 0;
+    for (let i = 1; i <= H; i++) {
+      const u = U + grow * (i - 1), gi = Math.pow(g, i);
+      now += ((u - saved) * mEff + ADAPT_O) * gi;
+      late += u * mLate(u) * gi;
+    }
+    const q = env.summaryQuality != null ? env.summaryQuality : lastChapterQuality(p.st);
+    if (q != null && q < SUMMARY_MIN_QUALITY) { now *= 1.15; r.qualityPenalty = true; }
+    r.costNow = now; r.costLate = late; r.summaryQuality = q;
+    r.choice = now < late ? 'now' : 'late';
+    const hrTxt = '命中率悲观分位 ' + Math.round(hr * 100) + '%（' + (post.n ? post.n + ' 样本' : '先验主导') + '）';
+    if (r.choice === 'now') { r.reason = 'adaptive'; r.why = '现在摘要（' + H + ' 轮折现成本 $' + now.toFixed(5) + ' < 推迟 $' + late.toFixed(5) + '），' + hrTxt + (r.qualityPenalty ? '，已含质量风险罚 15%' : ''); }
+    else r.why = '暂不摘要（现在摘 $' + now.toFixed(5) + ' ≥ 推迟 $' + late.toFixed(5) + '），' + hrTxt + (r.qualityPenalty ? '，含质量风险罚 15%' : '');
     return r;
+  }
+  const ADAPT_H = 12, ADAPT_GAMMA = 0.9, ADAPT_O = 0;
+  function lastChapterQuality(st) { const ch = st && st.chapters ? st.chapters.filter(c => c && c.quality != null) : []; return ch.length ? ch[ch.length - 1].quality : null; }
+  /**
+   * C-3：命中率 Beta 后验。先验 Beta(6, 4)；每轮观测按命中比例计 1 份证据：α += hit/prompt，β += 1 − hit/prompt。
+   * 决策用悲观分位 q = mean − 1.28·sd（≈ 10% 分位），样本少时自动保守，样本多时收敛到真实值。
+   */
+  const HIT_PRIOR_A = 6, HIT_PRIOR_B = 4, HIT_Z = 1.28;
+  function hitPosterior(obs) {
+    let a = HIT_PRIOR_A, b = HIT_PRIOR_B, n = 0;
+    (obs || []).forEach(o => {
+      const pt = +o.prompt || 0; if (!(pt > 0)) return;
+      const h = Math.max(0, Math.min(pt, +o.hit || 0)) / pt;
+      a += h; b += 1 - h; n++;
+    });
+    const t = a + b, mean = a / t, sd = Math.sqrt(a * b / (t * t * (t + 1)));
+    return { alpha: a, beta: b, n, mean, sd, q: Math.max(0, Math.min(1, mean - HIT_Z * sd)) };
+  }
+  /** 从 env 取后验：优先 env.hitPost；否则用旧字段 hitRate × hitSamples 折算成伪观测；都没有 → 纯先验 */
+  function hitPosteriorOf(env) {
+    if (env.hitPost && env.hitPost.alpha != null) return env.hitPost;
+    const n = env.hitRate != null ? (env.hitSamples | 0) : 0;
+    return hitPosterior(Array.from({ length: n }, () => ({ hit: env.hitRate, prompt: 1 })));
   }
   /** 计算超预算时的裁剪起点（不修改状态） */
   function computeTrimWindow(st, p) {
@@ -1163,7 +1208,9 @@
     const gapMedian = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : null;
     const ttl = cap && cap.ttl || 0;
     const cold = !!(ttl && idleSec != null && idleSec > ttl);
-    return { hitRate, hitSamples, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
+    // C-3：近 20 次有效请求的 Beta 后验（按 cache_hit_tokens / prompt_tokens；没有 token 时退回 hit_rate）
+    const hitPost = hitPosterior(sup.slice(-20).map(e => e.prompt_tokens > 0 && e.cache_hit_tokens != null ? { hit: e.cache_hit_tokens, prompt: e.prompt_tokens } : { hit: e.hit_rate || 0, prompt: 1 }));
+    return { hitRate, hitSamples, hitPost, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
   }
 
   // ---------------- 指纹与诊断 ----------------
@@ -1580,10 +1627,10 @@
   }
 
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
-    capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
+    capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, hitPosterior, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
-    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
+    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, systemStablePrefix, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
