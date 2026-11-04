@@ -173,7 +173,7 @@ test('自适应摘要：缓存冷却时阈值 50% 即摘要；成本回本时 70
   assert.strictEqual(cold.summaryReason, 'cold');
   const warm = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.9, hitSamples: 8, strategy: 'explicit', cost });
   assert.ok(warm.auto && warm.auto.breakEven > 0, '给出回本轮数');
-  assert.strictEqual(warm.summaryReason, warm.auto.breakEven <= 12 ? 'adaptive' : null);
+  assert.strictEqual(warm.summaryReason, warm.auto.choice === 'now' ? 'adaptive' : null); // C-1：两分支比较决定
   // 命中率很低（缓存经常失效）→ 每轮多发历史更贵 → 更快回本
   const low = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.1, hitSamples: 8, strategy: 'implicit', cost });
   assert.ok(low.auto.breakEven < warm.auto.breakEven);

@@ -229,7 +229,7 @@ test('阶段2：世界书 loreTrace 含版本与注入 Token/预算', () => {
 });
 
 // ─── 阶段3：缓存成本 / Token 校准 ───
-test('阶段3：无真实命中样本时 adaptiveSummary 不做默认 80% 决策', () => {
+test('阶段3（C-3 更新）：无真实命中样本时用 Beta(6,4) 先验悲观分位，而非默认 80%', () => {
   let st = withBlocks();
   st.settings = Object.assign({}, st.settings, {
     max_context: 32000, output_reserve: 2000, safety_margin: 500,
@@ -245,12 +245,14 @@ test('阶段3：无真实命中样本时 adaptiveSummary 不做默认 80% 决策
   };
   // 注入价格：用内置
   const a1 = R.adaptiveSummary(p, envNoHit);
-  assert.ok(!a1.reason, '无样本不应 adaptive，got ' + JSON.stringify(a1));
-  assert.ok(/样本|命中/.test(a1.why));
+  // C-3：不再一刀切禁用；用先验 Beta(6,4) 的悲观分位（≈0.40），绝不使用 80% 默认值
+  const prior = R.hitPosterior([]);
+  assert.ok(Math.abs(a1.hitQ - prior.q) < 1e-12 && a1.hitQ < 0.5, 'got ' + JSON.stringify(a1));
+  assert.ok(/先验/.test(a1.why));
   const envHit = Object.assign({}, envNoHit, { hitRate: 0.9, hitSamples: 5 });
   const a2 = R.adaptiveSummary(p, envHit);
   // 有样本才可能 adaptive（也可能回本轮数不够）；至少不应再报「无样本」
-  assert.ok(!/尚无真实缓存命中样本/.test(a2.why));
+  assert.ok(!/先验主导/.test(a2.why) && a2.hitQ > a1.hitQ);
 });
 
 test('阶段3：Token 校准按 provider/model/modality 隔离', () => {
