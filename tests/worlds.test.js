@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('assert');
 const W = require('../app/src/main/assets/www/worlds.js');
 const RPCache = require('../app/src/main/assets/www/rpcache.js');
+const T = require('../app/src/main/assets/www/templates.js');
 
 test('BLOCK_IDS 与 RPCache.STATIC_DEFS 对齐', () => {
   assert.deepStrictEqual(W.BLOCK_IDS, RPCache.STATIC_DEFS.map(d => d.id));
@@ -48,18 +49,47 @@ test('模板规范化：缺省块、trim、emoji、JSON 往返', () => {
   assert.strictEqual(W.normalizeWorld(stored[0]).blocks.style, '');
 });
 
-test('开聊创建字段：worldId / 名称 / emoji / title', () => {
+test('开聊创建字段：worldId / 名称 / emoji / title + 沉浸式模板', () => {
   const providers = [{ id: 'deepseek', models: ['deepseek-flash'] }];
   const fb = { providerId: 'deepseek', model: 'deepseek-flash' };
   const world = W.normalizeWorld({ name: '雨港', emoji: '🌧️', blocks: { world: '雨夜' } });
-  const c = W.conversationFromWorld(world, providers, fb);
+  const c = W.conversationFromWorld(world, providers, fb, T);
   assert.strictEqual(c.worldId, world.id);
   assert.strictEqual(c.worldName, '雨港');
   assert.strictEqual(c.worldEmoji, '🌧️');
   assert.ok(c.title.includes('雨港'));
   assert.strictEqual(c.providerId, 'deepseek');
   assert.strictEqual(c.model, 'deepseek-flash');
-  assert.strictEqual(c.systemPrompt, undefined, '不强制覆盖 systemPrompt，交给调用方惯例');
+  assert.strictEqual(W.WORLD_START_TEMPLATE_ID, 't-rp-immersive');
+  assert.strictEqual(c.templateId, 't-rp-immersive');
+  assert.strictEqual(c.templateName, '沉浸式 RP（全自动）');
+  assert.strictEqual(c.templateEmoji, '🎬');
+  assert.ok(typeof c.systemPrompt === 'string' && c.systemPrompt.length > 40);
+  assert.ok(c.systemPrompt.includes('分层设定 / 世界模板'));
+  assert.ok(!c.systemPrompt.includes('首条消息后自动生成'));
+  assert.ok(/\d{4}-\d{2}-\d{2}/.test(c.systemPrompt) && /\d{2}:\d{2}/.test(c.systemPrompt), 'date/time filled');
+  const imm = T.BUILTIN_TEMPLATES.find(x => x.id === 't-rp-immersive');
+  const expected = T.applyToConv({}, imm);
+  assert.strictEqual(c.systemPrompt, expected.systemPrompt);
+});
+
+test('世界开聊后 template + L1 blocks 一并正确', () => {
+  const world = W.normalizeWorld({
+    name: '雨港', emoji: '🌧️',
+    blocks: { world: '雨夜港湾', character: '私家侦探', rules: '不替玩家决定' },
+  });
+  const fields = W.conversationFromWorld(world, [{ id: 'deepseek', models: ['m'] }], { providerId: 'deepseek', model: 'm' }, T);
+  const conv0 = Object.assign({
+    id: 'c-w', title: '新对话', messages: [], plugins: {},
+  }, fields);
+  const { conv, changed } = W.applyWorldToConversation(conv0, world, RPCache, 1700000000000);
+  assert.ok(changed);
+  assert.strictEqual(conv.templateId, 't-rp-immersive');
+  assert.ok(conv.systemPrompt.includes('世界模板'));
+  assert.strictEqual(conv.plugins.rpcache.enabled, true);
+  assert.strictEqual(RPCache.getBlock(conv.plugins.rpcache.state, 'world').content, '雨夜港湾');
+  assert.strictEqual(RPCache.getBlock(conv.plugins.rpcache.state, 'character').content, '私家侦探');
+  assert.ok(conv.plugins.rpcache.state.baseHash);
 });
 
 test('应用到对话后 L1 blocks 内容正确，并启用 RP', () => {

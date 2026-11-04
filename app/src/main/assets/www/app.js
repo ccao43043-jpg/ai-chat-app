@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.0';
+  const APP_VERSION = '0.21.1';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2247,14 +2247,14 @@
     if (running) { toast('请先停止当前生成'); return; }
     if (!wd) return;
     newConv();
-    const f = Worlds.conversationFromWorld(wd, configured(), { providerId: conv.providerId, model: conv.model });
+    const f = Worlds.conversationFromWorld(wd, configured(), { providerId: conv.providerId, model: conv.model }, Templates);
     Object.assign(conv, f);
     const applied = Worlds.applyWorldToConversation(conv, wd, RPCache, Date.now());
     conv = applied.conv;
     saveConv();
     closeWorldEdit(); closeWorlds(); closeDrawer();
     renderAll();
-    toast('已用「' + wd.name + '」开聊（RP 缓存已启用）');
+    toast('已用「' + wd.name + '」开聊（沉浸式 RP + RP 缓存）');
   }
   function syncWorldToCurrent(wd) {
     if (!conv) { toast('没有当前对话'); return; }

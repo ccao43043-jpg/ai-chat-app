@@ -1,3 +1,14 @@
+**v0.21.1：世界开聊自动套用「沉浸式 RP（全自动）」**
+
+- **开聊默认模板**：从世界「用此世界开聊」创建的对话自动带上 `t-rp-immersive`（名称 / emoji / fill 后的 systemPrompt，含 date/time）
+- **保留**：世界 L1 blocks 写入 + 启用 RP 缓存逻辑不变
+- **文案**：沉浸式模板「设定来源」改为「分层设定 / 世界模板」（两种路径都通顺）；世界页提示开聊将自动使用该模板
+- **单测**：`tests/worlds.test.js` 覆盖 templateId/systemPrompt + blocks；`templates.test.js` 期望同步
+
+测试：`npm test` 393/393 全绿；Android `0.21.1`（versionCode 61）/ 桌面 / npm `0.21.1`
+
+---
+
 **v0.21.0：世界模板（L1 设定库 → 开聊）**
 
 - **世界库**：侧栏「世界」入口；新建 / 编辑 / 删除 / 列表；名称、可选 emoji/简介；L1 块与 `rpcache` `STATIC_DEFS` 对齐（world / character / rules / format / fewshot / prohibit / style）
