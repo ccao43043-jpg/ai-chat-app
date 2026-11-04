@@ -218,8 +218,53 @@ test('保活分析与写入价', () => {
   assert.equal(K.recommend([], 300, 270, 3).samples, 0);
   const c1 = G.estimateCost({ prompt: 1000, hit: 0, write: 1000 }), c2 = G.estimateCost({ prompt: 1000, hit: 0, write: 1000 }, { write: 1.5 });
   assert.equal(c1.equiv, 1000); assert.equal(c2.equiv, 1500);
-  assert.ok(G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'a', t: 1000 }, 300));
-  assert.ok(!G.expectedHit({ explicit: true, prefix_hash: 'a', t: 0 }, { prefix_hash: 'b', t: 1000 }, 300));
+  // A5：应命中 = LCP 占比 ≥ 0.9 且间隔 < TTL（不再只看 prefix_hash）
+  const same = 'x'.repeat(100);
+  assert.ok(G.expectedHit({ t: 0, body: same }, { t: 1000, body: same + 'y', lcpRatio: G.lcpRatio(same, same + 'y') }, 300));
+  assert.ok(!G.expectedHit({ t: 0, body: 'old-prefix' }, { t: 1000, body: 'brand-new-request-body', lcpRatio: G.lcpRatio('old-prefix', 'brand-new-request-body') }, 300));
+  assert.equal(G.lcpLen('abcde', 'abxyz'), 2);
+  assert.ok(Math.abs(G.lcpRatio('aaaa', 'aaab') - 0.75) < 1e-9);
+  assert.equal(G.attributeCacheHit({ expected: 0.95, actual: 0.1, gapSec: 30, compressed: false, ttlEff: 240 }).code, 'provider_miss');
+  assert.equal(G.attributeCacheHit({ expected: 0.95, actual: 0.1, gapSec: 300, compressed: false, ttlEff: 240 }).code, 'ttl_expired');
+  assert.equal(G.attributeCacheHit({ expected: 0.5, actual: 0, gapSec: 10, compressed: false, ttlEff: 240 }).code, 'prefix_broken');
+  assert.equal(G.attributeCacheHit({ expected: 0.2, actual: 0, gapSec: 10, compressed: true, ttlEff: 240 }).code, 'normal_compress');
+});
+
+test('C4：minCacheTokens Pro/Flash-Lite/Flash；短前缀 Flash-Lite 诊断文案', () => {
+  const E = G.CachePolicyEngine;
+  assert.equal(E.minCacheTokens('google/gemini-2.5-pro'), 4096);
+  assert.equal(E.minCacheTokens('google/gemini-2.5-flash-lite'), 2048);
+  assert.equal(E.minCacheTokens('gemini-flash_lite'), 2048);
+  assert.equal(E.minCacheTokens('google/gemini-2.5-flash'), 1024);
+  const note = E.flashLitePrefixNote('google/gemini-2.5-flash-lite', 2500);
+  assert.ok(note && /3k|cached_tokens/.test(note));
+  assert.equal(E.flashLitePrefixNote('google/gemini-2.5-flash-lite', 3500), null);
+  assert.equal(E.flashLitePrefixNote('google/gemini-2.5-flash', 1000), null);
+});
+
+test('A3/C5：冷窗口 SOFT/HARD；idle≤TTL 不提前压，idle>TTL 且 raw≥SOFT 提前压，raw≥HARD 总是压', () => {
+  const H = G.HybridWindow;
+  assert.equal(H.SOFT, 32);
+  assert.equal(H.HARD, 40);
+  assert.equal(H.RAW_MIN, 20);
+  assert.equal(H.RAW_MAX, 40);
+  assert.equal(H.TTL_EFF_DEFAULT, 240);
+  const mk = n => { const a = []; for (let i = 1; i <= n; i++) a.push({ role: 'user', content: '张燕在北境第' + i + '次调查，决定把账本交给曹含森保存。' }, { role: 'assistant', content: '曹含森收下账本。他不知道密道通向旧矿。第' + i + '轮结果。' }); return a; };
+  let st = H.empty();
+  const warm = H.apply(mk(32), st, { idleSec: 60, ttlEff: 240 });
+  assert.equal(warm.summaryCreated, false);
+  assert.equal(warm.earlyCompressed, false);
+  assert.equal(warm.rawTurns, 32);
+  st = H.empty();
+  const cold = H.apply(mk(32), st, { idleSec: 300, ttlEff: 240 });
+  assert.ok(cold.summaryCreated);
+  assert.ok(cold.earlyCompressed);
+  assert.equal(st.cut, 20);
+  assert.equal(cold.rawTurns, 12);
+  st = H.empty();
+  const hard = H.apply(mk(40), st, { idleSec: 10, ttlEff: 240 });
+  assert.ok(hard.summaryCreated);
+  assert.equal(st.cut, 20);
 });
 
 // ── 问题 1：冻结摘要二级合并 ──
