@@ -1,0 +1,5 @@
+{"id":"c1","turns":30,"provider":"deepseek","model":"deepseek-chat","seed":1,"systemPrompt":"你是王城中的角色扮演叙事者，保持人设，回应玩家行动。","summaryEvery":10}
+{"id":"c2","turns":30,"provider":"deepseek","model":"deepseek-chat","seed":42,"systemPrompt":"你是王城中的角色扮演叙事者，保持人设，回应玩家行动。","summaryEvery":10}
+{"id":"c3","turns":30,"provider":"openai","model":"gpt-4o-mini","seed":7,"systemPrompt":"你是王城中的角色扮演叙事者，保持人设，回应玩家行动。","summaryEvery":10}
+{"id":"c4","turns":30,"provider":"anthropic","model":"claude-3-5-haiku","seed":99,"systemPrompt":"你是王城中的角色扮演叙事者，保持人设，回应玩家行动。","summaryEvery":10}
+{"id":"c5","turns":30,"provider":"gemini","model":"gemini-2.0-flash","seed":2026,"systemPrompt":"你是王城中的角色扮演叙事者，保持人设，回应玩家行动。","summaryEvery":10}
