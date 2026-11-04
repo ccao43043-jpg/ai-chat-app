@@ -71,7 +71,7 @@ test('P2 L0 含 ASCII 双引号 / 反斜杠的设定行不误报缺失', () => {
 test('P1：batchFp 为 SHA-256；冻结批次改一个字符即作废摘要；旧 FNV 指纹平滑升级', () => {
   const H = G.HybridWindow;
   const hist = [];
-  for (let i = 0; i < H.RAW_MAX + 2; i++) hist.push({ role: 'user', content: '问题' + i }, { role: 'assistant', content: '回答' + i });
+  for (let i = 0; i < H.RAW_MAX + 2; i++) hist.push({ role: 'user', content: '张燕追问第' + i + '条线索，决定把证据交给曹含森。' }, { role: 'assistant', content: '曹含森点头。他不知道密道已暴露。回答' + i + '。' });
   const st = H.empty();
   const r1 = H.apply(hist, st);
   assert.ok(r1.summaryCreated && st.summaries.length);
@@ -79,10 +79,10 @@ test('P1：batchFp 为 SHA-256；冻结批次改一个字符即作废摘要；�
   // 未修改：复用
   assert.strictEqual(H.apply(hist, st).prefixChanged, false);
   // 改一个字符：作废后重建（文本更新）
-  const edited = hist.map(m => Object.assign({}, m)); edited[0].content = '问题X';
+  const edited = hist.map(m => Object.assign({}, m)); edited[0].content = '张燕改口，把线索X交给李明。';
   const r2 = H.apply(edited, st);
   assert.strictEqual(r2.prefixChanged, true);
-  assert.ok(st.summaries[0].text.includes('问题X'));
+  assert.ok(/线索X|李明/.test(st.summaries[0].text));
   // 旧版 8 位 FNV 指纹：内容一致时升级而不作废
   const st2 = H.empty(); H.apply(hist, st2);
   const batch = H.splitTurns(hist).slice(st2.summaries[0].from, st2.summaries[0].to);

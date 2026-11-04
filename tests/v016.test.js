@@ -61,7 +61,7 @@ test('阶段1：缺关键知识分区则 parseSummary / commitChapter 拒提交'
 test('阶段1：完整摘要可 commit，带 sourceFp 与 quality', () => {
   const ps = R.parseSummary(FULL_SUM);
   assert.ok(ps.ok, JSON.stringify(ps));
-  assert.ok(ps.quality >= 0.30);
+  assert.ok(ps.quality >= R.SUMMARY_MIN_QUALITY);
   assert.deepStrictEqual(ps.critMissing, []);
   const batch = convo(4);
   const covered = batch.map(m => m.id);
@@ -71,13 +71,11 @@ test('阶段1：完整摘要可 commit，带 sourceFp 与 quality', () => {
   const r = R.commitChapter(st0, { content: FULL_SUM, coveredIds: covered, batch, at: 1, atRound: 2, rounds: 2 });
   assert.ok(r.ok);
   assert.strictEqual(r.chapter.sourceFp, fp);
-  assert.ok(r.chapter.quality >= 0.30);
+  assert.ok(r.chapter.quality >= R.SUMMARY_MIN_QUALITY);
   assert.strictEqual(R.chaptersOf(r.state).length, 1);
 });
 
 test('阶段1：低质量摘要 force=false 拒提交', () => {
-  // 分区齐全但几乎全空 → quality 可能刚好过线；用 force 路径以外的低分需构造
-  // 缺 soft 分区且关键几乎空：仍需 critical 齐全
   const thin = `FACTS:
 - 无
 
@@ -91,18 +89,24 @@ SECRET:
 - 无
 
 UNRESOLVED:
+- 无
+
+RELATIONSHIPS:
+- 无
+
+OBJECTS:
+- 无
+
+LOCATION:
 - 无`;
   const ps = R.parseSummary(thin);
-  // 全「无」时 score 仍可能 ≥0.35（每 critical 0.04*5 + soft）；若 ok 则用 force 路径测低分拒绝
-  if (ps.ok && ps.quality >= 0.30) {
-    // 直接测 commit 的 quality 门槛：伪造 parsed
-    const st0 = withBlocks();
-    const r = R.commitChapter(st0, { content: thin, parsed: { ok: true, text: thin, quality: 0.1, missing: [], critMissing: [] }, coveredIds: ['u1'], at: 1 });
-    assert.ok(!r.ok);
-    assert.strictEqual(r.reason, 'low_quality');
-  } else {
-    assert.ok(!ps.ok || ps.quality < 0.35);
-  }
+  // v0.17：五区全「无」不得凑分，必须拒绝
+  assert.ok(!ps.ok, 'all-empty critical must fail');
+  assert.ok(ps.quality < R.SUMMARY_MIN_QUALITY);
+  assert.ok((ps.critEmpty || []).length >= 5);
+  const st0 = withBlocks();
+  const r = R.commitChapter(st0, { content: thin, coveredIds: ['u1'], at: 1 });
+  assert.ok(!r.ok);
 });
 
 test('阶段1：fallbackTrim 默认临时不推进 window；permanent 才推进', () => {

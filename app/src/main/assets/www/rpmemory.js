@@ -26,6 +26,31 @@
     return o;
   }
 
+  /** 统一关键词上限；合并与自动提取共用，避免 merge 再 slice 到 16 */
+  const KW_MAX = 48;
+  const KW_REL = /喜欢|讨厌|爱|恨|朋友|敌人|信任|结盟|决裂|敌对|合作|忠诚|背叛|已婚|未婚/;
+  const KW_TIME = /今晚|当天|次日|曾经|现在|之后|之前|当时|目前|\d{1,2}月|\d{1,4}年|昨天|今天|明天/;
+  const KW_OBJ = /账本|钥匙|信件|照片|剑|刀|戒指|地图|密道|卷轴|护符|盒子|文件|证据/;
+  function kwPriority(k) {
+    const s = String(k || '');
+    if (KW_REL.test(s)) return 400 + s.length;
+    if (KW_OBJ.test(s)) return 300 + s.length;
+    if (KW_TIME.test(s)) return 200 + s.length;
+    // 2–4 字实体词优先于碎片
+    if (/^[\u4e00-\u9fff]{2,4}$/.test(s) || /^[A-Za-z][A-Za-z0-9_-]{2,}$/.test(s)) return 100 + s.length;
+    return s.length;
+  }
+  function mergeKeywords(a, b) {
+    const freq = new Map();
+    [...(a || []), ...(b || [])].forEach(k => {
+      const t = String(k || '').trim(); if (!t) return;
+      freq.set(t, (freq.get(t) || 0) + 1);
+    });
+    return [...freq.entries()]
+      .sort((x, y) => (y[1] - x[1]) || (kwPriority(y[0]) - kwPriority(x[0])) || y[0].length - x[0].length || x[0].localeCompare(y[0]))
+      .map(e => e[0])
+      .slice(0, KW_MAX);
+  }
   /** 自动关键词：英文单词 + 中文词（不截断成长词的前 2 字；长段保留 2/3/4 字滑窗） */
   function autoKeywords(text) {
     const t = String(text || ''); const out = new Set();
@@ -38,9 +63,8 @@
         for (let i = 0; i <= seg.length - n; i++) out.add(seg.slice(i, i + n));
       }
     });
-    // v0.16：保留更多中文关键词（不只前 16）；长词优先
-    const arr = [...out].sort((a, b) => b.length - a.length || a.localeCompare(b));
-    return arr.slice(0, 48);
+    // 按优先级排序后截到 KW_MAX（不再在 merge 时二次压到 16）
+    return [...out].sort((a, b) => kwPriority(b) - kwPriority(a) || b.length - a.length || a.localeCompare(b)).slice(0, KW_MAX);
   }
 
   function buildExtractPrompt(turns, existing) {
@@ -68,7 +92,7 @@
       if (typeof x === 'string') x = { text: x };
       let type = String(x.type || 'detail').toLowerCase(); type = rev[x.type] || type; if (!TYPES.includes(type)) type = 'detail';
       const text = String(x.text).trim().slice(0, 300);
-      let kw = Array.isArray(x.keywords) ? x.keywords.map(k => String(k).trim()).filter(Boolean).slice(0, 8) : [];
+      let kw = Array.isArray(x.keywords) ? x.keywords.map(k => String(k).trim()).filter(Boolean).slice(0, KW_MAX) : [];
       if (!kw.length) kw = autoKeywords(text);
       return { type, text, keywords: kw };
     }).filter(x => x.text);
@@ -79,25 +103,82 @@
     const A = bigrams(a), B = bigrams(b); if (!A.size || !B.size) return norm(a) === norm(b) ? 1 : 0;
     let i = 0; A.forEach(x => { if (B.has(x)) i++; }); return i / Math.min(A.size, B.size);
   }
-  /** 冲突对：极性相反的关系/状态，禁止相似度合并 */
+  /** 冲突对：极性相反的关系/状态；映射到关系族后，仅同 subject+object+族才冲突 */
   const CONFLICT_PAIRS = [
     ['喜欢', '讨厌'], ['爱', '恨'], ['朋友', '敌人'], ['信任', '不信任'], ['结盟', '决裂'],
     ['存活', '死亡'], ['活着', '死了'], ['同意', '反对'], ['敌对', '合作'], ['忠诚', '背叛'],
     ['在场', '缺席'], ['已婚', '未婚'], ['解锁', '上锁'],
   ];
-  function detectConflict(a, b) {
-    const ta = norm(a), tb = norm(b);
-    if (!ta || !tb) return false;
-    for (const [x, y] of CONFLICT_PAIRS) {
-      const nx = norm(x), ny = norm(y);
-      if ((ta.includes(nx) && tb.includes(ny)) || (ta.includes(ny) && tb.includes(nx))) return true;
+  const REL_FAMILY = {
+    '喜欢': 'affection', '讨厌': 'affection', '爱': 'affection', '恨': 'affection',
+    '朋友': 'alliance', '敌人': 'alliance', '结盟': 'alliance', '决裂': 'alliance', '敌对': 'alliance', '合作': 'alliance',
+    '信任': 'trust', '不信任': 'trust', '忠诚': 'trust', '背叛': 'trust',
+    '存活': 'alive', '死亡': 'alive', '活着': 'alive', '死了': 'alive',
+    '同意': 'agree', '反对': 'agree',
+    '在场': 'presence', '缺席': 'presence',
+    '已婚': 'marital', '未婚': 'marital',
+    '解锁': 'lock', '上锁': 'lock',
+  };
+  const POLARITY = {
+    '喜欢': 1, '爱': 1, '朋友': 1, '信任': 1, '结盟': 1, '合作': 1, '忠诚': 1,
+    '存活': 1, '活着': 1, '同意': 1, '在场': 1, '已婚': 1, '解锁': 1,
+    '讨厌': -1, '恨': -1, '敌人': -1, '不信任': -1, '决裂': -1, '敌对': -1, '背叛': -1,
+    '死亡': -1, '死了': -1, '反对': -1, '缺席': -1, '未婚': -1, '上锁': -1,
+  };
+  /** 抽取关系三元组：subject + predicate + object + polarity/family */
+  function extractRelationTriple(text) {
+    const s = String(text || '').trim();
+    if (!s) return null;
+    const preds = Object.keys(REL_FAMILY).sort((a, b) => b.length - a.length);
+    for (const pred of preds) {
+      const i = s.indexOf(pred);
+      if (i < 0) continue;
+      let subject = s.slice(0, i).replace(/^[关于对与和]/, '').replace(/[的地得了着过]/g, '').trim();
+      let object = s.slice(i + pred.length).replace(/^[了着过的]/, '').replace(/[。！？!.].*$/, '').trim();
+      // 去掉主语/宾语两端标点与助词
+      subject = subject.replace(/^[\s，,：:]+|[\s，,：:]+$/g, '');
+      object = object.replace(/^[\s，,：:]+|[\s，,：:]+$/g, '');
+      if (!subject || subject.length > 16) continue;
+      if (!object) object = '_'; // 允许单目状态（存活/死亡）
+      return {
+        subject: norm(subject),
+        object: norm(object),
+        predicate: pred,
+        family: REL_FAMILY[pred],
+        polarity: POLARITY[pred] || 0,
+        raw: s,
+      };
     }
-    // 否定冲突：「不/没/并非」+ 共享核心词
+    return null;
+  }
+  function sameEntity(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    return (a.length >= 2 && b.length >= 2) && (a.includes(b) || b.includes(a));
+  }
+  function detectConflict(a, b) {
+    const ta = extractRelationTriple(a);
+    const tb = extractRelationTriple(b);
+    if (ta && tb) {
+      // 仅同 subject + object + 关系族且极性相反 → 冲突
+      if (sameEntity(ta.subject, tb.subject) && sameEntity(ta.object, tb.object)
+          && ta.family && ta.family === tb.family
+          && ta.polarity && tb.polarity && ta.polarity !== tb.polarity) {
+        return true;
+      }
+      return false; // 抽到三元组但不满足同主体/对象/族 → 明确不冲突
+    }
+    // 回退：否定冲突仍要求共享主体片段，避免「张燕…」「李明…」误伤
+    const na = norm(a), nb = norm(b);
+    if (!na || !nb) return false;
     const neg = /不|没|并非|未|无/;
     if (neg.test(a) !== neg.test(b)) {
-      const ca = ta.replace(/不|没|并非|未|无/g, '');
-      const cb = tb.replace(/不|没|并非|未|无/g, '');
-      if (ca.length >= 2 && cb.length >= 2 && (ca.includes(cb) || cb.includes(ca) || similarity(ca, cb) >= 0.85)) return true;
+      const ca = na.replace(/不|没|并非|未|无/g, '');
+      const cb = nb.replace(/不|没|并非|未|无/g, '');
+      // 需要足够重叠且主体前缀相近
+      const subA = ca.slice(0, 4), subB = cb.slice(0, 4);
+      if (ca.length >= 2 && cb.length >= 2 && sameEntity(subA, subB)
+          && (ca.includes(cb) || cb.includes(ca) || similarity(ca, cb) >= 0.85)) return true;
     }
     return false;
   }
@@ -126,7 +207,7 @@
       const hit = out.find(e => !e.supersededBy && e.type === n.type && (norm(e.text) === nn || norm(e.text).includes(nn) || nn.includes(norm(e.text)) || similarity(e.text, n.text) >= 0.8));
       if (hit) {
         if (n.text.length > hit.text.length && !hit.edited) hit.text = n.text;
-        hit.keywords = [...new Set([...(hit.keywords || []), ...(n.keywords || [])])].slice(0, 16);
+        hit.keywords = mergeKeywords(hit.keywords, n.keywords);
         hit.updatedAt = at; merged++;
       } else {
         seq++; out.push({ id: 'm' + seq + '_' + (at % 100000), seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: 1 });
@@ -167,7 +248,7 @@
   const shouldExtract = (turns, lastTurn, interval) => turns - (lastTurn | 0) >= interval;
   function toMemoryText(entries) { return entries.map(e => '- [' + (TYPE_CN[e.type] || e.type) + '] ' + e.text).join('\n'); }
 
-  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, autoKeywords, buildExtractPrompt, parseExtraction, similarity, detectConflict, CONFLICT_PAIRS, mergeEntries, selectRelevant, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
+  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, KW_MAX, autoKeywords, mergeKeywords, kwPriority, buildExtractPrompt, parseExtraction, similarity, detectConflict, extractRelationTriple, CONFLICT_PAIRS, REL_FAMILY, mergeEntries, selectRelevant, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;

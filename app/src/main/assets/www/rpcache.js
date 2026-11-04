@@ -321,7 +321,7 @@
   function commitChapter(st, o) {
     const ps = o.parsed || parseSummary(o.content);
     if (!ps.ok) return { ok: false, state: st, reason: 'invalid_summary', parsed: ps };
-    if (ps.quality != null && ps.quality < 0.30 && !o.force) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
+    if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY && !o.force) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
     const sourceFp = o.sourceFp || (o.batch ? chapterSourceFp(o.batch, o.coveredIds) : null);
     const next = addChapter(st, Object.assign({}, o, { content: ps.text || o.content, sourceFp, quality: ps.quality }));
     return { ok: true, state: next, chapter: chaptersOf(next)[chaptersOf(next).length - 1], parsed: ps };
@@ -349,11 +349,19 @@
   const pushArchive = (st, list, why, at) => (st.archive || []).concat(list.map(c => Object.assign({}, c, { archivedAt: at || 0, archivedWhy: why }))).slice(-ARCHIVE_LIMIT);
   /** 合并全部章节（+ 可选的新一批历史）为一章：只在章节总量超过上限时使用，会让 L3 之后的缓存重建一次 */
   function consolidate(st, o) {
+    // 与 commitChapter 一致：合并路径同样执行质量门（八分区 + SUMMARY_MIN_QUALITY）
+    if (!o.force) {
+      const ps = o.parsed || parseSummary(o.content);
+      if (!ps.ok) return { ok: false, state: st, reason: 'invalid_summary', parsed: ps };
+      if (ps.quality != null && ps.quality < SUMMARY_MIN_QUALITY) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
+      o = Object.assign({}, o, { content: ps.text || o.content, quality: ps.quality, parsed: ps });
+    }
     const old = chaptersOf(st);
     const ch = mkChapter(st, Object.assign({}, o, { coveredIds: coveredIds(st).concat(o.coveredIds || []), mergedFrom: old.map(c => c.no), source: o.source || 'merge' }));
     const next = Object.assign({}, st, { chapters: [ch], chapterSeq: ch.no, archive: pushArchive(st, old, 'merge', o.at),
       lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0, window: { startId: null, startOrdinal: 0 } });
-    return clearLoreStateForCovered(next, ch.coveredIds || []);
+    const cleared = clearLoreStateForCovered(next, ch.coveredIds || []);
+    return o.force ? cleared : { ok: true, state: cleared, chapter: chaptersOf(cleared)[0], parsed: o.parsed || null };
   }
   /** 编辑某一章（会让这一章及之后的缓存重建）；旧内容进入该章的版本历史 */
   function editChapter(st, no, content, at) {
@@ -842,14 +850,15 @@
   function calibOf(st, meta) {
     const key = calibKey(meta);
     if (st && st.calibBy && typeof st.calibBy[key] === 'number') return st.calibBy[key];
-    return typeof st.calib === 'number' ? st.calib : 1;
+    // 新模型从 1.0 起，不继承全局 st.calib（避免跨模型污染）
+    return 1;
   }
   /** 用服务商返回的真实输入 Token 校准估算（指数平均，系数限制在 0.5–2.5；按 provider/model/modality 隔离） */
   function calibrate(st, rawEstimate, actualPrompt, meta) {
     if (!(rawEstimate > 200) || !(actualPrompt > 0)) return st;
     const key = calibKey(meta);
     const map = Object.assign({}, st.calibBy || {});
-    const prev = typeof map[key] === 'number' ? map[key] : (typeof st.calib === 'number' ? st.calib : 1);
+    const prev = typeof map[key] === 'number' ? map[key] : 1.0;
     const ratio = Math.min(2.5, Math.max(0.5, actualPrompt / rawEstimate));
     const calib = Math.round((prev * 0.7 + ratio * 0.3) * 1000) / 1000;
     map[key] = calib;
@@ -1262,21 +1271,33 @@
   }
   /** 关键知识分区：缺任一项则拒提交（勿静默丢剧情边界） */
   const CRITICAL_SUMMARY = ['FACTS', 'CHARACTER_KNOWLEDGE', 'PLAYER_KNOWLEDGE', 'SECRET', 'UNRESOLVED'];
+  /** 统一质量门槛（CHANGELOG / parseSummary / commitChapter 一致）；空分区写「无」不得凑分 */
+  const SUMMARY_MIN_QUALITY = 0.60;
   function sectionBody(text, key) {
     const re = new RegExp('(?:^|\\n)\\s*[#*]*\\s*' + key + '\\s*:?\\s*\\n([\\s\\S]*?)(?=(?:\\n\\s*[#*]*\\s*(?:' + SUMMARY_SECTIONS.join('|') + ')\\b)|$)', 'i');
     const m = re.exec(text || '');
     return m ? m[1].trim() : '';
   }
+  function isEmptySectionBody(body) {
+    const b = String(body || '').trim();
+    if (!b) return true;
+    const lines = b.split(/\n/).map(x => x.trim()).filter(Boolean);
+    if (!lines.length) return true;
+    // 整区只有「无 / none / n/a」视为空，不得凑分
+    return lines.every(l => /^[-–—*•]?\s*(无|none|n\/?a|nil|空)\s*$/i.test(l));
+  }
   function scoreSummary(text) {
-    let score = 0, filled = 0;
+    let score = 0, filled = 0, critFilled = 0;
     SUMMARY_SECTIONS.forEach(k => {
       const body = sectionBody(text, k);
-      if (!body) return;
-      const empty = /^[-–—]\s*(无|none|n\/?a)\s*$/im.test(body) && body.split('\n').filter(Boolean).length <= 1;
-      if (!empty) { filled++; score += CRITICAL_SUMMARY.indexOf(k) >= 0 ? 0.14 : 0.06; }
-      else if (CRITICAL_SUMMARY.indexOf(k) >= 0) score += 0.06;
-      else score += 0.02;
+      if (!body || isEmptySectionBody(body)) return; // 空分区（含「无」）得 0 分
+      filled++;
+      const crit = CRITICAL_SUMMARY.indexOf(k) >= 0;
+      if (crit) critFilled++;
+      score += crit ? 0.14 : 0.06;
     });
+    // 五个关键分区全空：直接 0（即使 soft 有内容也不允许靠「无」过门）
+    if (!critFilled) return 0;
     return Math.max(0, Math.min(1, Math.round((score + Math.min(0.2, filled * 0.02)) * 100) / 100));
   }
   function parseSummary(text) {
@@ -1284,11 +1305,14 @@
     t = t.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
     t = t.replace(/^\[?CHAPTER[ _]SUMMARY[^\n]*\]?\s*\n/i, '');
     t = canonicalize(t);
+    // 八分区必须完整
     const missing = SUMMARY_SECTIONS.filter(k => !new RegExp('(^|\\n)\\s*[#*]*\\s*' + k + '\\b', 'i').test(t));
     const critMissing = CRITICAL_SUMMARY.filter(k => missing.indexOf(k) >= 0);
     const quality = scoreSummary(t);
-    const ok = !!t && !critMissing.length && quality >= 0.30;
-    return { ok, text: t, missing, critMissing, quality };
+    const critEmpty = CRITICAL_SUMMARY.filter(k => isEmptySectionBody(sectionBody(t, k)));
+    // 缺任一分区、质量不达标、或五个关键分区全空 → 拒
+    const ok = !!t && !missing.length && quality >= SUMMARY_MIN_QUALITY && critEmpty.length < CRITICAL_SUMMARY.length;
+    return { ok, text: t, missing, critMissing, critEmpty, quality, minQuality: SUMMARY_MIN_QUALITY };
   }
   function priceFor(model, prices) {
     return priceForRules(model, prices) || (model ? priceForRules(model, BUILTIN_PRICES, true) : null);
@@ -1544,7 +1568,7 @@
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
-    activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, scoreSummary, consolidate, editChapter, removeLastChapter,
+    activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,

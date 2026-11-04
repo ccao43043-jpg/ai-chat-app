@@ -13,7 +13,7 @@ test('解析：代码块 JSON / 对象包裹 / 行格式 / 垃圾', () => {
 test('去重合并', () => {
   let r = M.mergeEntries([], [{ type: 'fact', text: '艾琳是药剂师', keywords: ['艾琳'] }], 1);
   r = M.mergeEntries(r.list, [{ type: 'fact', text: '艾琳是药剂师。', keywords: ['药剂师'] }, { type: 'event', text: '主角救了艾琳', keywords: [] }], 2);
-  assert.strictEqual(r.list.length, 2); assert.strictEqual(r.merged, 1); assert.deepStrictEqual(r.list[0].keywords, ['艾琳', '药剂师']);
+  assert.strictEqual(r.list.length, 2); assert.strictEqual(r.merged, 1); assert.deepStrictEqual([...r.list[0].keywords].sort(), ['药剂师', '艾琳'].sort()); assert.ok(r.list[0].keywords.length <= M.KW_MAX);
 });
 test('相关性选择：关键词命中、置顶、停用、数量上限、顺序稳定', () => {
   const l = M.mergeEntries([], [{ type: 'fact', text: '艾琳是药剂师', keywords: ['艾琳'] }, { type: 'detail', text: '城堡地下有密道', keywords: ['密道'] },

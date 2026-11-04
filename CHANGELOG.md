@@ -1,3 +1,18 @@
+**v0.17.0：复审报告 1–6 项（摘要质量门 / Hybrid 证据 / 三元组冲突 / 校准 / 关键词 / 版本一致）**
+
+1. 章节摘要空内容拒提交：八分区完整；`SUMMARY_MIN_QUALITY = 0.60`（parseSummary / commitChapter / CHANGELOG 一致）；空分区「无」不得凑分；五关键区全空拒提交；`consolidate` 合并路径同门
+2. Gemini Hybrid 摘要质量验证：`extractHybridEvidence` + 覆盖率评分；语义摘要保留玩家句尾决策与回复中间秘密；质量 < 门槛不推进 cut；`fast_local` 仅 `temporaryFallback`（permanent:false）
+3. 关系三元组冲突：`extractRelationTriple`；同 subject+object+关系族且极性相反才冲突；不同主体/对象不误判；supersede 保留时间线
+4. 新模型校准从 1.0 起：`calibOf` / `calibrate` 不再回退全局 `st.calib`
+5. 关键词合并：统一 `KW_MAX=48`；`mergeKeywords` 按实体/关系/时间/物品优先级+频次，不再 `.slice(0,16)`
+6. README / package / Android `versionName` / `APP_VERSION` / about-ver 一致（`tests/version-sync.test.js` + v017-6）
+
+不做 / 刻意保留
+- 未接云端大模型语义摘要 API（本地证据启发式已加强）
+- 未推倒 L1–L6 分层上下文
+
+测试：`tests/v017.test.js` + 既有套件；Android `0.17.0`（versionCode 55）/ 桌面 / npm `0.17.0`
+
 **v0.16.0：RP/缓存审查三阶段（剧情遗忘 → 记忆冲突召回 → 缓存成本）**
 
 阶段1（最高优先：历史压缩勿丢剧情）

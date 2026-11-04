@@ -203,11 +203,52 @@
     return turns;
   }
   const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
-  /** 旧策略 fast_local：固定字符截断 */
+  /** 永久推进 cut 的质量门槛；fast_local 不得绕过 */
+  const HYBRID_SUMMARY_MIN_QUALITY = 0.50;
+  /** 从批次抽取可校验证据：人名、关键动作/结果、秘密、物品转移、句尾决策 */
+  function extractHybridEvidence(batch) {
+    const ev = [];
+    const nameRe = /[\u4e00-\u9fff]{2,4}|[A-Z][a-z]{2,}/g;
+    const actionRe = /(把.{2,12}(?:交给|递给|交给了|藏进|放进|交给)|发现.{2,16}|保存.{2,12}|转移.{2,12}|交给.{2,8}|告诉.{2,12}|隐瞒.{2,12}|不知道.{2,16}|知道.{2,16}|秘密.{2,16}|证据.{2,12}|喜欢|讨厌|背叛|结盟)/g;
+    (batch || []).forEach((turn, ti) => {
+      (turn || []).forEach(m => {
+        const role = m.role || '';
+        const text = partsText(m.__orig != null ? m.__orig : m.content).replace(/\s+/g, ' ').trim();
+        if (!text) return;
+        const mid = text.length > 40 ? text.slice(Math.floor(text.length * 0.25), Math.floor(text.length * 0.75)) : text;
+        const tail = text.length > 24 ? text.slice(-48) : text;
+        const head = text.slice(0, 36);
+        const zones = role === 'user' ? [tail, text] : [mid, tail, head];
+        zones.forEach(z => {
+          (z.match(actionRe) || []).forEach(a => ev.push({ kind: 'action', text: a, role, turn: ti, id: m.id || null }));
+        });
+        // 句尾决策（玩家）
+        if (role === 'user' && text.length > 8) {
+          const decision = tail.replace(/[。！？!?.…]+$/g, '').slice(-24);
+          if (decision.length >= 4) ev.push({ kind: 'decision', text: decision, role, turn: ti, id: m.id || null });
+        }
+        // 秘密/知识边界
+        (text.match(/不知道[^。！？\n]{2,20}|知道[^。！？\n]{2,20}|秘密[^。！？\n]{0,16}/g) || []).forEach(s => {
+          ev.push({ kind: 'secret', text: s, role, turn: ti, id: m.id || null });
+        });
+        (text.match(nameRe) || []).forEach(n => {
+          if (n.length >= 2) ev.push({ kind: 'name', text: n, role, turn: ti, id: m.id || null });
+        });
+      });
+    });
+    // 去重保序
+    const seen = new Set(); const out = [];
+    ev.forEach(e => {
+      const k = e.kind + ':' + e.text;
+      if (seen.has(k)) return; seen.add(k); out.push(e);
+    });
+    return out;
+  }
+  /** 旧策略 fast_local：固定字符截断（仅临时兜底，不得永久推进 cut） */
   function summarizeTurnsFast(turns, startNo) {
     return turns.map((t, i) => '第' + (startNo + i + 1) + '轮：' + t.map(m => (m.role === 'user' ? '玩家' : m.role === 'assistant' ? '回复' : m.role) + '「' + clip(partsText(m.content), m.role === 'user' ? 60 : 90) + '」').join(' → ')).join('\n');
   }
-  /** 语义摘要（本地启发式，保留决策/人名/结果；可切换回 fast_local） */
+  /** 语义摘要（本地启发式）：保留玩家句尾决策、回复中间/末尾、人名与关键动作证据 */
   function summarizeTurnsSemantic(turns, startNo) {
     const nameRe = /[\u4e00-\u9fff]{2,4}|[A-Z][a-z]{2,}/g;
     const lines = [];
@@ -217,12 +258,22 @@
       const asst = [...t].reverse().find(m => m.role === 'assistant');
       const ut = partsText(user && user.content).replace(/\s+/g, ' ').trim();
       const at = partsText(asst && asst.content).replace(/\s+/g, ' ').trim();
-      // 取句尾（决策/结果常在末尾）+ 人名
       const tail = (s, n) => { s = String(s || ''); return s.length <= n ? s : '…' + s.slice(-n); };
-      const names = [...new Set([...(ut.match(nameRe) || []), ...(at.match(nameRe) || [])])].slice(0, 6);
-      const uBit = clip(ut, 48);
-      const aBit = tail(at, 72);
-      lines.push('第' + no + '轮：玩家「' + uBit + '」→ 结果「' + aBit + '」' + (names.length ? '｜人物:' + names.join('/') : ''));
+      const mid = (s, n) => {
+        s = String(s || '');
+        if (s.length <= n) return s;
+        const start = Math.max(0, Math.floor(s.length / 2) - Math.floor(n / 2));
+        return '…' + s.slice(start, start + n) + '…';
+      };
+      const names = [...new Set([...(ut.match(nameRe) || []), ...(at.match(nameRe) || [])])].slice(0, 8);
+      // 玩家：前部语境 + 句尾决策（关键事实常在末尾）
+      const uBit = ut.length <= 64 ? ut : (clip(ut, 28) + '…' + ut.slice(-36));
+      // 回复：中间（秘密常在此）+ 句尾结果
+      const aBit = at.length <= 96 ? at : (mid(at, 40) + '｜' + tail(at, 40));
+      const acts = extractHybridEvidence([t]).filter(e => e.kind === 'action' || e.kind === 'secret').slice(0, 4).map(e => e.text);
+      lines.push('第' + no + '轮：玩家「' + uBit + '」→ 结果「' + aBit + '」'
+        + (names.length ? '｜人物:' + names.join('/') : '')
+        + (acts.length ? '｜证据:' + acts.join('；') : ''));
     });
     return lines.join('\n');
   }
@@ -232,16 +283,44 @@
     if (strat === 'fast_local') return summarizeTurnsFast(turns, startNo);
     return summarizeTurnsSemantic(turns, startNo);
   }
+  /**
+   * 质量分：事件/证据覆盖率为主，长度密度为辅。
+   * 不能只靠「中文 2–4 字片段命中」——必须覆盖抽取到的 action/decision/secret。
+   */
   function scoreHybridSummary(text, batch) {
     const t = String(text || '');
     if (!t || t.length < 20) return 0;
-    const src = batchText(batch);
-    const names = src.match(/[\u4e00-\u9fff]{2,4}/g) || [];
-    const uniq = [...new Set(names)].slice(0, 12);
-    let hit = 0; uniq.forEach(n => { if (t.indexOf(n) >= 0) hit++; });
-    const cover = uniq.length ? hit / uniq.length : 0.5;
-    const dens = Math.min(1, t.length / Math.max(80, batch.length * 40));
-    return Math.round(Math.min(1, cover * 0.7 + dens * 0.3) * 100) / 100;
+    const evidence = extractHybridEvidence(batch);
+    const critical = evidence.filter(e => e.kind === 'action' || e.kind === 'decision' || e.kind === 'secret');
+    const names = evidence.filter(e => e.kind === 'name');
+    const coverOf = (list) => {
+      if (!list.length) return 1;
+      let hit = 0;
+      list.forEach(e => {
+        const s = e.text;
+        // 允许摘要中出现证据的核心子串（≥4 或全等）
+        if (t.indexOf(s) >= 0) { hit++; return; }
+        if (s.length >= 6) {
+          const core = s.slice(0, Math.min(8, s.length));
+          if (t.indexOf(core) >= 0) { hit += 0.7; return; }
+          const core2 = s.slice(-Math.min(8, s.length));
+          if (t.indexOf(core2) >= 0) hit += 0.5;
+        } else if (s.length >= 2 && t.indexOf(s) >= 0) hit++;
+      });
+      return Math.min(1, hit / list.length);
+    };
+    const critCover = coverOf(critical.slice(0, 12));
+    const nameCover = coverOf(names.slice(0, 10));
+    const dens = Math.min(1, t.length / Math.max(80, (batch || []).length * 48));
+    // 抽不到人名也抽不到关键证据 → 低分封顶，避免空聊/无信息批次误过永久门
+    if (!critical.length && !names.length) {
+      return Math.round(Math.min(0.35, dens * 0.5) * 100) / 100;
+    }
+    // 有关键证据时，关键覆盖权重更高；无关键证据时退回人名+密度
+    const score = critical.length
+      ? (critCover * 0.65 + nameCover * 0.20 + dens * 0.15)
+      : (nameCover * 0.7 + dens * 0.3);
+    return Math.round(Math.min(1, score) * 100) / 100;
   }
 
   // 冻结批次指纹：用于判定摘要是否仍有效（正确性相关），用 SHA-256 而非 32 位 FNV，避免碰撞导致改过的批次沿用旧摘要
@@ -272,24 +351,23 @@
       const s0 = state.summaries[i];
       if (!batchValid(s0, turns.slice(s0.from, s0.to))) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
     }
+    let temporaryFallback = null;
     while (turns.length - state.cut >= RAW_MAX) {
       const from = state.cut, to = from + (RAW_MAX - RAW_MIN), batch = turns.slice(from, to);
-      const text = summarizeTurns(batch, from, { strategy });
+      const text = summarizeTurns(batch, from, { strategy: strategy === 'fast_local' ? 'fast_local' : 'semantic' });
       const quality = scoreHybridSummary(text, batch);
       summaryQuality = quality;
-      if (quality < 0.35 && strategy === 'semantic') {
-        // 语义摘要质量不足：不推进 cut，勿静默丢剧情；可退回 fast_local 再试一次
+      // 永久质量门：不达标绝不推进 cut（fast_local 也不能绕过）
+      if (quality >= HYBRID_SUMMARY_MIN_QUALITY) {
+        state.summaries.push({ from, to, fp: batchFp(batch), text, at: new Date().toISOString().slice(0, 10), quality, strategy: strategy === 'fast_local' ? 'fast_local' : 'semantic', sourceFp: batchFp(batch), permanent: true });
+        state.cut = to; summaryCreated = true; prefixChanged = true;
+      } else {
+        // fast_local 仅作本轮临时上下文压缩兜底，不写入永久 summaries、不推进 cut
         const fallback = summarizeTurns(batch, from, { strategy: 'fast_local' });
         const q2 = scoreHybridSummary(fallback, batch);
-        if (q2 >= 0.25) {
-          state.summaries.push({ from, to, fp: batchFp(batch), text: fallback, at: new Date().toISOString().slice(0, 10), quality: q2, strategy: 'fast_local', sourceFp: batchFp(batch) });
-          state.cut = to; summaryCreated = true; prefixChanged = true;
-        } else {
-          summaryFailed = true; break; // 保持旧窗口
-        }
-      } else {
-        state.summaries.push({ from, to, fp: batchFp(batch), text, at: new Date().toISOString().slice(0, 10), quality, strategy, sourceFp: batchFp(batch) });
-        state.cut = to; summaryCreated = true; prefixChanged = true;
+        temporaryFallback = { from, to, text: fallback, quality: q2, strategy: 'fast_local', permanent: false };
+        summaryFailed = true;
+        break; // 保持旧窗口；调用方可读 temporaryFallback
       }
     }
     let summaryMerged = false;
@@ -303,7 +381,15 @@
     const raw = turns.slice(state.cut).flat();
     const out = state.summaries.length ? [{ role: 'system', content: SUM_HEAD + '\n' + state.summaries.map(x => x.text).join('\n') }].concat(raw) : raw;
     const rawTurns = turns.length - state.cut;
-    return { messagesForRequest: out, state, prefixChanged, summaryCreated, summaryMerged, summaryFailed, summaryQuality, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
+    // 临时兜底：不改 state.cut；本轮请求用 fast_local 覆盖 [from,to)，原文仍留在 state 中待质量达标后再永久冻结
+    let messagesForRequest = out;
+    if (summaryFailed && temporaryFallback && temporaryFallback.text) {
+      const frozen = state.summaries.map(x => x.text);
+      const parts = frozen.concat([temporaryFallback.text]);
+      const tmpRaw = turns.slice(temporaryFallback.to).flat();
+      messagesForRequest = [{ role: 'system', content: SUM_HEAD + '\n' + parts.join('\n') }].concat(tmpRaw);
+    }
+    return { messagesForRequest, state, prefixChanged, summaryCreated, summaryMerged, summaryFailed, summaryQuality, temporaryFallback, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
   }
 
   // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
@@ -327,7 +413,7 @@
   }
   /** 清掉旧版（以内容哈希为键、值为字符串）的条目 */
   function hwMigrateSent(state) { const o = state.sent || {}; Object.keys(o).forEach(k => { if (!o[k] || typeof o[k] !== 'object') delete o[k]; }); state.sent = o; }
-  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, apply: hwApply, splitTurns, summarizeTurns, summarizeTurnsFast, summarizeTurnsSemantic, scoreHybridSummary, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
+  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, HYBRID_SUMMARY_MIN_QUALITY, apply: hwApply, splitTurns, summarizeTurns, summarizeTurnsFast, summarizeTurnsSemantic, scoreHybridSummary, extractHybridEvidence, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
 
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */

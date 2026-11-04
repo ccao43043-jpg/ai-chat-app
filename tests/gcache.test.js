@@ -130,7 +130,7 @@ test('非 OpenRouter Gemini 不识别（请求不经过 transform）', () => {
 
 // ── v1.2.0 Hybrid-5 ──
 const H = G.HybridWindow;
-const mkHist = n => { const a = []; for (let i = 1; i <= n; i++) a.push({ role: 'user', content: '第' + i + '句' }, { role: 'assistant', content: '回' + i }); return a; };
+const mkHist = n => { const a = []; for (let i = 1; i <= n; i++) a.push({ role: 'user', content: '张燕在北境第' + i + '次调查，决定把账本交给曹含森保存。' }, { role: 'assistant', content: '曹含森收下账本。他不知道密道通向旧矿。第' + i + '轮结果。' }); return a; };
 test('Hybrid-5：20/39 轮不摘要，40 轮压一次，41–59 不再生成，60 轮再压一批', () => {
   let st = H.empty();
   assert.strictEqual(H.apply(mkHist(20), st).summaryCreated, false);
@@ -184,8 +184,8 @@ test('Hybrid-5：非 OpenRouter+Gemini 不识别（插件不改请求）；冲�
 });
 test('Hybrid-5：编辑已冻结批次 → 作废并重建，历史删短 → 重置', () => {
   const st = H.empty(); H.apply(mkHist(40), st);
-  const h = mkHist(40); h[0].content = '改过';
-  const r = H.apply(h, st); assert.ok(r.summaryCreated); assert.ok(/改过/.test(st.summaries[0].text));
+  const h = mkHist(40); h[0].content = '张燕改过决定，把证据交给李明。';
+  const r = H.apply(h, st); assert.ok(r.summaryCreated); assert.ok(/改过|李明|证据/.test(st.summaries[0].text));
   const r2 = H.apply(mkHist(10), st); assert.strictEqual(st.summaries.length, 0); assert.strictEqual(r2.rawTurns, 10);
 });
 

@@ -280,7 +280,9 @@
     const sourceFp = R.chapterSourceFp(p.batch, ids);
     const o = { content: r.text, coveredIds: ids, at: Date.now(), source: merge ? 'merge' : source, rounds: p.batchRounds, atRound: p.rounds, sourceFp, quality: r.quality, parsed: r, batch: p.batch };
     if (merge) {
-      const state = R.consolidate(st, o);
+      const merged = R.consolidate(st, o);
+      if (merged && merged.ok === false) throw new Error('章节合并被拒绝：' + (merged.reason || 'invalid') + (r.critMissing && r.critMissing.length ? '（缺 ' + r.critMissing.join('/') + '）' : ''));
+      const state = (merged && merged.state) ? merged.state : merged;
       return { state, no: R.activeSummary(state).no, count: ids.length, missing: r.missing, quality: r.quality, sourceFp, merged: true, mergedCount: chapters.length };
     }
     const committed = R.commitChapter(st, o);

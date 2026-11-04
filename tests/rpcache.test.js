@@ -157,9 +157,9 @@ test('章节（V2）：只追加、之前章节逐字不变；编辑 / 撤销；
   const prompt = R.buildSummaryPrompt({ chapters: [], memory: R.getBlock(st, 'memory').content, batch: p.batch });
   R.SUMMARY_SECTIONS.forEach(k => assert.ok(prompt.includes(k + ':'), '提示词包含 ' + k));
   assert.ok(prompt.includes('知识边界'));
-  const out = '```\n[CHAPTER SUMMARY]\nFACTS:\n- 曹含森进入北境\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知道失踪案与商人有关\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 幕后组织未确认\n```';
+  const out = '```\n[CHAPTER SUMMARY]\nFACTS:\n- 曹含森进入北境\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知道失踪案与商人有关\n\nPLAYER_KNOWLEDGE:\n- 曹含森知道自己有特殊魔法\n\nSECRET:\n- 幕后组织尚未对玩家公开\n\nUNRESOLVED:\n- 幕后组织未确认\n\nRELATIONSHIPS:\n- 曹含森与张燕：合作调查\n\nOBJECTS:\n- 商队账本\n\nLOCATION:\n- 北境关卡\n```';
   const ps = R.parseSummary(out);
-  assert.ok(ps.ok); assert.ok(ps.text.startsWith('FACTS:')); assert.deepStrictEqual(ps.missing, ['RELATIONSHIPS', 'OBJECTS', 'LOCATION']); assert.ok(ps.quality >= 0.30); assert.deepStrictEqual(ps.critMissing, []);
+  assert.ok(ps.ok); assert.ok(ps.text.startsWith('FACTS:')); assert.deepStrictEqual(ps.missing, []); assert.ok(ps.quality >= R.SUMMARY_MIN_QUALITY); assert.deepStrictEqual(ps.critMissing, []);
   assert.ok(!R.parseSummary('他们聊了很多。').ok, '不合格式的输出不接受');
   st = R.addChapter(st, { content: ps.text, coveredIds: p.batch.map(m => m.id), at: 10, atRound: 6 });
   assert.strictEqual(R.activeSummary(st).no, 1);

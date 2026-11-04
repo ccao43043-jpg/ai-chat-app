@@ -19,6 +19,8 @@ test('各处版本号一致', () => {
   const h = /id="about-ver">v([\d.]+)/.exec(R('app/src/main/assets/www/index.html'));
   assert.ok(h, 'about-ver'); assert.strictEqual(h[1], v, 'about-ver');
   assert.ok(R('CHANGELOG.md').includes('v' + v), 'CHANGELOG 含当前版本');
+  assert.ok(R('README.md').includes('**v' + v), 'README 功能标题含当前版本');
+  assert.ok(R('README.md').includes('`' + v + '`'), 'README 含 Android/npm 版本');
 });
 
 test('renderMarkdown LRU 缓存规格', () => {
