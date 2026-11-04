@@ -533,44 +533,69 @@
       node.replaceWith(frag);
     });
   }
-  // Markdown 渲染 LRU 缓存（流式输出不读写缓存）
+  // Markdown 渲染 LRU 缓存（流式输出不读写缓存）+ 块级 DOM 差分（方向 F）
   const MD_CACHE_MAX = 80, HL_CACHE_MAX = 300, MD_CACHE_TEXT_MAX = 20000;
   const mdHtmlCache = new Map(), hlCache = new Map();
   function lruGet(map, k) { if (!map.has(k)) return undefined; const v = map.get(k); map.delete(k); map.set(k, v); return v; }
   function lruSet(map, k, v, max) { if (map.has(k)) map.delete(k); map.set(k, v); while (map.size > max) map.delete(map.keys().next().value); }
-  let streamHeadCache = null; // { src, html, codes } 只保留一条（当前正在流式的消息）
-  function renderMarkdown(text, sources, opts) {
-    const streaming = !!(opts && opts.streaming);
-    const src = text || '';
-    const cacheable = !streaming && src.length <= MD_CACHE_TEXT_MAX;
-    const div = document.createElement('div');
-    div.className = 'md';
-    let html = cacheable ? lruGet(mdHtmlCache, src) : undefined;
-    let stableCodes = 0; // 流式时，前面已稳定部分的代码块数量（这些块可以走高亮缓存）
-    if (html === undefined && streaming) {
-      // v0.9.0：流式增量渲染——在稳定边界处切开，前半段复用上次结果，只重新解析尾部
+  // 按消息 id 多槽：并发流 / 历史重渲不会互相踢掉（替代单槽 streamHeadCache）
+  const streamHeadCache = RenderDiff.createStreamHeadCache(8);
+  function markdownToHtml(src, streaming, msgId) {
+    let html, stableCodes = 0;
+    if (streaming) {
       const sp = Secure.splitStableMarkdown(src);
       if (sp.head) {
-        if (!streamHeadCache || streamHeadCache.src !== sp.head) {
+        let slot = msgId != null ? streamHeadCache.get(msgId) : null;
+        if (!slot || slot.src !== sp.head) {
           const h = DOMPurify.sanitize(marked.parse(sp.head));
-          streamHeadCache = { src: sp.head, html: h, codes: (h.match(/<pre[\s>]/g) || []).length };
+          slot = { src: sp.head, html: h, codes: (h.match(/<pre[\s>]/g) || []).length };
+          if (msgId != null) streamHeadCache.set(msgId, slot);
         }
-        html = streamHeadCache.html + DOMPurify.sanitize(marked.parse(sp.tail));
-        stableCodes = streamHeadCache.codes;
+        html = slot.html + DOMPurify.sanitize(marked.parse(sp.tail));
+        stableCodes = slot.codes;
       } else html = DOMPurify.sanitize(marked.parse(src));
+    } else {
+      html = DOMPurify.sanitize(marked.parse(src));
     }
-    if (html === undefined) { html = DOMPurify.sanitize(marked.parse(src)); if (cacheable) lruSet(mdHtmlCache, src, html, MD_CACHE_MAX); }
-    div.innerHTML = html;
-    let codeIdx = 0;
-    linkCitations(div, sources);
-    div.querySelectorAll('pre > code').forEach(code => {
-      const pre = code.parentElement; codeIdx++;
+    return { html, stableCodes };
+  }
+  /** 只处理「新增块」：hljs / code-block 包装 / 链接 / 图片占位 */
+  function enhanceMdBlock(node, ctx) {
+    if (!node || !node.querySelectorAll) return node;
+    const streaming = !!(ctx && ctx.streaming);
+    const cacheable = !!(ctx && ctx.cacheable);
+    const stableCodes = (ctx && ctx.stableCodes) || 0;
+    const sources = ctx && ctx.sources;
+    // 图片：onload 前用 aspect-ratio 占位，避免高度跳变
+    const imgs = node.nodeName === 'IMG' ? [node] : Array.from(node.querySelectorAll('img'));
+    imgs.forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (!img.style.aspectRatio) img.style.aspectRatio = RenderDiff.guessAspect(src) || '4 / 3';
+      img.addEventListener('load', () => {
+        // 真实尺寸到位后清占位，交给 onMsgImgLoad 重测
+        try { img.style.aspectRatio = ''; } catch (e) {}
+        onMsgImgLoad(img);
+      }, { once: true });
+      img.addEventListener('error', () => { try { img.style.aspectRatio = ''; } catch (e) {} }, { once: true });
+    });
+    linkCitations(node, sources);
+    // 代码高亮：仅本块内；稳定块可走 hlCache
+    let root = node;
+    const codes = Array.from(node.querySelectorAll('pre > code'));
+    // 若自身就是 pre>code 结构
+    if (!codes.length && node.nodeName === 'PRE') {
+      const c = node.querySelector('code');
+      if (c) codes.push(c);
+    }
+    codes.forEach((code, idx) => {
+      const pre = code.parentElement;
       const m = /language-([\w+#.-]+)/.exec(code.className || '');
       const lang = m ? m[1] : '';
       const raw = code.textContent;
       try {
         const known = !!(lang && hljs.getLanguage(lang));
-        const stable = cacheable || codeIdx <= stableCodes;
+        // keep 段已高亮不重跑；新增块仅在非流式 / cacheable 时走稳定缓存
+        const stable = cacheable;
         const hk = stable && raw.length <= MD_CACHE_TEXT_MAX ? (lang || '') + '\u0000' + raw : null;
         let hl = hk ? lruGet(hlCache, hk) : undefined;
         if (hl === undefined) {
@@ -581,17 +606,57 @@
         }
         if (hl !== null) { code.innerHTML = hl; code.classList.add('hljs'); }
       } catch (e) { /* ignore */ }
-      const wrap = document.createElement('div'); wrap.className = 'code-block';
-      const head = document.createElement('div'); head.className = 'code-head';
-      head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
-      head.querySelector('button').onclick = () => copyText(raw);
-      pre.replaceWith(wrap); wrap.appendChild(head); wrap.appendChild(pre);
+      if (pre && pre.parentNode && !pre.parentNode.classList.contains('code-block')) {
+        const wrap = document.createElement('div'); wrap.className = 'code-block';
+        const head = document.createElement('div'); head.className = 'code-head';
+        head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
+        head.querySelector('button').onclick = () => copyText(raw);
+        if (pre.parentNode === node && node.nodeName === 'PRE') {
+          // node 本身是 pre：包完后根变成 wrap
+          wrap.appendChild(head); wrap.appendChild(pre);
+          root = wrap;
+        } else {
+          pre.replaceWith(wrap); wrap.appendChild(head); wrap.appendChild(pre);
+        }
+      } else if (pre && !pre.parentNode) {
+        const wrap = document.createElement('div'); wrap.className = 'code-block';
+        const head = document.createElement('div'); head.className = 'code-head';
+        head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
+        head.querySelector('button').onclick = () => copyText(raw);
+        wrap.appendChild(head); wrap.appendChild(pre);
+        root = wrap;
+      }
     });
-    div.querySelectorAll('a').forEach(a => {
+    const links = root.querySelectorAll ? root.querySelectorAll('a') : [];
+    Array.from(links).forEach(a => {
       a.setAttribute('target', '_blank');
       a.onclick = e => { const h = a.getAttribute('href') || ''; if (/^https?:/i.test(h)) { e.preventDefault(); openUrl(h); } };
     });
+    return root;
+  }
+  /** 把 markdown 差分写入已有 .md 节点（流式定点 patch） */
+  function renderMarkdownInto(div, text, sources, opts) {
+    opts = opts || {};
+    const streaming = !!opts.streaming;
+    const src = text || '';
+    const cacheable = !streaming && src.length <= MD_CACHE_TEXT_MAX;
+    let html = cacheable ? lruGet(mdHtmlCache, src) : undefined;
+    let stableCodes = 0;
+    if (html === undefined) {
+      const r = markdownToHtml(src, streaming, opts.msgId);
+      html = r.html; stableCodes = r.stableCodes;
+      if (cacheable) lruSet(mdHtmlCache, src, html, MD_CACHE_MAX);
+    } else {
+      stableCodes = (html.match(/<pre[\s>]/g) || []).length;
+    }
+    const ctxBase = { streaming, cacheable, stableCodes, sources };
+    RenderDiff.applyBlockDiff(div, html, (node, info) => enhanceMdBlock(node, Object.assign({}, ctxBase, { blockIndex: info.index })));
     return div;
+  }
+  function renderMarkdown(text, sources, opts) {
+    const div = document.createElement('div');
+    div.className = 'md';
+    return renderMarkdownInto(div, text, sources, opts || {});
   }
 
   // ---------------- 对话管理 ----------------
@@ -780,6 +845,26 @@
     if (stickState.on || nearBottom()) { vsMeasure(el, m, false); stickToBottom(600); }
     else vsMeasure(el, m, true);
   }
+  // 方向 F：容器尺寸变化（转屏 / 分屏 / 字号）→ 清空高度缓存并强制重渲
+  let boxSizeRO = null, lastBoxW = 0, lastBoxH = 0, boxSizeROTimer = 0;
+  function ensureBoxSizeObserver() {
+    const box = $('#messages');
+    if (!box || typeof ResizeObserver !== 'function') return;
+    if (boxSizeRO) return;
+    boxSizeRO = new ResizeObserver(entries => {
+      const cr = entries[0] && entries[0].contentRect; if (!cr) return;
+      const w = Math.round(cr.width), h = Math.round(cr.height);
+      if (!lastBoxW && !lastBoxH) { lastBoxW = w; lastBoxH = h; return; }
+      if (w === lastBoxW && h === lastBoxH) return;
+      lastBoxW = w; lastBoxH = h;
+      clearTimeout(boxSizeROTimer);
+      boxSizeROTimer = setTimeout(() => {
+        vsHeight.clear();
+        if (conv) renderMessages({ force: true, stickBottom: nearBottom() });
+      }, 80);
+    });
+    boxSizeRO.observe(box);
+  }
   function vsTotalHeight(list) {
     let t = 0; for (let i = 0; i < list.length; i++) t += vsEstimate(list[i]); return t;
   }
@@ -832,6 +917,7 @@
     opts = opts || {};
     const box = $('#messages');
     const stick = opts.stickBottom != null ? opts.stickBottom : true;
+    ensureBoxSizeObserver();
     if (!vsScrollBound) {
       vsScrollBound = true;
       box.addEventListener('scroll', () => {
@@ -1066,11 +1152,33 @@
   }
   function mkAct(icon, label, fn) { const b = document.createElement('button'); b.className = 'act'; b.innerHTML = icon; b.setAttribute('aria-label', label); b.title = label; b.onclick = fn; return b; }
   function nearBottom() { const b = $('#messages'); return b.scrollHeight - b.scrollTop - b.clientHeight < 140; }
+  /** 流式定点：只差分更新已有 .md，避免整条消息 innerHTML 重建 */
+  function patchMsgMarkdown(el, m) {
+    if (!el || !m || !m.content) return false;
+    // 结构状态变化时退回全量 fillMsgEl
+    if (m.searching || m.pluginStatus || m.searchError || m.imageGen) return false;
+    const md = el.querySelector('.bot-body .md') || el.querySelector('.md');
+    if (!md) return false;
+    const text = window.Affect ? Affect.stripState(m.content) : m.content;
+    renderMarkdownInto(md, text, m.sources, { streaming: !!m.pending, msgId: m.id });
+    if (m.pending) md.classList.add('cursor'); else md.classList.remove('cursor');
+    const r = el.querySelector('.reasoning .r-text');
+    if (m.reasoning && r) r.textContent = m.reasoning;
+    if (m.error) {
+      let e = el.querySelector('.bot-body .err');
+      if (!e) {
+        const body = el.querySelector('.bot-body');
+        if (body) { e = document.createElement('div'); e.className = 'err'; body.appendChild(e); }
+      }
+      if (e) e.textContent = m.error;
+    }
+    return true;
+  }
   function updateMsg(m) {
     const el = document.querySelector('.msg[data-id="' + String(m.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
     const stick = nearBottom();
     if (el) {
-      fillMsgEl(el, m);
+      if (!(m.pending && patchMsgMarkdown(el, m))) fillMsgEl(el, m);
       vsMeasure(el, m, !stick);
       if (stick) $('#messages').scrollTop = $('#messages').scrollHeight;
       return;
@@ -1079,12 +1187,9 @@
     const last = conv.messages[conv.messages.length - 1];
     if (stick || m === last) renderMessages({ stickBottom: stick, force: true });
   }
-  let rafPending = new Set(), rafTimer = null;
-  function scheduleUpdate(m) {
-    rafPending.add(m);
-    if (rafTimer) return;
-    rafTimer = setTimeout(() => { rafTimer = null; const s = rafPending; rafPending = new Set(); s.forEach(updateMsg); }, 70);
-  }
+  // 方向 F：每帧最多一次 DOM 写入（rAF 替代 70ms 定时器）
+  const msgFrameSched = RenderDiff.createFrameScheduler(m => updateMsg(m));
+  function scheduleUpdate(m) { msgFrameSched.schedule(m); }
 
   function deleteMsg(m) { conv.messages = conv.messages.filter(x => x !== m); if (m && m.id) vsHeight.drop(m.id); saveConv(); renderMessages({ force: true }); }
 
