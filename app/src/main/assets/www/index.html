@@ -110,6 +110,10 @@
         <svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.8 19.5a6.2 6.2 0 0112.4 0"/><path d="M16 5.2a3.4 3.4 0 010 6.6M18.2 14.2a6 6 0 013 5.3"/></svg>
         <span>助手</span><small id="persona-count" class="nav-meta">助手与提示词</small>
       </button>
+      <button class="nav-row feat-btn" id="btn-worlds" type="button">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5s1.2-6.1 3.6-8.5z"/></svg>
+        <span>世界</span><small id="world-count" class="nav-meta">世界模板</small>
+      </button>
       <button class="nav-row feat-btn" id="btn-templates" type="button">
         <svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg>
         <span>模板</span><small id="template-count" class="nav-meta">提示词模板</small>
@@ -228,7 +232,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.20.1 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.21.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -377,6 +381,49 @@
     <span class="icon-btn ghost"></span>
   </header>
   <div class="page-body" id="pp-body"></div>
+</section>
+
+
+<!-- 世界库 -->
+<section id="page-worlds" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title">世界模板</div>
+    <button class="icon-btn" id="wl-add" aria-label="新建世界"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  </header>
+  <div class="page-body">
+    <div class="hint">先写好世界观与人物等 L1 设定，再「用此世界开聊」。同一世界可开多个对话；<b>改模板默认不回溯</b>已开对话（编辑页可选手动同步到当前对话）。与首条自动提取、角色卡、助手并存。</div>
+    <div id="world-grid" class="persona-grid"></div>
+  </div>
+</section>
+
+<!-- 世界编辑 -->
+<section id="page-world" class="page">
+  <header class="topbar">
+    <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="page-title" id="wd-title">编辑世界</div>
+    <button class="text-btn" id="wd-save">保存</button>
+  </header>
+  <div class="page-body">
+    <div class="persona-hero"><span class="ph-emoji" id="wd-emoji-view">🌍</span></div>
+    <div class="emoji-row" id="wd-emoji-row"></div>
+    <div class="group form">
+      <div class="field-row">
+        <label class="field" style="flex:0 0 84px"><span>图标</span><input id="wd-emoji" maxlength="4"></label>
+        <label class="field"><span>名称</span><input id="wd-name" placeholder="例如：雨港侦探"></label>
+      </div>
+      <label class="field"><span>简介</span><input id="wd-desc" placeholder="一句话说明（可选）"></label>
+    </div>
+    <div class="group-title">L1 设定（写入 RP 缓存块）</div>
+    <div class="hint soft">与 RP 缓存「固定设定」块一致。角色卡 / 禁止 / 示例对白里可写必须、禁止与情感对白样例。</div>
+    <div class="group form" id="wd-blocks"></div>
+    <div class="group" style="margin-top:12px">
+      <button class="pill-btn primary" id="wd-start" type="button" style="width:100%">用此世界开聊</button>
+      <button class="ghost-btn" id="wd-sync" type="button" style="width:100%;margin-top:8px">同步到当前对话</button>
+      <div class="hint" style="margin-top:8px">同步会覆盖当前对话的对应 L1 块并启用 RP 缓存；未打开的对话不受影响。</div>
+    </div>
+    <button class="ghost-btn danger" id="wd-delete" style="margin-top:16px">删除此世界</button>
+  </div>
 </section>
 
 <!-- 助手库 -->
@@ -583,6 +630,7 @@
 <script src="files.js"></script>
 <script src="charcard.js"></script>
 <script src="personas.js"></script>
+<script src="worlds.js"></script>
 <script src="templates.js"></script>
 <script src="versions.js"></script>
 <script src="usage-stats.js"></script>

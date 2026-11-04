@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.20.1';
+  const APP_VERSION = '0.21.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -211,6 +211,8 @@
   let prompts = (Store.get('prompts.json', null) || Personas.defaultPrompts()).map(Personas.normalizePrompt);
   const savePersonas = () => Store.set('personas.json', personas);
   const savePrompts = () => Store.set('prompts.json', prompts);
+  let worlds = (Store.get('worlds.json', null) || Worlds.defaultWorlds()).map(Worlds.normalizeWorld);
+  const saveWorlds = () => Store.set('worlds.json', worlds);
   let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
   const saveTemplates = () => Store.set('templates.json', templates);
   // 全局 Token 用量统计（非插件，独立页面）
@@ -880,6 +882,16 @@
   function renderEmptyState(box) {
     const has = configured().length > 0;
     const empty = document.createElement('div'); empty.className = 'empty';
+    if (conv.worldName && has) {
+      const wd = worlds.find(x => x.id === conv.worldId);
+      empty.innerHTML = '<div class="hero-emoji">' + esc(conv.worldEmoji || '🌍') + '</div><h1>' + esc(conv.worldName) + '</h1>' +
+        '<p class="sub">' + esc((wd && wd.desc) || '已从世界模板开聊') + '</p>' +
+        '<div class="persona-note">' + ICON.globe + '<span>来源世界「' + esc(conv.worldName) + '」，L1 设定已写入本对话 RP 缓存，直接发消息即可。</span></div>' +
+        '<button class="link-btn" id="empty-switch-world">换一个世界</button>';
+      box.appendChild(empty);
+      $('#empty-switch-world').onclick = () => openWorlds();
+      return;
+    }
     if (conv.personaName && has) {
       const ps = personas.find(x => x.id === conv.personaId);
       empty.innerHTML = '<div class="hero-emoji">' + esc(conv.personaEmoji) + '</div><h1>' + esc(conv.personaName) + '</h1>' +
@@ -892,7 +904,8 @@
     }
     empty.innerHTML = '<div class="hero-icon"><img class="hero-logo" src="logo.svg" alt=""></div><h1>你好，我是 AI Chat</h1>' +
       (has ? '<p class="sub">专注高质量文字生成。支持插件扩展能力。</p><div class="suggest"></div>' +
-        '<div class="persona-strip-head"><span>从助手开始</span><button class="link-btn" id="empty-all-personas">全部 ›</button></div><div class="persona-strip"></div>'
+        '<div class="persona-strip-head"><span>从助手开始</span><button class="link-btn" id="empty-all-personas">全部 ›</button></div><div class="persona-strip"></div>' +
+        '<div class="persona-strip-head" style="margin-top:14px"><span>从世界开聊</span><button class="link-btn" id="empty-all-worlds">全部 ›</button></div><div class="persona-strip" id="empty-world-strip"></div>'
            : '<p class="sub">一个应用，连接多家 AI 服务。支持插件扩展能力。</p><div class="setup-card"><b>开始之前</b><ol><li>打开设置，选择一个服务商</li><li>粘贴你的 API Key 并保存</li><li>回到这里，点顶部切换模型即可聊天</li></ol><button class="pill-btn primary" id="empty-setup" style="width:100%">去设置 API Key</button></div>');
     box.appendChild(empty);
     if (has) {
@@ -911,6 +924,20 @@
         strip.appendChild(b);
       });
       $('#empty-all-personas').onclick = () => openPersonas();
+      const wstrip = empty.querySelector('#empty-world-strip');
+      (worlds.length ? worlds : []).slice(0, 8).forEach(wd => {
+        const b = document.createElement('button'); b.className = 'pchip';
+        b.innerHTML = '<span class="pc-emoji">' + esc(wd.emoji) + '</span><span>' + esc(wd.name) + '</span>';
+        b.onclick = () => startFromWorld(wd);
+        wstrip.appendChild(b);
+      });
+      if (!worlds.length) {
+        const b = document.createElement('button'); b.className = 'pchip';
+        b.innerHTML = '<span class="pc-emoji">＋</span><span>新建世界</span>';
+        b.onclick = () => openWorldEdit(null);
+        wstrip.appendChild(b);
+      }
+      $('#empty-all-worlds').onclick = () => openWorlds();
     } else $('#empty-setup').onclick = openSettings;
   }
   function renderMessages(opts) {
@@ -1954,6 +1981,7 @@
   $('#drawer-new').onclick = startNew;
   $('#btn-settings').onclick = () => { closeDrawer(); setTimeout(openSettings, 120); };
   $('#btn-personas').onclick = () => { closeDrawer(); setTimeout(() => openPersonas(), 120); };
+  $('#btn-worlds').onclick = () => { closeDrawer(); setTimeout(() => openWorlds(), 120); };
 
   // ---------------- 模型快速切换 ----------------
   function selectModel(pid, model) {
@@ -2166,6 +2194,155 @@
     } catch (e) {
       dialog({ title: '搜索失败', body: String(e.message || e), okText: '知道了', info: true });
     } finally { btn.disabled = false; btn.textContent = '测试搜索'; }
+  };
+
+
+  // ---------------- 世界模板 ----------------
+  const WORLD_EMOJIS = ['🌍', '🌌', '🏰', '🕵️', '🐉', '🚀', '🏫', '🌊', '🗡️', '🎭', '🏙️', '🌙', '🔮', '⚔️', '🧧', '🦊'];
+  let editingWorld = null;
+  function refreshWorldCount() {
+    const el = $('#world-count');
+    if (el) el.textContent = worlds.length ? (worlds.length + ' 世界') : '世界模板';
+  }
+  function openWorlds() {
+    closeDrawer();
+    renderWorldGrid();
+    $('#page-worlds').classList.add('show');
+  }
+  function closeWorlds() { $('#page-worlds').classList.remove('show'); }
+  $('#wl-add').onclick = () => openWorldEdit(null);
+  function renderWorldGrid() {
+    const box = $('#world-grid'); box.innerHTML = '';
+    worlds.forEach(wd => {
+      const n = Worlds.filledBlockCount(wd);
+      const el = document.createElement('div'); el.className = 'persona-card';
+      el.innerHTML = '<div class="pcard-top"><span class="pcard-emoji">' + esc(wd.emoji) + '</span><button class="ci-more" aria-label="更多">' + ICON.more + '</button></div>' +
+        '<div class="pcard-name">' + esc(wd.name) + '</div><div class="pcard-desc">' + esc(wd.desc || '点此开聊或编辑 L1 设定') + '</div>' +
+        '<div class="pcard-tags"><span>' + n + '/7 块</span></div>';
+      el.onclick = () => startFromWorld(wd);
+      el.querySelector('.ci-more').onclick = e => {
+        e.stopPropagation();
+        actionSheet(wd.emoji + ' ' + wd.name, [
+          { label: '用此世界开聊', icon: ICON.chat, onClick: () => startFromWorld(wd) },
+          { label: '编辑', icon: ICON.edit, onClick: () => openWorldEdit(wd.id) },
+          { label: '复制一份', icon: ICON.dup, onClick: () => { worlds = Worlds.duplicate(worlds, wd.id); saveWorlds(); renderWorldGrid(); refreshWorldCount(); toast('已复制'); } },
+          { label: '删除', icon: ICON.trash, danger: true, onClick: () => deleteWorld(wd) },
+        ]);
+      };
+      box.appendChild(el);
+    });
+    const add = document.createElement('button'); add.className = 'persona-card add';
+    add.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建世界</span>';
+    add.onclick = () => openWorldEdit(null);
+    box.appendChild(add);
+    refreshWorldCount();
+  }
+  async function deleteWorld(wd) {
+    const ok = await dialog({ title: '删除世界？', body: '「' + wd.name + '」将被删除。已开对话不受影响（改模板本就不回溯）。', okText: '删除', danger: true });
+    if (!ok) return;
+    worlds = Worlds.remove(worlds, wd.id);
+    saveWorlds(); renderWorldGrid(); refreshWorldCount(); toast('已删除');
+  }
+  function startFromWorld(wd) {
+    if (running) { toast('请先停止当前生成'); return; }
+    if (!wd) return;
+    newConv();
+    const f = Worlds.conversationFromWorld(wd, configured(), { providerId: conv.providerId, model: conv.model });
+    Object.assign(conv, f);
+    const applied = Worlds.applyWorldToConversation(conv, wd, RPCache, Date.now());
+    conv = applied.conv;
+    saveConv();
+    closeWorldEdit(); closeWorlds(); closeDrawer();
+    renderAll();
+    toast('已用「' + wd.name + '」开聊（RP 缓存已启用）');
+  }
+  function syncWorldToCurrent(wd) {
+    if (!conv) { toast('没有当前对话'); return; }
+    if (running) { toast('请先停止当前生成'); return; }
+    const applied = Worlds.applyWorldToConversation(conv, wd, RPCache, Date.now());
+    conv = applied.conv;
+    saveConv();
+    renderAll();
+    toast('已同步「' + wd.name + '」到当前对话');
+  }
+  function openWorldEdit(id) {
+    const wd = id ? worlds.find(x => x.id === id) : null;
+    editingWorld = wd ? Worlds.normalizeWorld(Object.assign({}, wd)) : Worlds.normalizeWorld({ name: '', emoji: '🌍' });
+    editingWorld.isNew = !wd;
+    $('#wd-title').textContent = wd ? '编辑世界' : '新建世界';
+    $('#wd-emoji').value = editingWorld.emoji; $('#wd-emoji-view').textContent = editingWorld.emoji;
+    $('#wd-name').value = wd ? wd.name : ''; $('#wd-desc').value = editingWorld.desc || '';
+    $('#wd-delete').style.display = wd ? '' : 'none';
+    $('#wd-start').style.display = wd ? '' : 'none';
+    $('#wd-sync').style.display = wd ? '' : 'none';
+    const row = $('#wd-emoji-row'); row.innerHTML = '';
+    WORLD_EMOJIS.forEach(em => { const b = document.createElement('button'); b.textContent = em; b.onclick = () => { $('#wd-emoji').value = em; $('#wd-emoji-view').textContent = em; }; row.appendChild(b); });
+    const box = $('#wd-blocks'); box.innerHTML = '';
+    Worlds.BLOCK_IDS.forEach(bid => {
+      const meta = Worlds.BLOCK_META[bid];
+      const lab = document.createElement('label'); lab.className = 'field';
+      lab.innerHTML = '<span>' + esc(meta.title) + '<small>' + esc(meta.hint) + '</small></span>';
+      const ta = document.createElement('textarea');
+      ta.id = 'wd-block-' + bid; ta.rows = bid === 'fewshot' || bid === 'character' ? 5 : 3;
+      ta.placeholder = meta.placeholder || '';
+      ta.value = editingWorld.blocks[bid] || '';
+      lab.appendChild(ta); box.appendChild(lab);
+    });
+    $('#page-world').classList.add('show');
+  }
+  function closeWorldEdit() {
+    $('#page-world').classList.remove('show');
+    editingWorld = null;
+    if ($('#page-worlds').classList.contains('show')) renderWorldGrid();
+  }
+  $('#wd-emoji').addEventListener('input', () => { $('#wd-emoji-view').textContent = $('#wd-emoji').value.trim() || '🌍'; });
+  function readWorldForm() {
+    const name = $('#wd-name').value.trim();
+    const blocks = Worlds.emptyBlocks();
+    Worlds.BLOCK_IDS.forEach(id => { const el = $('#wd-block-' + id); blocks[id] = el ? el.value : ''; });
+    return {
+      id: editingWorld.id, emoji: $('#wd-emoji').value.trim() || '🌍', name,
+      desc: $('#wd-desc').value.trim(), blocks,
+      createdAt: editingWorld.createdAt || 0,
+    };
+  }
+  $('#wd-save').onclick = () => {
+    const item = readWorldForm();
+    if (!item.name) { toast('请填写世界名称'); return; }
+    worlds = Worlds.upsert(worlds, item);
+    editingWorld = worlds.find(x => x.id === item.id) || Worlds.normalizeWorld(item);
+    editingWorld.isNew = false;
+    $('#wd-title').textContent = '编辑世界';
+    $('#wd-delete').style.display = '';
+    $('#wd-start').style.display = '';
+    $('#wd-sync').style.display = '';
+    saveWorlds(); refreshWorldCount(); toast('已保存');
+  };
+  $('#wd-start').onclick = () => {
+    const item = readWorldForm();
+    if (!item.name) { toast('请填写世界名称'); return; }
+    worlds = Worlds.upsert(worlds, item); saveWorlds();
+    const wd = worlds.find(x => x.id === item.id);
+    startFromWorld(wd);
+  };
+  $('#wd-sync').onclick = async () => {
+    const item = readWorldForm();
+    if (!item.name) { toast('请填写世界名称'); return; }
+    worlds = Worlds.upsert(worlds, item); saveWorlds();
+    const wd = worlds.find(x => x.id === item.id);
+    const ok = await dialog({
+      title: '同步到当前对话？',
+      body: '将用「' + item.name + '」覆盖当前对话的 L1 块并启用 RP 缓存。其他已开对话不会改动。',
+      okText: '同步',
+    });
+    if (!ok) return;
+    syncWorldToCurrent(wd);
+  };
+  $('#wd-delete').onclick = async () => {
+    const wd = worlds.find(x => x.id === editingWorld.id);
+    if (!wd) return;
+    closeWorldEdit();
+    deleteWorld(wd);
   };
 
   // ---------------- 助手库 ----------------
@@ -3027,6 +3204,8 @@
     if (shown('#page-imagegen')) { closeImageGen(); return true; }
     if (shown('#page-usage')) { closeUsage(); return true; }
     if (shown('#page-plugins')) { closePlugins(); return true; }
+    if (shown('#page-world')) { closeWorldEdit(); return true; }
+    if (shown('#page-worlds')) { closeWorlds(); return true; }
     if (shown('#page-persona')) { closePersonaEdit(); return true; }
     if (shown('#page-personas')) { closePersonas(); return true; }
     if (shown('#page-provider')) { closeProviderEdit(); return true; }
