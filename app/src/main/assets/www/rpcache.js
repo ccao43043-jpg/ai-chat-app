@@ -51,6 +51,10 @@
     auto_budget: true,        // V3：按模型上下文窗口 / 价格阶梯自动推导预算（手动修改任一预算数值即关闭）
     auto_summary: true,       // V3：自适应摘要时机（成本回本 + 缓存冷却），关闭则只按固定阈值
     cache_mode: 'auto',       // V3：auto | explicit | implicit —— 支持显式缓存的模型（千问）用哪种缓存
+    // A：层间拉格朗日预算（可回退 greedy = v0.19.0 行为）
+    budget_mode: 'lagrangian', // 'greedy' | 'lagrangian'
+    lagrange_layers: ['memory', 'summary'],
+    min_history_ratio: 0.35,  // history 至少保留的预算占比，防止记忆挤爆近期对话
     // v0.12：世界书 ST 语义（默认保持 v0.9.3 行为：scanDepth=2、无递归、概率 100）
     lore: {
       scanDepth: 2,           // 扫描最近 N 条消息（含本轮用户）；2 ≈ 旧「本轮+上一条回复」
@@ -193,6 +197,15 @@
     const settings = Object.assign({}, DEFAULT_SETTINGS, ss, {
       summary: Object.assign({}, DEFAULT_SETTINGS.summary, ss.summary || {}),
       lore: Object.assign({}, DEFAULT_SETTINGS.lore, ss.lore || {}),
+      lagrange_layers: Array.isArray(ss.lagrange_layers)
+        ? ss.lagrange_layers.slice()
+        : (DEFAULT_SETTINGS.lagrange_layers || ['memory', 'summary']).slice(),
+      budget_mode: ss.budget_mode === 'greedy' || ss.budget_mode === 'lagrangian'
+        ? ss.budget_mode
+        : DEFAULT_SETTINGS.budget_mode,
+      min_history_ratio: ss.min_history_ratio != null && isFinite(+ss.min_history_ratio)
+        ? Math.max(0, Math.min(1, +ss.min_history_ratio))
+        : DEFAULT_SETTINGS.min_history_ratio,
     });
     // 旧版（v0.4 及以前）保存的设置没有 auto_budget：数值仍是默认值 → 自动；用户改过 → 保持手动
     if (ss.max_context != null && ss.auto_budget == null) settings.auto_budget = budgetIsDefault(settings);
@@ -950,7 +963,8 @@
     const cold = !!(env && env.cold);
     // 合并章节：章节合计超上限；V3：缓存已冷（反正要重建）时提前到 60% 上限就合并
     p.needConsolidate = !!p.summaryReason && st.chapters.length > 1 && (chapterTokens >= cap || (cold && s.auto_summary !== false && chapterTokens >= cap * 0.6));
-    return p;
+    // A：默认 lagrangian；greedy 时 applyLagrangeBudget 直接原样返回（与 v0.19.0 逐字段一致）
+    return applyLagrangeBudget(p, baseSystem);
   }
   /** V3：自动预算覆盖会话设置（auto_budget 开启且 env.budget 存在时） */
   function effectiveSettings(s, env) {
@@ -1037,7 +1051,318 @@
     const n = env.hitRate != null ? (env.hitSamples | 0) : 0;
     return hitPosterior(Array.from({ length: n }, () => ({ hit: env.hitRate, prompt: 1 })));
   }
-  /** 计算超预算时的裁剪起点（不修改状态） */
+  // ---------------- A：层间拉格朗日 + 价值密度 ----------------
+  const TAU_LAYER = { static: Infinity, memory: 40, summary: 60, history: 25, state: 5 };
+  const OPEN_THREAD_RE = /[？?]|(还没|尚未|未确认|未解决|未揭|承诺|TODO|待办|悬着)/i;
+  const RESOLVED_RE = /(已经|已确认|解决了|知道了|揭开了|完成了|结束了)/;
+  const PIN_RE = /(^|\n)\s*(📌|★|☆|\[PIN\]|置顶)/i;
+  const TYPE_HIGH_RE = /(设定|关系|世界观|身份|SECRET|RELATIONSHIPS|CHARACTER_KNOWLEDGE|PLAYER_KNOWLEDGE|WORLD)/i;
+  const TYPE_MID_RE = /(事件|事实|FACTS|OBJECTS|LOCATION|发生)/i;
+  const TYPE_LOW_RE = /(过场|描写|闲聊|天气闲谈)/i;
+
+  /** 从近几轮对话抽取粗实体（CJK 词 / 较长拉丁词），无模型 */
+  function extractEntities(texts) {
+    const set = new Set();
+    (texts || []).forEach(raw => {
+      const t = String(raw || '');
+      for (let i = 0; i < t.length; i++) {
+        const c0 = t.charCodeAt(i);
+        if (c0 < 0x4e00 || c0 > 0x9fff) continue;
+        for (let len = 2; len <= 4 && i + len <= t.length; len++) {
+          let ok = true;
+          for (let k = 1; k < len; k++) {
+            const c = t.charCodeAt(i + k);
+            if (c < 0x4e00 || c > 0x9fff) { ok = false; break; }
+          }
+          if (ok) set.add(t.slice(i, i + len));
+        }
+      }
+      t.replace(/[A-Za-z][A-Za-z0-9_-]{2,}/g, m => { set.add(m.toLowerCase()); return m; });
+    });
+    return set;
+  }
+  function recentEntitySet(hist, input, nTurns) {
+    nTurns = nTurns == null ? 3 : nTurns;
+    const msgs = (hist || []).concat(input ? [input] : []);
+    const users = [];
+    msgs.forEach((m, i) => { if (m && m.role === 'user') users.push(i); });
+    const startUser = Math.max(0, users.length - nTurns);
+    const from = users.length ? users[startUser] : Math.max(0, msgs.length - nTurns * 2);
+    return extractEntities(msgs.slice(from).map(m => m && m.content));
+  }
+  function isPinnedItem(x) {
+    if (x && (x.pinned || x.isPinned)) return 1;
+    return PIN_RE.test(String(x && x.text || '')) ? 1 : 0;
+  }
+  function entityHitScore(text, entities) {
+    if (!entities || !entities.size) return 0;
+    const s = String(text || '');
+    let hits = 0;
+    entities.forEach(e => { if (e && s.indexOf(e) >= 0) hits++; });
+    // 拉丁实体大小写不敏感
+    if (!hits) {
+      const low = s.toLowerCase();
+      entities.forEach(e => { if (e && e.length >= 3 && low.indexOf(e) >= 0) hits++; });
+    }
+    return hits > 0 ? 1 : 0;
+  }
+  function openThreadScore(text) { return OPEN_THREAD_RE.test(String(text || '')) ? 1 : 0; }
+  function typeWeightScore(text) {
+    const s = String(text || '');
+    if (TYPE_HIGH_RE.test(s)) return 1;
+    if (TYPE_LOW_RE.test(s)) return 0.25;
+    if (TYPE_MID_RE.test(s)) return 0.6;
+    return 0.5; // 保守默认
+  }
+  function resolveRatioScore(text, recentTexts) {
+    if (!openThreadScore(text)) return 0;
+    const blob = (recentTexts || []).join('\n');
+    if (!blob) return 0;
+    // 粗启发式：近期出现「已解决」类用语且与条目共享实体 → 视为部分已解决
+    if (!RESOLVED_RE.test(blob)) return 0;
+    const ents = extractEntities([text]);
+    let shared = 0;
+    ents.forEach(e => { if (e.length >= 2 && blob.indexOf(e) >= 0) shared++; });
+    if (!shared) return 0.25;
+    return Math.min(1, 0.35 + shared * 0.2);
+  }
+  /**
+   * salience(x, turn) = 1 + 1.5·pin + 1.2·entityHit + 1·openThread + 0.8·typeWeight − 1·resolveRatio
+   * 缺字段时给保守默认；不调用模型。
+   */
+  function itemSalience(x, ctx) {
+    ctx = ctx || {};
+    const text = x && x.text != null ? x.text : String(x || '');
+    const pin = isPinnedItem(x);
+    const ent = entityHitScore(text, ctx.entities);
+    const open = openThreadScore(text);
+    const tw = typeWeightScore(text);
+    const rr = resolveRatioScore(text, ctx.recentTexts);
+    return 1 + 1.5 * pin + 1.2 * ent + 1.0 * open + 0.8 * tw - 1.0 * rr;
+  }
+  function itemDecay(layer, deltaTurns) {
+    const tau = TAU_LAYER[layer];
+    if (tau == null) return 1;
+    if (!isFinite(tau)) return 1;
+    const d = Math.max(0, Number(deltaTurns) || 0);
+    return Math.exp(-d / tau);
+  }
+  function itemValue(x, ctx) {
+    const sal = itemSalience(x, ctx);
+    const dec = itemDecay(x.layer || 'memory', x.deltaTurns);
+    return sal * dec;
+  }
+
+  /** 把长期记忆正文拆成可挑选条目（列表项 / 段落）；单块则整段一条 */
+  function splitMemoryItems(content) {
+    const c = String(content || '');
+    if (!c) return [];
+    if (/\n(?=[-*•·]\s|\d+[.)、]\s)/.test(c)) {
+      return c.split(/\n(?=[-*•·]\s|\d+[.)、]\s)/).map((text, i) => ({
+        id: 'memory:' + i, layer: 'memory', text, join: '\n', index: i, pinned: PIN_RE.test(text),
+      }));
+    }
+    if (/\n\n+/.test(c)) {
+      return c.split(/\n\n+/).map((text, i) => ({
+        id: 'memory:' + i, layer: 'memory', text, join: '\n\n', index: i, pinned: PIN_RE.test(text),
+      }));
+    }
+    return [{ id: 'memory:0', layer: 'memory', text: c, join: '\n', index: 0, pinned: PIN_RE.test(c) }];
+  }
+  function joinMemoryItems(items) {
+    if (!items || !items.length) return '';
+    const join = items[0].join || '\n';
+    return items.map(x => x.text).join(join);
+  }
+  /** 章节各成一条；按原序 */
+  function splitSummaryItems(st, rounds) {
+    return chaptersOf(st).filter(c => c && c.content).map((c, i) => ({
+      id: 'summary:' + (c.no | 0), layer: 'summary', text: c.content, chapter: c, index: i,
+      pinned: !!(c.pinned || c.isPinned),
+      deltaTurns: Math.max(0, (rounds | 0) - (c.atRound | 0)),
+    }));
+  }
+
+  /** 收集 lagrange_layers 上的可选条目，并算 v/t */
+  function collectLagrangeCandidates(st, p, layers) {
+    layers = layers || ['memory', 'summary'];
+    const hist = p.hist || [];
+    const entities = recentEntitySet(hist, p.input, 3);
+    const recentTexts = hist.slice(-6).concat(p.input ? [p.input] : []).map(m => m && m.content);
+    const ctx = { entities, recentTexts, turn: p.rounds | 0 };
+    const k = p.calib || 1;
+    const out = [];
+    if (layers.indexOf('memory') >= 0) {
+      const raw = getBlock(st, 'memory').content || '';
+      splitMemoryItems(raw).forEach(it => {
+        it.deltaTurns = it.deltaTurns != null ? it.deltaTurns : 0;
+        const bodyTok = estimateTokens(it.text);
+        // 均摊标签开销，避免拆条后总和偏离 memoryText
+        it.t = Math.max(1, Math.round(bodyTok * k));
+        it.v = itemValue(it, ctx);
+        it.density = it.v / it.t;
+        it._ctx = ctx;
+        out.push(it);
+      });
+    }
+    if (layers.indexOf('summary') >= 0) {
+      splitSummaryItems(st, p.rounds).forEach(it => {
+        // 含章节标签的开销
+        const tagged = chapterText(it.chapter);
+        it.t = Math.max(1, Math.round(estimateTokens(tagged) * k));
+        it.v = itemValue(it, ctx);
+        it.density = it.v / it.t;
+        out.push(it);
+      });
+    }
+    return out;
+  }
+
+  /**
+   * 外层：二分 μ（约 24 次），按 v/t ≥ μ 贪心挑选可选层；
+   * 约束 history 预算 ∈ [t_min_history, t_all_history]（正确方向：抢太多 → 抬 μ）。
+   */
+  function selectLagrangeOptional(candidates, opts) {
+    opts = opts || {};
+    const B = opts.B, fixedCore = opts.fixedCore | 0, tAllHist = opts.tAllHist | 0;
+    const tMinHist = opts.tMinHist | 0;
+    const list = (candidates || []).slice();
+    if (!list.length) return { mu: 0, picked: [], dropped: [], iterations: 0 };
+    let maxD = 0;
+    list.forEach(c => { if (c.density > maxD) maxD = c.density; });
+    let lo = 0, hi = maxD > 0 ? maxD : 0;
+    let best = null;
+    const pickAt = mu => {
+      const picked = [], dropped = [];
+      let sumT = 0, sumV = 0;
+      list.forEach(c => {
+        if (c.density >= mu) { picked.push(c); sumT += c.t; sumV += c.v; }
+        else dropped.push(c);
+      });
+      const Bhist = B - fixedCore - sumT;
+      return { mu, picked, dropped, sumT, sumV, Bhist };
+    };
+    let iterations = 0;
+    let bestFeasible = null; // Bhist >= tMinHist 的解里取 μ 更低（价值更大）的
+    for (let i = 0; i < 24; i++) {
+      iterations = i + 1;
+      const mu = (lo + hi) / 2;
+      const cur = pickAt(mu);
+      best = cur;
+      if (cur.Bhist >= tMinHist) {
+        if (!bestFeasible || cur.mu < bestFeasible.mu - 1e-15 || (Math.abs(cur.mu - bestFeasible.mu) <= 1e-15 && cur.sumV > bestFeasible.sumV))
+          bestFeasible = cur;
+        if (cur.Bhist > tAllHist) hi = mu;        // 还能再塞可选 → 降价
+        else break;                               // 落在 [tMinHist, tAllHist]
+      } else {
+        lo = mu;                                  // 可选层抢太多 → 抬价
+      }
+      if (hi - lo < 1e-15) break;
+    }
+    // 离散密度可能导致永远进不了「甜区」：优先可行解，否则取最高价（条目最少）
+    let result = bestFeasible || pickAt(hi) || best || pickAt(0);
+    // 钉住条目：密度再低也优先占坑（从最低密度非 pin 里挤）
+    const pinned = list.filter(c => isPinnedItem(c));
+    pinned.forEach(pin => {
+      if (result.picked.some(x => x.id === pin.id)) return;
+      const room = result.Bhist - tMinHist;
+      if (pin.t <= Math.max(0, room)) {
+        result.picked.push(pin);
+        result.dropped = result.dropped.filter(x => x.id !== pin.id);
+        result.sumT += pin.t; result.Bhist -= pin.t;
+        return;
+      }
+      // 挤掉密度最低的非 pin
+      const victims = result.picked.filter(x => !isPinnedItem(x)).sort((a, b) => a.density - b.density);
+      let freed = 0, dropIds = [];
+      for (const v of victims) {
+        if (freed >= pin.t) break;
+        freed += v.t; dropIds.push(v.id);
+      }
+      if (freed >= pin.t) {
+        result.picked = result.picked.filter(x => dropIds.indexOf(x.id) < 0).concat([pin]);
+        dropIds.forEach(id => {
+          const v = list.find(x => x.id === id);
+          if (v) result.dropped.push(v);
+        });
+        result.dropped = result.dropped.filter(x => x.id !== pin.id);
+        result.sumT = result.picked.reduce((n, x) => n + x.t, 0);
+        result.Bhist = B - fixedCore - result.sumT;
+      }
+    });
+    // 保持层内原序
+    result.picked.sort((a, b) => (a.layer === b.layer ? a.index - b.index : String(a.layer).localeCompare(b.layer)));
+    result.dropped.sort((a, b) => (a.layer === b.layer ? a.index - b.index : String(a.layer).localeCompare(b.layer)));
+    result.iterations = iterations;
+    return result;
+  }
+
+  /**
+   * 在 plan 结果上应用拉格朗日挑选：只改 system / tokens / overBudget 等规划字段，不改 st 持久内容。
+   * 全选时不重写文本，保证与 greedy 逐字节一致。
+   */
+  function applyLagrangeBudget(p, baseSystem) {
+    const st = p.st, s = p.settings || st.settings || DEFAULT_SETTINGS;
+    if ((s.budget_mode || 'lagrangian') === 'greedy') return p;
+    const layers = Array.isArray(s.lagrange_layers) && s.lagrange_layers.length
+      ? s.lagrange_layers.slice() : ['memory', 'summary'];
+    const k = p.calib || 1;
+    const B = p.limit;
+    const ratio = s.min_history_ratio != null ? Number(s.min_history_ratio) : 0.35;
+    const tAllHist = p.tokens.history | 0;
+    const fixedCore = (p.tokens.static | 0) + (p.tokens.delta | 0) + (p.tokens.state | 0) + (p.tokens.input | 0);
+    const tMinHist = Math.max(0, Math.floor(B * (isFinite(ratio) ? ratio : 0.35)));
+    const candidates = collectLagrangeCandidates(st, p, layers);
+    // 无候选或完全装得下：保持原文（含标签），不做改写
+    const optionalTok = (layers.indexOf('memory') >= 0 ? (p.tokens.memory | 0) : 0)
+      + (layers.indexOf('summary') >= 0 ? (p.tokens.summary | 0) : 0);
+    const fitsAll = fixedCore + optionalTok + tAllHist <= B;
+    if (!candidates.length || (fitsAll && fixedCore + optionalTok + tMinHist <= B)) {
+      p.lagrange = { skipped: true, reason: fitsAll ? 'fits' : 'empty', layers, tMinHist, B };
+      return p;
+    }
+    const sel = selectLagrangeOptional(candidates, { B, fixedCore, tAllHist, tMinHist });
+    const allIds = new Set(candidates.map(c => c.id));
+    const pickIds = new Set(sel.picked.map(c => c.id));
+    const fullSelect = candidates.every(c => pickIds.has(c.id));
+    let memText = memoryText(st);
+    let sumText = summaryText(st);
+    let memTok = p.tokens.memory, sumTok = p.tokens.summary;
+    if (!fullSelect) {
+      if (layers.indexOf('memory') >= 0) {
+        const memItems = candidates.filter(c => c.layer === 'memory' && pickIds.has(c.id));
+        const body = joinMemoryItems(memItems);
+        memText = body ? '[LONG_TERM_MEMORY]\n' + body : '';
+        memTok = Math.round(estimateTokens(memText) * k);
+      }
+      if (layers.indexOf('summary') >= 0) {
+        const sumItems = candidates.filter(c => c.layer === 'summary' && pickIds.has(c.id))
+          .sort((a, b) => a.index - b.index);
+        sumText = sumItems.map(c => chapterText(c.chapter)).join('\n\n');
+        sumTok = Math.round(estimateTokens(sumText) * k);
+      }
+    }
+    const staticT = staticText(st, baseSystem);
+    const system = [staticT, sumText, memText].filter(Boolean).join('\n\n');
+    const stablePrefix = [staticT, sumText].filter(Boolean).join('\n\n');
+    const tokens = Object.assign({}, p.tokens, {
+      memory: memTok, summary: sumTok,
+    });
+    tokens.total = LAYERS.reduce((n, x) => n + (tokens[x] | 0), 0);
+    // 内层 history 仍交现有 computeTrimWindow / temporaryTrimPlan（连续性前缀）；此处只改可选层
+    return Object.assign({}, p, {
+      system, stablePrefix, tokens,
+      overBudget: tokens.total > B,
+      lagrange: {
+        mu: sel.mu, iterations: sel.iterations, layers, tMinHist, B, fixedCore, tAllHist,
+        picked: sel.picked.map(c => ({ id: c.id, layer: c.layer, t: c.t, v: +c.v.toFixed(4), density: +c.density.toFixed(6) })),
+        dropped: sel.dropped.map(c => ({ id: c.id, layer: c.layer, t: c.t, v: +c.v.toFixed(4), density: +c.density.toFixed(6) })),
+        fullSelect,
+      },
+    });
+  }
+
+    /** 计算超预算时的裁剪起点（不修改状态） */
   function computeTrimWindow(st, p) {
     const keep = Math.max(1, (st.settings.summary && st.settings.summary.keep_recent_turns) | 0 || 1);
     const k = p.calib || 1;
@@ -1632,6 +1957,7 @@
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, systemStablePrefix, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
+    TAU_LAYER, extractEntities, recentEntitySet, itemSalience, itemDecay, itemValue, splitMemoryItems, joinMemoryItems, splitSummaryItems, collectLagrangeCandidates, selectLagrangeOptional, applyLagrangeBudget,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
     LORE_REASON, parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };
