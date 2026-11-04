@@ -120,12 +120,15 @@
     '在场': 'presence', '缺席': 'presence',
     '已婚': 'marital', '未婚': 'marital',
     '解锁': 'lock', '上锁': 'lock',
+    '住在': 'location', '居住在': 'location', '位于': 'location', '搬到': 'location', '移居': 'location',
   };
   const POLARITY = {
     '喜欢': 1, '爱': 1, '朋友': 1, '信任': 1, '结盟': 1, '合作': 1, '忠诚': 1,
     '存活': 1, '活着': 1, '同意': 1, '在场': 1, '已婚': 1, '解锁': 1,
     '讨厌': -1, '恨': -1, '敌人': -1, '不信任': -1, '决裂': -1, '敌对': -1, '背叛': -1,
     '死亡': -1, '死了': -1, '反对': -1, '缺席': -1, '未婚': -1, '上锁': -1,
+    // location 无极性：同 attribute 不同 value 视为更新而非极性冲突
+    '住在': 0, '居住在': 0, '位于': 0, '搬到': 0, '移居': 0,
   };
   /** 抽取关系三元组：subject + predicate + object + polarity/family */
   function extractRelationTriple(text) {
@@ -188,10 +191,15 @@
    * 合并：冲突检测优先于相似度合并。
    * 冲突 → 旧条目标记 superseded（失效），新条作为新版本写入；不合并文本。
    * 同向相似 → 合并关键词/取更长文本。
+   * opts（可选）：{ turn, sourceMsgId, ledger } —— 写入生效区间 / 出处，并同步事实账本。
    */
-  function mergeEntries(list, incoming, at, src) {
+  function mergeEntries(list, incoming, at, src, opts) {
+    opts = opts || {};
+    const turn = opts.turn != null ? opts.turn | 0 : null;
+    const sourceMsgId = opts.sourceMsgId != null ? opts.sourceMsgId : null;
     const out = (list || []).map(e => Object.assign({}, e)); let added = 0, merged = 0, superseded = 0, conflicts = 0;
     let seq = out.reduce((m, e) => Math.max(m, e.seq || 0), 0);
+    let ledger = Array.isArray(opts.ledger) ? opts.ledger.slice() : null;
     (incoming || []).forEach(n => {
       const nn = norm(n.text);
       // 先找冲突（同类型）
@@ -202,8 +210,14 @@
         conflictHit.supersededBy = id;
         conflictHit.supersededAt = at;
         conflictHit.disabled = true; // 失效标记：召回时跳过
-        out.push({ id, seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: (conflictHit.version | 0) + 1, supersedes: conflictHit.id });
+        if (turn != null && conflictHit.validToTurn == null) conflictHit.validToTurn = turn;
+        const neu = { id, seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: (conflictHit.version | 0) + 1, supersedes: conflictHit.id };
+        if (turn != null) { neu.validFromTurn = turn; neu.validToTurn = null; }
+        if (sourceMsgId != null) neu.sourceMsgId = sourceMsgId;
+        if (n.confidence != null) neu.confidence = clamp01(n.confidence); else neu.confidence = 0.7;
+        out.push(neu);
         added++; conflicts++; superseded++;
+        if (ledger) ledger = upsertFact(ledger, factFromText(n.text, { id, turn, sourceMsgId, confidence: neu.confidence, quote: n.text }), turn).ledger;
         return;
       }
       const hit = out.find(e => !e.supersededBy && e.type === n.type && (norm(e.text) === nn || norm(e.text).includes(nn) || nn.includes(norm(e.text)) || similarity(e.text, n.text) >= 0.8));
@@ -211,12 +225,264 @@
         if (n.text.length > hit.text.length && !hit.edited) hit.text = n.text;
         hit.keywords = mergeKeywords(hit.keywords, n.keywords);
         hit.updatedAt = at; merged++;
+        if (n.confidence != null || hit.confidence != null) hit.confidence = mergeConfidence(hit.confidence, n.confidence != null ? n.confidence : 0.7);
+        if (sourceMsgId != null && !hit.sourceMsgId) hit.sourceMsgId = sourceMsgId;
+        if (ledger) ledger = upsertFact(ledger, factFromText(n.text, { id: hit.id, turn: turn != null ? turn : hit.validFromTurn, sourceMsgId: hit.sourceMsgId, confidence: hit.confidence, quote: hit.text }), turn).ledger;
       } else {
-        seq++; out.push({ id: 'm' + seq + '_' + (at % 100000), seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: 1 });
-        added++;
+        seq++;
+        const neu = { id: 'm' + seq + '_' + (at % 100000), seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: 1 };
+        if (turn != null) { neu.validFromTurn = turn; neu.validToTurn = null; }
+        if (sourceMsgId != null) neu.sourceMsgId = sourceMsgId;
+        neu.confidence = n.confidence != null ? clamp01(n.confidence) : 0.7;
+        out.push(neu); added++;
+        if (ledger) ledger = upsertFact(ledger, factFromText(n.text, { id: neu.id, turn, sourceMsgId, confidence: neu.confidence, quote: n.text }), turn).ledger;
       }
     });
-    return { list: out, added, merged, conflicts, superseded };
+    const ret = { list: out, added, merged, conflicts, superseded };
+    if (ledger) ret.ledger = ledger;
+    return ret;
+  }
+
+  // ---------------- §6 事实账本（ledger）：生效区间 + 摘要一致性 ----------------
+  const clamp01 = x => Math.max(0, Math.min(1, Number(x) || 0));
+  function mergeConfidence(a, b) {
+    const x = a != null ? clamp01(a) : 0.5, y = b != null ? clamp01(b) : 0.5;
+    // 证据合并：1 - (1-a)(1-b)，略抬升但不超过 1
+    return clamp01(1 - (1 - x) * (1 - y));
+  }
+  /** 三元组 → 账本键：subject + attribute(=family) + value(=object+polarity/predicate) */
+  function tripleToFactParts(t) {
+    if (!t) return null;
+    const attribute = t.family || t.predicate || 'misc';
+    const value = {
+      object: t.object == null ? '_' : t.object,
+      polarity: t.polarity || 0,
+      predicate: t.predicate || '',
+      raw: t.raw || '',
+    };
+    return { subject: t.subject, attribute, value };
+  }
+  function valuesEquivalent(a, b) {
+    if (a == null || b == null) return false;
+    if (typeof a === 'string' || typeof b === 'string') {
+      const sa = typeof a === 'string' ? a : (a.raw || a.predicate || a.object || '');
+      const sb = typeof b === 'string' ? b : (b.raw || b.predicate || b.object || '');
+      const na = norm(sa), nb = norm(sb);
+      if (!na || !nb) return false;
+      return na === nb || na.includes(nb) || nb.includes(na) || similarity(sa, sb) >= 0.8;
+    }
+    // 同极性 + 同 object → 等价（同义/包含）
+    if ((a.polarity || 0) && (b.polarity || 0) && a.polarity === b.polarity && sameEntity(String(a.object || ''), String(b.object || ''))) return true;
+    if (!(a.polarity || 0) && !(b.polarity || 0) && sameEntity(String(a.object || ''), String(b.object || ''))) return true;
+    if (a.predicate && b.predicate && a.predicate === b.predicate && sameEntity(String(a.object || ''), String(b.object || ''))) return true;
+    const ra = norm(a.raw || a.predicate || ''), rb = norm(b.raw || b.predicate || '');
+    if (ra && rb && (ra === rb || ra.includes(rb) || rb.includes(ra) || similarity(a.raw || '', b.raw || '') >= 0.8)) return true;
+    return false;
+  }
+  function valuesConflict(a, b) {
+    if (!a || !b) return false;
+    if (typeof a === 'object' && typeof b === 'object') {
+      if ((a.polarity || 0) && (b.polarity || 0) && a.polarity !== b.polarity && sameEntity(String(a.object || ''), String(b.object || ''))) return true;
+      // 无极性但 object 不同 → 更新而非「极性冲突」；由调用方当 update
+      return false;
+    }
+    return false;
+  }
+  function valuesDiffer(a, b) {
+    if (valuesEquivalent(a, b)) return false;
+    if (valuesConflict(a, b)) return true;
+    if (typeof a === 'object' && typeof b === 'object') {
+      if (!sameEntity(String(a.object || ''), String(b.object || ''))) return true;
+      if ((a.polarity || 0) !== (b.polarity || 0)) return true;
+      if (a.predicate && b.predicate && a.predicate !== b.predicate && !(a.polarity || 0)) return true;
+    }
+    return !valuesEquivalent(a, b);
+  }
+  function factFromText(text, meta) {
+    meta = meta || {};
+    const t = extractRelationTriple(text);
+    const parts = tripleToFactParts(t);
+    const turn = meta.turn != null ? meta.turn | 0 : 0;
+    const id = meta.id || ('f' + turn + '_' + Math.abs(hashStr(String(text || '')) % 100000));
+    if (!parts) {
+      // 抽不出三元组：用整句作 value，attribute=note，仍可入库供回滚
+      return {
+        id, subject: norm(String(text || '').slice(0, 8)) || '_', attribute: 'note',
+        value: { object: norm(text), polarity: 0, predicate: '', raw: String(text || '') },
+        validFromTurn: turn, validToTurn: null,
+        sourceMsgId: meta.sourceMsgId != null ? meta.sourceMsgId : null,
+        confidence: clamp01(meta.confidence != null ? meta.confidence : 0.5),
+        supersededBy: null, quote: meta.quote != null ? meta.quote : String(text || '').slice(0, 120),
+      };
+    }
+    return {
+      id, subject: parts.subject, attribute: parts.attribute, value: parts.value,
+      validFromTurn: turn, validToTurn: null,
+      sourceMsgId: meta.sourceMsgId != null ? meta.sourceMsgId : null,
+      confidence: clamp01(meta.confidence != null ? meta.confidence : 0.7),
+      supersededBy: null, quote: meta.quote != null ? meta.quote : String(text || '').slice(0, 120),
+    };
+  }
+  function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
+  function sameFactKey(a, b) {
+    return a && b && sameEntity(String(a.subject || ''), String(b.subject || '')) && String(a.attribute || '') === String(b.attribute || '');
+  }
+  function currentFacts(ledger, atTurn) {
+    const list = ledger || [];
+    return list.filter(f => {
+      if (f.supersededBy) return false;
+      if (f.validToTurn != null && f.validToTurn !== undefined) {
+        if (atTurn == null) return false; // 只要有关闭区间，当前视图不算有效
+        return (f.validFromTurn | 0) <= atTurn && atTurn < (f.validToTurn | 0);
+      }
+      if (atTurn != null && (f.validFromTurn | 0) > atTurn) return false;
+      return true;
+    });
+  }
+  /**
+   * 追加/更新事实。规则：
+   * - 同 (subject,attribute) 且 validToTurn==null 的旧事实：
+   *   等价 → 合并 confidence，不动区间
+   *   极性冲突或不同值 → 关闭旧事实，写入新事实
+   */
+  function upsertFact(ledger, fact, turn) {
+    const out = (ledger || []).map(f => Object.assign({}, f, f.value && typeof f.value === 'object' ? { value: Object.assign({}, f.value) } : {}));
+    const neu = Object.assign({}, fact);
+    if (neu.value && typeof neu.value === 'object') neu.value = Object.assign({}, neu.value);
+    const t = turn != null ? turn | 0 : (neu.validFromTurn != null ? neu.validFromTurn | 0 : 0);
+    neu.validFromTurn = t;
+    if (neu.validToTurn === undefined) neu.validToTurn = null;
+    if (neu.supersededBy === undefined) neu.supersededBy = null;
+    if (neu.confidence == null) neu.confidence = 0.7;
+    neu.confidence = clamp01(neu.confidence);
+    if (!neu.id) neu.id = 'f' + t + '_' + Math.abs(hashStr(neu.subject + '|' + neu.attribute + '|' + JSON.stringify(neu.value)) % 100000);
+
+    const open = out.find(f => sameFactKey(f, neu) && f.validToTurn == null && !f.supersededBy);
+    if (!open) {
+      out.push(neu);
+      return { ledger: out, action: 'add', fact: neu, closed: null };
+    }
+    if (valuesEquivalent(open.value, neu.value)) {
+      open.confidence = mergeConfidence(open.confidence, neu.confidence);
+      if (neu.quote && (!open.quote || neu.quote.length > open.quote.length)) open.quote = neu.quote;
+      if (neu.sourceMsgId != null && open.sourceMsgId == null) open.sourceMsgId = neu.sourceMsgId;
+      return { ledger: out, action: 'merge', fact: open, closed: null };
+    }
+    // 冲突或更新：关闭旧事实
+    open.validToTurn = t;
+    open.supersededBy = neu.id;
+    out.push(neu);
+    const action = valuesConflict(open.value, neu.value) ? 'conflict' : 'update';
+    return { ledger: out, action, fact: neu, closed: open };
+  }
+  /** 按 subject 聚合当前有效事实；超预算按 confidence × recency 取 */
+  function renderLedger(ledger, opts) {
+    opts = opts || {};
+    const atTurn = opts.atTurn != null ? opts.atTurn | 0 : null;
+    const nowTurn = opts.nowTurn != null ? opts.nowTurn | 0 : (atTurn != null ? atTurn : 0);
+    const budget = opts.budget != null ? opts.budget | 0 : (opts.maxFacts != null ? opts.maxFacts | 0 : 12);
+    const tau = opts.tau != null ? +opts.tau : 20;
+    let facts = currentFacts(ledger, atTurn == null ? undefined : atTurn);
+    // 打分：confidence × recency
+    facts = facts.map(f => {
+      const age = Math.max(0, nowTurn - (f.validFromTurn | 0));
+      const recency = Math.exp(-age / Math.max(1, tau));
+      const score = clamp01(f.confidence != null ? f.confidence : 0.5) * recency;
+      return { f, score };
+    }).sort((a, b) => b.score - a.score || (b.f.validFromTurn | 0) - (a.f.validFromTurn | 0));
+    if (budget > 0) facts = facts.slice(0, budget);
+    // 按 subject 聚合输出
+    const bySub = new Map();
+    facts.forEach(({ f, score }) => {
+      const k = f.subject || '_';
+      if (!bySub.has(k)) bySub.set(k, []);
+      bySub.get(k).push({ f, score });
+    });
+    const lines = [];
+    bySub.forEach((arr, sub) => {
+      arr.forEach(({ f }) => {
+        const v = f.value || {};
+        const label = v.raw || ((v.predicate || f.attribute || '') + (v.object && v.object !== '_' ? v.object : ''));
+        lines.push('- [' + sub + '/' + f.attribute + '] ' + (f.quote || label));
+      });
+    });
+    if (!lines.length) return '';
+    return '[MEMORY_LEDGER]\n' + lines.join('\n');
+  }
+  /** 回滚：只保留 sourceMsgId 在 keepIds 内的事实（无 sourceMsgId 的条目默认保留，兼容旧数据）。
+   * 若关闭它的 superseder 已被剪掉，则重新打开（清 validToTurn / supersededBy），避免残留「被未来事实关掉」的状态。 */
+  function pruneBySourceIds(ledger, keepIds) {
+    const keep = keepIds instanceof Set ? keepIds : new Set(keepIds || []);
+    const out = (ledger || [])
+      .filter(f => f.sourceMsgId == null || f.sourceMsgId === '' || keep.has(f.sourceMsgId))
+      .map(f => Object.assign({}, f, f.value && typeof f.value === 'object' ? { value: Object.assign({}, f.value) } : {}));
+    const ids = new Set(out.map(f => f.id));
+    out.forEach(f => {
+      if (f.supersededBy && !ids.has(f.supersededBy)) {
+        f.supersededBy = null;
+        f.validToTurn = null;
+      }
+    });
+    return out;
+  }
+  /** 从摘要文本抽断言句（分区行 / 列表项） */
+  function assertionLines(summaryText) {
+    const t = String(summaryText || '');
+    const lines = t.split(/\n/).map(l => l.replace(/^\s*[-*•#]+\s*/, '').trim()).filter(Boolean);
+    // 去掉纯分区标题
+    const heads = /^(FACTS|CHARACTER_KNOWLEDGE|PLAYER_KNOWLEDGE|SECRET|UNRESOLVED|RELATIONSHIPS|OBJECTS|LOCATION)\b/i;
+    return lines.filter(l => !heads.test(l) && !/^(无|none|n\/?a)$/i.test(l));
+  }
+  /**
+   * 摘要 vs 账本一致性：
+   * conflict = 同 (s,attr) 当前值与摘要断言冲突
+   * unsupported = 摘要有断言但账本找不到 s 或 attr（计数，不算硬错）
+   * summaryQuality = baseScore − 0.10·conflict − 0.03·unsupported
+   */
+  function checkSummaryAgainstLedger(summaryText, ledger, baseScore) {
+    const base = baseScore != null ? +baseScore : 1;
+    const cur = currentFacts(ledger);
+    const byKey = new Map();
+    cur.forEach(f => {
+      const k = String(f.subject || '') + '|' + String(f.attribute || '');
+      byKey.set(k, f);
+      // 也按 subject 索引，便于 unsupported 判定
+    });
+    const subjects = new Set(cur.map(f => f.subject));
+    const attrsBySub = new Map();
+    cur.forEach(f => {
+      if (!attrsBySub.has(f.subject)) attrsBySub.set(f.subject, new Set());
+      attrsBySub.get(f.subject).add(f.attribute);
+    });
+    let conflictCount = 0, unsupportedCount = 0;
+    const conflicts = [], unsupported = [];
+    assertionLines(summaryText).forEach(line => {
+      const t = extractRelationTriple(line);
+      if (!t) { unsupportedCount++; unsupported.push({ line, reason: 'no_triple' }); return; }
+      const parts = tripleToFactParts(t);
+      const subHit = [...subjects].some(s => sameEntity(s, parts.subject));
+      if (!subHit) { unsupportedCount++; unsupported.push({ line, reason: 'unknown_subject', subject: parts.subject }); return; }
+      const sub = [...subjects].find(s => sameEntity(s, parts.subject));
+      const attrs = attrsBySub.get(sub) || new Set();
+      if (![...attrs].includes(parts.attribute)) { unsupportedCount++; unsupported.push({ line, reason: 'unknown_attr', subject: parts.subject, attribute: parts.attribute }); return; }
+      const open = cur.find(f => sameEntity(f.subject, parts.subject) && f.attribute === parts.attribute);
+      if (!open) { unsupportedCount++; unsupported.push({ line, reason: 'no_open' }); return; }
+      if (valuesConflict(open.value, parts.value) || (valuesDiffer(open.value, parts.value) && !valuesEquivalent(open.value, parts.value))) {
+        // 极性冲突，或断言值与当前值明显不同
+        if (valuesConflict(open.value, parts.value) || !valuesEquivalent(open.value, parts.value)) {
+          conflictCount++;
+          conflicts.push({ line, subject: parts.subject, attribute: parts.attribute, ledger: open, asserted: parts.value });
+        }
+      }
+    });
+    const summaryQuality = Math.max(0, Math.round((base - 0.10 * conflictCount - 0.03 * unsupportedCount) * 100) / 100);
+    return { conflictCount, unsupportedCount, conflicts, unsupported, baseScore: base, summaryQuality };
+  }
+  function buildLedgerConflictHint(check) {
+    if (!check || !check.conflicts || !check.conflicts.length) return '';
+    return '账本冲突（请修正后再提交）：\n' + check.conflicts.slice(0, 8).map(c =>
+      '- ' + c.subject + '/' + c.attribute + '：摘要「' + c.line + '」与账本「' + ((c.ledger && (c.ledger.quote || (c.ledger.value && c.ledger.value.raw))) || '') + '」冲突'
+    ).join('\n');
   }
 
   // ---------------- §3 BM25F + 时间衰减 + MMR + mem_tokens ----------------
@@ -339,7 +605,7 @@
   const shouldExtract = (turns, lastTurn, interval) => turns - (lastTurn | 0) >= interval;
   function toMemoryText(entries) { return entries.map(e => '- [' + (TYPE_CN[e.type] || e.type) + '] ' + e.text).join('\n'); }
 
-  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, KW_MAX, autoKeywords, mergeKeywords, kwPriority, buildExtractPrompt, parseExtraction, similarity, detectConflict, extractRelationTriple, CONFLICT_PAIRS, REL_FAMILY, mergeEntries, selectRelevant, terms, buildIndex, buildQuery, bm25f, BM25, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
+  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, KW_MAX, autoKeywords, mergeKeywords, kwPriority, buildExtractPrompt, parseExtraction, similarity, detectConflict, extractRelationTriple, CONFLICT_PAIRS, REL_FAMILY, POLARITY, mergeEntries, selectRelevant, terms, buildIndex, buildQuery, bm25f, BM25, renderInjection, shouldExtract, toMemoryText, charKey, textOf, clamp01, mergeConfidence, factFromText, tripleToFactParts, valuesEquivalent, valuesConflict, valuesDiffer, upsertFact, currentFacts, renderLedger, pruneBySourceIds, checkSummaryAgainstLedger, buildLedgerConflictHint, assertionLines };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;
@@ -361,8 +627,12 @@
         if (!msgs.length) return { added: 0 };
         const raw = await host.callModel(buildExtractPrompt(msgs, b.entries), { conv, usageType: 'memory', maxTokens: 2048 });
         const items = parseExtraction(raw);
-        const r = mergeEntries(b.entries, items, Date.now(), manual ? 'manual' : 'auto');
-        b.entries = r.list; b.lastError = ''; b.lastAt = Date.now();
+        const turn = userTurns(conv);
+        const lastMsg = msgs[msgs.length - 1];
+        const r = mergeEntries(b.entries, items, Date.now(), manual ? 'manual' : 'auto', {
+          turn, sourceMsgId: lastMsg && lastMsg.id, ledger: b.ledger || [],
+        });
+        b.entries = r.list; if (r.ledger) b.ledger = r.ledger; b.lastError = ''; b.lastAt = Date.now();
         cd.lastTurn = userTurns(conv); host.saveConv(conv);
         saveAll(host, loadAll(host));
         return r;
