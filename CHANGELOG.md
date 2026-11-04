@@ -1,11 +1,13 @@
-**（草稿 / 待发版）affect 插件 v1.3.0 打磨（随下一版应用发布）**
+**v0.20.1：affect 1.3.0 打磨补丁（vecStepKf / 面板 KF·CUSUM / estimator 开关）**
 
 分支：`feat/affect-polish`（基于 v0.20.0 / 5d4caa4）
 
 - **D vec（KF 路径）**：不再对 `vec` 使用纯 `INERTIA`；`vecStepKf` 用滤波 â 合成 valence/arousal 目标，步进增益跟本轮 Kalman `K` 联动；`classify` 滞回不变；`estimator=legacy` 仍固定 INERTIA（兼容单测）
 - **面板**：短 hint 展示 KF（â/P/yT/yM/yL/w）与 CUSUM（档/dwell/S+/S-）；增加「KF / 旧版」选择，写入 `conv.affectEstimator` 并保存
-- **单测**：`tests/affect-kf.test.js` 增补 vec / hint / estimatorOf / 振荡稳定性哨兵；`npm test` 全绿
-- **未做**：人工 MAE 金标（§5.3）、发版 / Release / APK（本条仅草稿）
+- **单测**：`tests/affect-kf.test.js` 增补 vec / hint / estimatorOf / 振荡稳定性哨兵
+- **未做**：**G（op log）**、人工 MAE 金标（§5.3）
+
+测试：`npm test` 386/386 全绿；`npm run eval` gate pass；Android `0.20.1`（versionCode 59）/ 桌面 / npm `0.20.1`
 
 ---
 

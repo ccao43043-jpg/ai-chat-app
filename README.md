@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.20.1：affect 1.3.0 打磨（vecStepKf / 面板 KF·CUSUM / estimator 开关）**
+
+- D：`vecStepKf`（滤波 â→valence/arousal，步进增益跟 Kalman `K`）；面板 KF/CUSUM hint；`conv.affectEstimator`（KF / 旧版）
+- 未做：**G（op log）**、人工 MAE 金标（§5.3）
+- Android `0.20.1`（versionCode 59）/ 桌面 / npm `0.20.1`
+
 **v0.20.0：第四轮剩余合并（A 拉格朗日预算 / D KF affect / E 事实账本 / F 块级渲染差分）**
 
 - A：层间拉格朗日预算分配（`budget_mode=lagrangian`，可回退 greedy）
