@@ -114,7 +114,7 @@ test('A1 证据锚：why 与原话 Jaccard 足够时 +2 有据', () => {
   g = A.guard(-2, '愤怒', '今天天气不错', { why: '你骂我' }); assert.strictEqual(g.a, -1); assert.ok(g.hit.includes('why_weak'));
   g = A.guard(-2, '愤怒', '今天天气不错'); assert.strictEqual(g.a, -2, '无 why 保持旧行为');
   const st = A.step(null, { a: 2, m: '开心', why: '送你一束花' }, '今天我特意送你一束花', T0);
-  assert.strictEqual(st.a, 2); assert.strictEqual(st.why, '送你一束花'); assert.strictEqual(st.p, 'model');
+  assert.strictEqual(st.a, 2); assert.strictEqual(st.why, '送你一束花'); assert.ok(st.p === 'model' || st.p === 'model+kf', st.p);
   assert.ok(A.fixedProtocol().includes('"why"'));
 });
 

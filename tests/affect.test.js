@@ -4,6 +4,7 @@ const assert = require('node:assert');
 globalThis.Plugins = require('../app/src/main/assets/www/plugins.js');
 const A = require('../app/src/main/assets/www/affect.js');
 const T0 = new Date(2026, 10, 3, 10, 0, 0).getTime();
+const LEGACY = { estimator: 'legacy' };
 const H = 3600e3, D = 86400e3;
 
 test('常量钉死', () => {
@@ -40,30 +41,30 @@ test('衰减：好感 3 天半衰回 0.30；心情 1 小时半衰回 (0,0.20)', 
 });
 
 test('饱和 + 不对称 + 日上限（本地自然日）', () => {
-  let s = A.step(null, { a: 1, m: '开心' }, '谢谢你', T0);
+  let s = A.step(null, { a: 1, m: '开心' }, '谢谢你', T0, LEGACY);
   assert.strictEqual(s.aff, 0.34);                               // aff=0.3 时 ×1
-  const hi = A.step({ v: 1, aff: 0.9, vec: { val: 0, aro: 0.2 }, mood: '平静', ts: T0 }, { a: 1, m: '开心' }, '嗯', T0);
+  const hi = A.step({ v: 1, aff: 0.9, vec: { val: 0, aro: 0.2 }, mood: '平静', ts: T0 }, { a: 1, m: '开心' }, '嗯', T0, LEGACY);
   assert.ok(hi.aff - 0.9 < 0.01);                                // 高好感正向变难
-  const neg = A.step(null, { a: -1, m: '不悦' }, '嗯', T0);
+  const neg = A.step(null, { a: -1, m: '不悦' }, '嗯', T0, LEGACY);
   assert.strictEqual(neg.aff, r(0.3 - 0.05 * 1.25));             // 负向 ×1.25
-  s = null; for (let i = 0; i < 10; i++) s = A.step(s, { a: 2, m: '开心' }, '爱你', T0 + i * 1000);
+  s = null; for (let i = 0; i < 10; i++) s = A.step(s, { a: 2, m: '开心' }, '爱你', T0 + i * 1000, LEGACY);
   assert.ok(Math.abs(s.aff - 0.45) < 1e-3 && Math.abs(s.g.net - 0.15) < 1e-3, JSON.stringify(s)); // 日帽 0.15
-  const nx = A.step(s, { a: 2, m: '开心' }, '爱你', T0 + D);    // 次日帽子重置
+  const nx = A.step(s, { a: 2, m: '开心' }, '爱你', T0 + D, LEGACY);    // 次日帽子重置
   assert.ok(nx.aff > s.aff - 0.01 && nx.g.day !== s.g.day);
 });
 function r(x) { return Math.round(x * 1e4) / 1e4; }
 
 test('护栏：辱骂 soft（模型 a≥0）；boundary 仍强制；missing 时辱骂仍强制', () => {
-  const ab = A.step(null, { a: 2, m: '开心' }, '你个白痴', T0);
+  const ab = A.step(null, { a: 2, m: '开心' }, '你个白痴', T0, LEGACY);
   assert.strictEqual(ab.a, 2); assert.strictEqual(ab.m, '开心'); assert.ok(ab.g.guard.includes('abuse_soft'));
-  const bd = A.step(null, { a: 0, m: '平静' }, '发裸照', T0);
+  const bd = A.step(null, { a: 0, m: '平静' }, '发裸照', T0, LEGACY);
   assert.strictEqual(bd.a, -2); assert.strictEqual(bd.m, '愤怒'); assert.ok(bd.g.guard.includes('boundary'));
-  const up = A.step(null, { a: 2, m: '开心' }, '今天天气如何', T0);
+  const up = A.step(null, { a: 2, m: '开心' }, '今天天气如何', T0, LEGACY);
   assert.strictEqual(up.a, 1); assert.ok(up.g.guard.includes('a2_unfounded'));
-  assert.strictEqual(A.step(null, { a: 2, m: '开心' }, '你真棒，爱你', T0).a, 2);
+  assert.strictEqual(A.step(null, { a: 2, m: '开心' }, '你真棒，爱你', T0, LEGACY).a, 2);
   // missing_state：无模型自报 → 辱骂仍强制
-  const missAb = A.step(null, null, '傻逼', T0);
-  assert.ok(['guard', 'missing_state+guard'].includes(missAb.p));
+  const missAb = A.step(null, null, '傻逼', T0, LEGACY);
+  assert.ok(['guard', 'missing_state+guard', 'missing_state+guard+kf'].includes(missAb.p), missAb.p);
   assert.strictEqual(missAb.a, -1);
   assert.ok(missAb.g.guard.includes('abuse'));
   // 模型自报已负向：仍记 abuse（非 soft）
@@ -72,7 +73,7 @@ test('护栏：辱骂 soft（模型 a≥0）；boundary 仍强制；missing 时�
 });
 
 test('心情：惯性 + 滞回', () => {
-  const s = A.step(null, { a: 0, m: '开心' }, '', T0);
+  const s = A.step(null, { a: 0, m: '开心' }, '', T0, LEGACY);
   assert.deepStrictEqual(s.vec, { val: 0.3, aro: 0.325 });
   // 处于开心/平静中间附近时，不轻易切换
   assert.strictEqual(A.classify({ val: 0.28, aro: 0.31 }, '开心'), '开心');
@@ -186,7 +187,7 @@ test('A6(a) turn 时钟：隔很久墙钟几乎不衰减；wall 仍按时间', (
   const turnMood = A.decay(prev, T0 + 30 * D, { clock: 'turn', turn: 10 + 8 });
   assert.ok(Math.abs(turnMood.vec.val - 0.3) < 1e-3, 'mood 8 轮半衰');
   // step 记录 turn
-  const s = A.step(prev, { a: 0, m: '平静' }, '嗯', T0 + 30 * D, { clock: 'turn', turn: 11 });
+  const s = A.step(prev, { a: 0, m: '平静' }, '嗯', T0 + 30 * D, { clock: 'turn', turn: 11, estimator: 'legacy' });
   assert.strictEqual(s.turn, 11);
   // clockOf：显式覆盖 / RP 默认 turn
   assert.strictEqual(A.clockOf({ affectClock: 'turn' }), 'turn');
