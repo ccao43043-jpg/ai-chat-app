@@ -48,6 +48,14 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.18.0：四路审查修复（R1 日期 / C1 适配器 / 缓存策略 / A6 affect）**
+
+- R1：`normalizeDates` 仅剥机器时间（秒/时区），保留剧情时分
+- C1：服务商缓存适配器（openrouter / openai-compat / none），自定义 Gemini 渠道可进管线
+- C4/A3/C7/A5：Flash-Lite 门槛与价目、冷窗口提前压缩、LCP 归因诊断
+- A6：affect 档位文本化、协议进 system、漏标补偿、turn 时钟、辱骂 soft
+- Android `0.18.0`（versionCode 56）/ 桌面 / npm `0.18.0`
+
 **v0.17.0：复审修复（摘要质量门 / Hybrid 证据覆盖 / 三元组冲突 / 校准隔离 / 关键词合并）**
 
 - 章节摘要：八分区完整；`SUMMARY_MIN_QUALITY=0.60`；空分区写「无」不得凑分；五区全空拒提交；合并路径同样过质量门

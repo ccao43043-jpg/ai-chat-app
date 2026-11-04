@@ -24,7 +24,7 @@ test('rp / rpmemory / affect / gcache 顶栏契约', () => {
   assert.ok(rm.includes('headerBadges() { return []; }'));
   const af = www('affect.js');
   assert.ok(af.includes("kind: 'mood'"));
-  assert.ok(af.includes("s.mood + ' · ' + t"));
+  assert.ok(af.includes("s.mood + ' · ' + rel"));  // A6：档位文本化 relation
   assert.ok(!fs.existsSync(path.join(__dirname, '..', 'app/src/main/assets/www', 'liveliness.js')));
   assert.ok(!www('index.html').includes('liveliness') && www('index.html').includes('affect.js'));
   const gc = www('gcache.js');

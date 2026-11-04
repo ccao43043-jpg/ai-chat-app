@@ -1,6 +1,18 @@
-**Unreleased（分支 fix/a6-affect）**
+**v0.18.0：四路审查修复合并（R1 normalizeDates / C1 缓存适配器 / C4·A3·C7·A5 / A6 affect）**
 
-- A6 affect：relation 档位文案、固定协议进 system、漏标补偿、RP 默认 turn 时钟、辱骂 soft、面板漏标/护栏统计
+合并分支（基线 a0137b3 / v0.17.0）
+1. **R1 normalizeDates**（`fix/r1-normalize-dates`）：Hybrid user 尾部不再调用 `normalizeDates`；仅剥带秒/时区的机器时间，保留剧情 `HH:MM`（如「下午 13:45」）
+2. **C4 / A3 / C7 / A5**（`fix/cache-strategy`）：Flash-Lite 门槛 2048、Pro 4096、其余 1024；HybridWindow 冷窗口 SOFT=32/HARD=40（idle>TTL_eff 240s 提前压缩）；Gemini 2.5 Flash-Lite 价目；LCP 占比替代 prefix_hash「应命中」，诊断接入面板/toast
+3. **C1 缓存适配器**（`fix/c1-cache-adapter`）：服务商 `cacheAdapter`（auto/openrouter/openai-compat/none）；自定义渠道可进 gcache；openai-compat 只做前缀稳定+统计，不发 `cache_control`/`session_id`
+4. **A6 affect**（`fix/a6-affect`）：relation 档位文案；固定协议进 system；user 头仅一行 `[AFFECT]`；漏标≥3 补偿示范；RP 默认 turn 时钟；辱骂 soft（a≥0 记 abuse_soft）；面板漏标/护栏统计
+
+不做 / Known
+- **A4** 大摘要：未做
+- **A2** A/B 对照：未做
+- **A0** 运行时探测：未做（C1 为静态/域名推断适配器，非运行时探测）
+- **A1** 动态 TTL：未做（冷窗口 / 应命中仍用审查默认 TTL_eff=240s）
+
+测试：`npm test` 全绿；Android `0.18.0`（versionCode 56）/ 桌面 / npm `0.18.0`
 
 **v0.17.0：复审报告 1–6 项（摘要质量门 / Hybrid 证据 / 三元组冲突 / 校准 / 关键词 / 版本一致）**
 
