@@ -54,12 +54,12 @@ test('对话系统提示词视为 L1：变化时 static 版本 +1，不变不升
   assert.strictEqual(R.syncBase(st, '新的人设').staticVersion, 2);
 });
 
-test('六层顺序：L1 → L2 → L3 在 system；L4 原样；L5 + L6 在最后一条用户消息', () => {
+test('六层顺序（C-2）：static → summary → memory 在 system；L4 原样；L5 + L6 在最后一条用户消息', () => {
   let st = withBlocks();
   st = R.addSummary(st, { content: 'FACTS:\n- 进入北境', coveredIds: [], at: 1 });
   const p = R.plan(st, '你是RP助手', convo(3));
   const { system, messages } = R.assemble(p);
-  const idx = ['你是RP助手', '[WORLD]', '[CHARACTER]', '[RP_RULES]', '[LONG_TERM_MEMORY]', '[CHAPTER_SUMMARY #001]'].map(t => system.indexOf(t));
+  const idx = ['你是RP助手', '[WORLD]', '[CHARACTER]', '[RP_RULES]', '[CHAPTER_SUMMARY #001]', '[LONG_TERM_MEMORY]'].map(t => system.indexOf(t));
   idx.forEach(i => assert.ok(i >= 0));
   assert.deepStrictEqual(idx, idx.slice().sort((x, y) => x - y), 'system 内顺序固定');
   assert.ok(!system.includes('HP:'), '动态状态不在 system 中');
@@ -168,7 +168,8 @@ test('章节（V2）：只追加、之前章节逐字不变；编辑 / 撤销；
   assert.deepStrictEqual(p.hist.map(m => m.id), ['u4', 'a4', 'u5', 'a5'], '被摘要的消息不再发送');
   assert.strictEqual(items.length, 11, '原始消息仍在');
   assert.ok(p.system.includes('[CHAPTER_SUMMARY #001]\nFACTS:'));
-  const sys1 = p.system;
+  const sys1 = p.stablePrefix; // C-2：memory 排在 summary 之后，稳定前缀 = static + 章节
+  assert.ok(p.system.startsWith(sys1));
   // 继续对话后追加 #002：只覆盖新移出的消息；#001 逐字保留，system 以旧 system 为前缀
   const more = convo(10);
   p = R.plan(st, '', more);

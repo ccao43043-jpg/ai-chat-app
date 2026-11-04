@@ -351,7 +351,11 @@
       const last = parts[parts.length - 1]; if (last) last.cache_control = { type: 'ephemeral' };
       return parts;
     };
-    if (sys) out.push({ role: 'system', content: cc && opts.cacheSystem !== false ? mark(sys) : sys });
+    // C-2：cacheSystemSplit = 字符偏移；在 summary|memory 交界额外加一个断点（两段各自成块）
+    const split = cc && opts.cacheSystem !== false && opts.cacheSystemSplit > 0 && opts.cacheSystemSplit < (sys || '').length ? opts.cacheSystemSplit : 0;
+    if (sys) out.push({ role: 'system', content: split
+      ? [{ type: 'text', text: sys.slice(0, split), cache_control: { type: 'ephemeral' } }, { type: 'text', text: sys.slice(split), cache_control: { type: 'ephemeral' } }]
+      : cc && opts.cacheSystem !== false ? mark(sys) : sys });
     msgs.forEach(m => {
       let content;
       if (m.role === 'user' && m.images && m.images.length) {

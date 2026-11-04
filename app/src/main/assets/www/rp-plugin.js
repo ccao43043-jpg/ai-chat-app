@@ -221,8 +221,15 @@
     const ex = cap.explicit || { maxMarkers: 4, minTokens: 1024 };
     const k = p.calib || 1;
     const sysTok = p.tokens.static + p.tokens.memory + p.tokens.summary;
-    const marks = { system: false, history: -1, count: 0 };
+    const marks = { system: false, systemSplit: null, history: -1, count: 0 };
     if (sysTok >= ex.minTokens) { marks.system = true; marks.count++; }
+    // C-2：summary|memory 交界再打一个断点（static+summary 稳定前缀够长、memory 非空、且仍留一个给历史）
+    const stableTok = p.tokens.static + p.tokens.summary;
+    const reserveHist = p.hist.length ? 1 : 0;
+    if (marks.system && p.tokens.memory > 0 && stableTok >= ex.minTokens && marks.count + 1 + reserveHist <= ex.maxMarkers && p.stablePrefix
+      && a.system && a.system.indexOf(p.stablePrefix) === 0 && a.system.length > p.stablePrefix.length) {
+      marks.systemSplit = p.stablePrefix.length; marks.count++;
+    }
     if (p.hist.length && sysTok + p.tokens.history >= ex.minTokens && marks.count < ex.maxMarkers) {
       const i = p.hist.length - 1; a.messages[i]._cache = true; marks.history = i; marks.count++;
     }
@@ -362,7 +369,7 @@
         } else if (env.cap.vendor === 'qwen' && env.strategy === 'explicit') {
           // 千问显式缓存（DeepSeek 不走这里，请求结构与 v0.4 相同）
           marks = placeMarkers(a, p, env.cap);
-          if (marks.count) ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true, cacheSystem: marks.system });
+          if (marks.count) ctx.opts = Object.assign({}, ctx.opts, { cacheControl: true, cacheSystem: marks.system, cacheSystemSplit: marks.systemSplit });
         }
         ctx.systemPrompt = a.system; ctx.messages = a.messages;
         const fp = R.fingerprints(p, base);

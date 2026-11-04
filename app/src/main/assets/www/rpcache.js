@@ -807,7 +807,10 @@
   function summaryText(st) { return chaptersOf(st).filter(c => c.content).map(chapterText).join('\n\n'); }
   function stateText(st) { const c = getBlock(st, 'state').content; return c ? '[CURRENT_STATE]\n' + c : ''; }
   function deltaText(st) { const c = getBlock(st, 'delta').content; return c ? '[MEMORY_UPDATE]\n' + c : ''; }
-  function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), memoryText(st), summaryText(st)].filter(Boolean).join('\n\n'); }
+  // C-2：层序按变更频率从低到高：static → summary（按章变）→ memory（每轮可能变），memory 变动不再毒化 summary 缓存
+  function buildSystem(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st), memoryText(st)].filter(Boolean).join('\n\n'); }
+  /** C-2：system 中「static + summary」稳定前缀（summary|memory 交界之前的部分），供第二个缓存断点使用 */
+  function systemStablePrefix(st, baseSystem) { return [staticText(st, baseSystem), summaryText(st)].filter(Boolean).join('\n\n'); }
   /**
    * 最后一条用户消息 = 本轮输入 + 记忆增量 + 当前状态（V2：输入在前）。
    * 这条消息进入历史后只保留输入原文；因为输入在开头，上一轮请求与本轮请求的公共前缀一直延伸到上一轮输入的末尾，
@@ -936,7 +939,7 @@
     }
     const chapterTokens = tokens.summary;
     const cap = Math.max(1000, sum.chapter_cap_tokens | 0 || DEFAULT_SETTINGS.summary.chapter_cap_tokens);
-    const p = { st, system, hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
+    const p = { st, system, stablePrefix: systemStablePrefix(st, baseSystem), hist, input, unsummarized, covered, tokens, limit, overBudget, batch, batchRounds, needSummary: !!summaryReason, summaryReason,
       summaryBlocked, sinceLast, minGap, rounds, chapterTokens, cap, needConsolidate: false, calib: k, trimmed: start > 0, dropped: start, settings: s, auto: null };
     // V3：自适应摘要时机（只在宿主提供 env 时启用；不传 env 与 v0.4 完全一致）
     if (env && s.auto_summary !== false && sum.enabled && batch.length && !summaryReason) {
@@ -1583,7 +1586,7 @@
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
-    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
+    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, systemStablePrefix, finalUserContent, serializeHistory,
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
