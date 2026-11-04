@@ -1,3 +1,16 @@
+**v0.21.0：世界模板（L1 设定库 → 开聊）**
+
+- **世界库**：侧栏「世界」入口；新建 / 编辑 / 删除 / 列表；名称、可选 emoji/简介；L1 块与 `rpcache` `STATIC_DEFS` 对齐（world / character / rules / format / fewshot / prohibit / style）
+- **开聊**：「用此世界开聊」新建对话，自动启用 RP 缓存，各块写入本对话 RP state；无需依赖首条消息提取
+- **复用**：同一世界可开多对话；改模板默认不回溯；编辑页可选「同步到当前对话」
+- **共存**：保留首条自动提取、角色卡 Skill、助手 persona；空状态显示来源世界名
+- **情感硬约束**：character / prohibit / fewshot 的 hint 与占位示例提示可写必须 / 禁止 / 对白样例
+- **单测**：`tests/worlds.test.js`（规范化、应用到对话 blocks、开聊字段）
+
+测试：`npm test` 392/392 全绿；Android `0.21.0`（versionCode 60）/ 桌面 / npm `0.21.0`
+
+---
+
 **v0.20.1：affect 1.3.0 打磨补丁（vecStepKf / 面板 KF·CUSUM / estimator 开关）**
 
 分支：`feat/affect-polish`（基于 v0.20.0 / 5d4caa4）

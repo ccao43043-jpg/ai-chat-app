@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.21.0：世界模板（先建世界再开聊）**
+
+- 世界库 CRUD；L1 块对齐 RPCache；「用此世界开聊」自动启用 RP 并写入 blocks；改模板默认不回溯，可选手动同步当前对话
+- 与首条自动提取 / 角色卡 / 助手并存；空状态显示来源世界
+- Android `0.21.0`（versionCode 60）/ 桌面 / npm `0.21.0`
+
 **v0.20.1：affect 1.3.0 打磨（vecStepKf / 面板 KF·CUSUM / estimator 开关）**
 
 - D：`vecStepKf`（滤波 â→valence/arousal，步进增益跟 Kalman `K`）；面板 KF/CUSUM hint；`conv.affectEstimator`（KF / 旧版）
