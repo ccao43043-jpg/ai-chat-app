@@ -1,3 +1,7 @@
+**Unreleased（分支 fix/a6-affect）**
+
+- A6 affect：relation 档位文案、固定协议进 system、漏标补偿、RP 默认 turn 时钟、辱骂 soft、面板漏标/护栏统计
+
 **v0.17.0：复审报告 1–6 项（摘要质量门 / Hybrid 证据 / 三元组冲突 / 校准 / 关键词 / 版本一致）**
 
 1. 章节摘要空内容拒提交：八分区完整；`SUMMARY_MIN_QUALITY = 0.60`（parseSummary / commitChapter / CHANGELOG 一致）；空分区「无」不得凑分；五关键区全空拒提交；`consolidate` 合并路径同门
