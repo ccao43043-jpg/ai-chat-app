@@ -305,17 +305,32 @@
   const activeSummary = st => { const c = chaptersOf(st); return c.length ? c[c.length - 1] : null; };
   /** 已写入章节（不再发送原文）的全部消息 id */
   function coveredIds(st) { const out = []; chaptersOf(st).forEach(c => (c.coveredIds || []).forEach(id => out.push(id))); return out; }
+  function chapterSourceFp(items, covered) {
+    const set = new Set(covered || []);
+    const parts = (items || []).filter(m => set.has(m.id)).map(m => m.role + ':' + String(m.content || ''));
+    return parts.length ? ('sha256:' + sha256(parts.join('\n'))) : null;
+  }
   function mkChapter(st, o) {
     const no = (st.chapterSeq | 0) + 1;
     const content = canonicalize(o.content);
     return { no, content, hash: sha256(content), coveredIds: (o.coveredIds || []).slice(), at: o.at || 0, source: o.source || 'auto', rounds: o.rounds | 0,
-      atRound: o.atRound | 0, history: [], mergedFrom: o.mergedFrom || null };
+      atRound: o.atRound | 0, history: [], mergedFrom: o.mergedFrom || null,
+      sourceFp: o.sourceFp || null, quality: o.quality != null ? o.quality : null };
+  }
+  /** 事务提交：校验摘要质量 / 源指纹后再落章；失败不推进窗口 */
+  function commitChapter(st, o) {
+    const ps = o.parsed || parseSummary(o.content);
+    if (!ps.ok) return { ok: false, state: st, reason: 'invalid_summary', parsed: ps };
+    if (ps.quality != null && ps.quality < 0.30 && !o.force) return { ok: false, state: st, reason: 'low_quality', parsed: ps };
+    const sourceFp = o.sourceFp || (o.batch ? chapterSourceFp(o.batch, o.coveredIds) : null);
+    const next = addChapter(st, Object.assign({}, o, { content: ps.text || o.content, sourceFp, quality: ps.quality }));
+    return { ok: true, state: next, chapter: chaptersOf(next)[chaptersOf(next).length - 1], parsed: ps };
   }
   /** 追加新章节：只覆盖本批新移出的历史；之前的章节逐字不变 → 前缀保持 */
   function addChapter(st, o) {
     const ch = mkChapter(st, o);
     const next = Object.assign({}, st, { chapters: chaptersOf(st).concat([ch]), chapterSeq: ch.no, lastSummaryRound: o.atRound != null ? o.atRound | 0 : st.lastSummaryRound | 0,
-      window: { startId: null, startOrdinal: 0 } });
+      window: { startId: null, startOrdinal: 0 }, overflow: null });
     return clearLoreStateForCovered(next, ch.coveredIds || []);
   }
   /** 锚点被章节覆盖后，清掉对应条目的 sticky/cooldown，允许再次触发 */
@@ -667,7 +682,18 @@
       convId,
       anchorId: last.id,
     }, opts, { trace }));
-    const loreTrace = { turn, anchorId: last.id, at: at || 0, items: trace.slice(0, 60) };
+    // v0.16：trace 增强（版本 / 注入 Token / 预算）
+    const injectTokens = picked.reduce((n, e) => n + estimateLoreTokens(e), 0);
+    const ctxTok = (st.settings && st.settings.max_context) || DEFAULT_SETTINGS.max_context;
+    const budgetTotal = Math.max(200, Math.floor(ctxTok * ((loreSettings(st).budgetPct != null ? loreSettings(st).budgetPct : 0.25))));
+    const loreTrace = {
+      v: 2, turn, anchorId: last.id, at: at || 0,
+      injectTokens, budget: { total: budgetTotal, used: injectTokens, remaining: Math.max(0, budgetTotal - injectTokens) },
+      items: trace.slice(0, 60).map(x => {
+        const e = loreOf(st).find(y => y.id === x.id);
+        return Object.assign({}, x, e ? { tokens: estimateLoreTokens(e) } : {});
+      }),
+    };
     // 更新 sticky / cooldown 状态机
     const entries = Object.assign({}, loreSt0.entries);
     picked.forEach(e => {
@@ -808,14 +834,29 @@
     }
     return Math.ceil(n);
   }
-  /** 用服务商返回的真实输入 Token 校准估算（指数平均，系数限制在 0.5–2.5） */
-  function calibrate(st, rawEstimate, actualPrompt) {
-    if (!(rawEstimate > 200) || !(actualPrompt > 0)) return st;
-    const ratio = Math.min(2.5, Math.max(0.5, actualPrompt / rawEstimate));
-    const prev = typeof st.calib === 'number' ? st.calib : 1;
-    const calib = Math.round((prev * 0.7 + ratio * 0.3) * 1000) / 1000;
-    return Object.assign({}, st, { calib, calibN: (st.calibN | 0) + 1 });
+  /** 校准键：provider / model / modality 隔离，避免跨模型互相污染 */
+  function calibKey(meta) {
+    meta = meta || {};
+    return [meta.provider || '', meta.model || '', meta.modality || 'text'].join('|');
   }
+  function calibOf(st, meta) {
+    const key = calibKey(meta);
+    if (st && st.calibBy && typeof st.calibBy[key] === 'number') return st.calibBy[key];
+    return typeof st.calib === 'number' ? st.calib : 1;
+  }
+  /** 用服务商返回的真实输入 Token 校准估算（指数平均，系数限制在 0.5–2.5；按 provider/model/modality 隔离） */
+  function calibrate(st, rawEstimate, actualPrompt, meta) {
+    if (!(rawEstimate > 200) || !(actualPrompt > 0)) return st;
+    const key = calibKey(meta);
+    const map = Object.assign({}, st.calibBy || {});
+    const prev = typeof map[key] === 'number' ? map[key] : (typeof st.calib === 'number' ? st.calib : 1);
+    const ratio = Math.min(2.5, Math.max(0.5, actualPrompt / rawEstimate));
+    const calib = Math.round((prev * 0.7 + ratio * 0.3) * 1000) / 1000;
+    map[key] = calib;
+    const nMap = Object.assign({}, st.calibNBy || {}); nMap[key] = (nMap[key] | 0) + 1;
+    return Object.assign({}, st, { calib, calibN: (st.calibN | 0) + 1, calibBy: map, calibNBy: nMap, calibKey: key });
+  }
+
   // v0.8.9（P2）：每条消息的估算按 id 缓存（内容 / 图片数不变则复用；运行时，不持久化）
   const tokCache = new Map();
   function itemTokens(m) {
@@ -845,7 +886,8 @@
   function plan(state, baseSystem, items, env) {
     const st = normalizeState(state);
     const s = effectiveSettings(st.settings, env), sum = s.summary;
-    const k = st.calib || 1; const cal = n => Math.round(n * k);
+    const k = (env && (env.calibMeta || env.model)) ? calibOf(st, env.calibMeta || { provider: env.provider, model: env.model, modality: env.modality || 'text' }) : (st.calib || 1);
+    const cal = n => Math.round(n * k);
     items = applyFrozenLore(st, items);
     const covered = new Set(coveredIds(st));
     const elig = items.filter(m => !covered.has(m.id));
@@ -927,32 +969,72 @@
     if (!pr) { r.why = '没有价格信息，按固定阈值'; return r; }
     const est = summaryCost(p, Object.assign({}, c, { warm: env.warm != null ? env.warm : 1 }));
     const batchTok = Math.round(estimateItems(p.batch) * k);
-    const hr = env.hitRate != null ? env.hitRate : 0.8;
+    // v0.16：无真实命中样本时不做自适应成本决策（禁止默认 80%）
+    if (env.hitRate == null || !(env.hitSamples > 0)) { r.why = '尚无真实缓存命中样本，不做自适应摘要成本决策'; return r; }
+    const hr = env.hitRate;
     const hitP = env.strategy === 'explicit' && pr.hit_explicit != null ? pr.hit_explicit : pr.hit;
     const perTurn = Math.max(0, batchTok - est.callOut) * (hr * hitP + (1 - hr) * pr.miss) / 1e6 * factorFor(pr, c.at || Date.now(), c.mode, c.peak);
     if (!(perTurn > 0) || est.usd == null) { r.why = '无法估算收益'; return r; }
     r.breakEven = est.usd / perTurn;
     const horizon = env.horizon || 12;
-    if (r.breakEven <= horizon) { r.reason = 'adaptive'; r.why = '摘要约 ' + r.breakEven.toFixed(1) + ' 轮回本（≤ ' + horizon + '），命中率 ' + Math.round(hr * 100) + '%'; }
+    if (r.breakEven <= horizon) { r.reason = 'adaptive'; r.why = '摘要约 ' + r.breakEven.toFixed(1) + ' 轮回本（≤ ' + horizon + '），命中率 ' + Math.round(hr * 100) + '%（' + env.hitSamples + ' 样本）'; }
     else r.why = '摘要需 ' + r.breakEven.toFixed(1) + ' 轮才回本，暂不摘要';
     return r;
   }
-  /** 无法摘要（关闭 / 失败 / 无可摘要历史）而仍超预算时：一次性截掉一大块旧历史，起点固定到下次超预算为止 */
-  function fallbackTrim(st, p) {
-    const keep = Math.max(1, st.settings.summary.keep_recent_turns | 0);
+  /** 计算超预算时的裁剪起点（不修改状态） */
+  function computeTrimWindow(st, p) {
+    const keep = Math.max(1, (st.settings.summary && st.settings.summary.keep_recent_turns) | 0 || 1);
     const k = p.calib || 1;
-    const un = p.unsummarized;
+    const un = p.unsummarized || [];
     const users = []; un.forEach((m, i) => { if (m.role === 'user') users.push(i); });
     const fixed = p.tokens.total - p.tokens.history;
-    // v0.8.9（P2）：前缀和 + 二分。尾部 Token 随起点后移单调不增 → 找最小可行用户轮起点，不早于保留的最近 keep 轮
     const S = [0]; for (let i = 0; i < un.length; i++) S.push(S[i] + itemTokens(un[i]));
     const fits = j => fixed + (S[un.length] - S[users[j]]) * k <= p.limit;
     let j = Math.max(0, users.length - keep);
     if (users.length && !fits(j)) { let lo = j, hi = users.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (fits(mid)) hi = mid; else lo = mid + 1; } j = lo; }
     const startIdx = users.length ? users[j] : 0;
-    if (!un[startIdx]) return st;
-    return Object.assign({}, st, { window: { startId: un[startIdx].id, startOrdinal: startIdx } });
+    if (!un[startIdx]) return null;
+    return { startId: un[startIdx].id, startOrdinal: startIdx, startIdx };
   }
+  /**
+   * 临时裁剪：只改本轮 plan.hist，不永久推进 st.window。
+   * 摘要失败后的超预算必须走这里，避免剧情被静默永久丢掉。
+   */
+  function temporaryTrimPlan(st, p, opts) {
+    opts = opts || {};
+    const win = computeTrimWindow(st, p);
+    if (!win) return { state: st, plan: p };
+    const hist = (p.unsummarized || []).slice(win.startIdx);
+    const k = p.calib || 1;
+    const histTok = Math.round(estimateItems(hist) * k);
+    const tokens = Object.assign({}, p.tokens, { history: histTok, total: p.tokens.total - p.tokens.history + histTok });
+    const plan = Object.assign({}, p, { hist, tokens, trimmed: true, tempTrim: true, dropped: win.startIdx, overBudget: tokens.total > p.limit });
+    const state = Object.assign({}, st, {
+      overflow: {
+        tempStartId: win.startId, tempStartOrdinal: win.startOrdinal, permanent: false,
+        reason: opts.reason || 'over_budget_temp', last_error: opts.error || null, at: Date.now(),
+      },
+    });
+    return { state, plan, window: win };
+  }
+  /**
+   * fallbackTrim：默认临时（只记 overflow，不推进 window）；opts.permanent=true 才永久覆盖起点。
+   */
+  function fallbackTrim(st, p, opts) {
+    opts = opts || {};
+    const win = computeTrimWindow(st, p);
+    if (!win) return st;
+    if (opts.permanent) {
+      return Object.assign({}, st, { window: { startId: win.startId, startOrdinal: win.startOrdinal }, overflow: null });
+    }
+    return Object.assign({}, st, {
+      overflow: {
+        tempStartId: win.startId, tempStartOrdinal: win.startOrdinal, permanent: false,
+        reason: opts.reason || 'over_budget_temp', last_error: opts.error || null, at: Date.now(),
+      },
+    });
+  }
+
   /** 组装最终消息：L4 原样追加，L6 + 增量 + L5 合并为最后一条用户消息 */
   function assemble(p) {
     const messages = p.hist.map(m => { const o = { role: m.role, content: m.content || '' }; if (m.images && m.images.length) o.images = m.images; if (m._src) o._src = m._src; o.id = m.id; return o; });
@@ -1047,6 +1129,7 @@
     const all = logs || []; const sup = all.filter(e => e.supported);
     const recent = sup.slice(-5);
     const hitRate = recent.length ? recent.reduce((n, e) => n + (e.hit_rate || 0), 0) / recent.length : null;
+    const hitSamples = recent.length;
     const older = sup.slice(-10, -5);
     const trend = recent.length && older.length ? hitRate - older.reduce((n, e) => n + (e.hit_rate || 0), 0) / older.length : null;
     const last = all[all.length - 1];
@@ -1057,7 +1140,7 @@
     const gapMedian = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : null;
     const ttl = cap && cap.ttl || 0;
     const cold = !!(ttl && idleSec != null && idleSec > ttl);
-    return { hitRate, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
+    return { hitRate, hitSamples, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
   }
 
   // ---------------- 指纹与诊断 ----------------
@@ -1177,17 +1260,36 @@
       '===== 需要合并的章节（按顺序） =====\n' + (prev || '（无）') +
       (o.batch && o.batch.length ? '\n\n===== 本批旧对话（按原顺序） =====\n' + transcriptOf(o.batch) : '');
   }
+  /** 关键知识分区：缺任一项则拒提交（勿静默丢剧情边界） */
+  const CRITICAL_SUMMARY = ['FACTS', 'CHARACTER_KNOWLEDGE', 'PLAYER_KNOWLEDGE', 'SECRET', 'UNRESOLVED'];
+  function sectionBody(text, key) {
+    const re = new RegExp('(?:^|\\n)\\s*[#*]*\\s*' + key + '\\s*:?\\s*\\n([\\s\\S]*?)(?=(?:\\n\\s*[#*]*\\s*(?:' + SUMMARY_SECTIONS.join('|') + ')\\b)|$)', 'i');
+    const m = re.exec(text || '');
+    return m ? m[1].trim() : '';
+  }
+  function scoreSummary(text) {
+    let score = 0, filled = 0;
+    SUMMARY_SECTIONS.forEach(k => {
+      const body = sectionBody(text, k);
+      if (!body) return;
+      const empty = /^[-–—]\s*(无|none|n\/?a)\s*$/im.test(body) && body.split('\n').filter(Boolean).length <= 1;
+      if (!empty) { filled++; score += CRITICAL_SUMMARY.indexOf(k) >= 0 ? 0.14 : 0.06; }
+      else if (CRITICAL_SUMMARY.indexOf(k) >= 0) score += 0.06;
+      else score += 0.02;
+    });
+    return Math.max(0, Math.min(1, Math.round((score + Math.min(0.2, filled * 0.02)) * 100) / 100));
+  }
   function parseSummary(text) {
     let t = String(text || '').trim();
     t = t.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
     t = t.replace(/^\[?CHAPTER[ _]SUMMARY[^\n]*\]?\s*\n/i, '');
     t = canonicalize(t);
     const missing = SUMMARY_SECTIONS.filter(k => !new RegExp('(^|\\n)\\s*[#*]*\\s*' + k + '\\b', 'i').test(t));
-    return { ok: !!t && missing.indexOf('FACTS') < 0 && missing.length <= 4, text: t, missing };
+    const critMissing = CRITICAL_SUMMARY.filter(k => missing.indexOf(k) >= 0);
+    const quality = scoreSummary(t);
+    const ok = !!t && !critMissing.length && quality >= 0.30;
+    return { ok, text: t, missing, critMissing, quality };
   }
-
-  // ---------------- 价格（V2：可配置的匹配规则与高峰时段） ----------------
-  /** 用户价格规则优先；都不匹配时用内置价格表（V3：新模型自动匹配） */
   function priceFor(model, prices) {
     return priceForRules(model, prices) || (model ? priceForRules(model, BUILTIN_PRICES, true) : null);
   }
@@ -1442,9 +1544,9 @@
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
-    activeSummary, chaptersOf, coveredIds, addChapter, addSummary, consolidate, editChapter, removeLastChapter,
+    activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, scoreSummary, consolidate, editChapter, removeLastChapter,
     staticText, memoryText, summaryText, deltaText, stateText, buildSystem, finalUserContent, serializeHistory,
-    estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, oldestBatch, plan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
+    estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,
     makeLogEntry, appendLog, LOG_LIMIT_RP: LOG_LIMIT, stats, detectAnomaly, EXTRACT_FIELDS, BLOCK_TEMPLATES, parseSections, findSectionMessage, buildExtractPrompt, shouldAutoExtract, EXTRACT_MIN, PROMPT_KEEP, parseExtract, fillEmptyBlocks,
     LORE_REASON, parseLore, loreToText, setLore, constantLoreText, selectConstantLore, activeFired, fireLore, applyFrozenLore, rebuildLore, activateLore, loreSettings, addErratum, loreStateOf, pruneLoreState, normalizeLoreState, loreSeedKey, rngForSeed, seedHash, rollProbability };

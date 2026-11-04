@@ -59,7 +59,7 @@ test('护栏：辱骂/越界强制负向，无依据 +2 降为 +1', () => {
   const up = A.step(null, { a: 2, m: '开心' }, '今天天气如何', T0);
   assert.strictEqual(up.a, 1); assert.ok(up.g.guard.includes('a2_unfounded'));
   assert.strictEqual(A.step(null, { a: 2, m: '开心' }, '你真棒，爱你', T0).a, 2);
-  assert.strictEqual(A.step(null, null, '傻逼', T0).p, 'guard');
+  assert.ok(['guard', 'missing_state+guard'].includes(A.step(null, null, '傻逼', T0).p));
 });
 
 test('心情：惯性 + 滞回', () => {

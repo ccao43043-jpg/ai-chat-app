@@ -159,7 +159,7 @@ test('章节（V2）：只追加、之前章节逐字不变；编辑 / 撤销；
   assert.ok(prompt.includes('知识边界'));
   const out = '```\n[CHAPTER SUMMARY]\nFACTS:\n- 曹含森进入北境\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知道失踪案与商人有关\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 幕后组织未确认\n```';
   const ps = R.parseSummary(out);
-  assert.ok(ps.ok); assert.ok(ps.text.startsWith('FACTS:')); assert.deepStrictEqual(ps.missing, ['RELATIONSHIPS', 'OBJECTS', 'LOCATION']);
+  assert.ok(ps.ok); assert.ok(ps.text.startsWith('FACTS:')); assert.deepStrictEqual(ps.missing, ['RELATIONSHIPS', 'OBJECTS', 'LOCATION']); assert.ok(ps.quality >= 0.30); assert.deepStrictEqual(ps.critMissing, []);
   assert.ok(!R.parseSummary('他们聊了很多。').ok, '不合格式的输出不接受');
   st = R.addChapter(st, { content: ps.text, coveredIds: p.batch.map(m => m.id), at: 10, atRound: 6 });
   assert.strictEqual(R.activeSummary(st).no, 1);
@@ -194,19 +194,28 @@ test('章节（V2）：只追加、之前章节逐字不变；编辑 / 撤销；
   assert.strictEqual(p.hist[0].id, 'u4'); assert.strictEqual(st.archive.length, 1);
 });
 
-test('超预算且无法摘要：一次性截断，起点固定，之后前缀稳定', () => {
+test('超预算：临时裁剪不永久推进窗口；permanent 才固定起点', () => {
   let st = withBlocks();
   st.settings = Object.assign({}, st.settings, { max_context: 2600, output_reserve: 0, safety_margin: 0, summary: Object.assign({}, st.settings.summary, { enabled: false, keep_recent_turns: 3 }) });
   const long = n => convo(n).map(m => Object.assign({}, m, { content: m.content + '描写'.repeat(100) }));
   let p = R.plan(st, '', long(14));
   assert.ok(p.overBudget); assert.ok(!p.needSummary);
-  st = R.fallbackTrim(st, p);
+  const beforeWin = JSON.stringify(st.window);
+  const tmp = R.temporaryTrimPlan(st, p, { reason: 'summary_failed' });
+  st = tmp.state; p = tmp.plan;
+  assert.ok(p.tempTrim && p.trimmed);
+  assert.strictEqual(JSON.stringify(st.window), beforeWin, '临时裁剪不得永久推进 window');
+  assert.ok(st.overflow && st.overflow.permanent === false);
+  // 显式 permanent 才固定起点（用户确认场景）
+  st = R.fallbackTrim(st, R.plan(withBlocks(), '', long(14)), { permanent: true });
+  // rebuild with same settings
+  st.settings = Object.assign({}, st.settings, { max_context: 2600, output_reserve: 0, safety_margin: 0, summary: Object.assign({}, st.settings.summary, { enabled: false, keep_recent_turns: 3 }) });
   p = R.plan(st, '', long(14));
   assert.ok(!p.overBudget); assert.ok(p.trimmed);
   const start = p.hist[0].id;
   assert.strictEqual(p.hist[0].role, 'user');
   const p2 = R.plan(st, '', long(15));
-  assert.strictEqual(p2.hist[0].id, start, '下一轮起点不变（不是滑动窗口）');
+  assert.strictEqual(p2.hist[0].id, start, 'permanent 后下一轮起点不变');
   assert.deepStrictEqual(p2.hist.slice(0, p.hist.length).map(m => m.content), p.hist.map(m => m.content));
 });
 

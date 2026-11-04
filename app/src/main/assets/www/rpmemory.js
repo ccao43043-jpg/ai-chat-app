@@ -7,7 +7,7 @@
   'use strict';
   const TYPES = ['fact', 'event', 'relation', 'detail'];
   const TYPE_CN = { fact: '事实', event: '事件', relation: '关系', detail: '细节' };
-  const DEFAULTS = { interval: 20, window: 40, maxInject: 8, minScore: 1 };
+  const DEFAULTS = { interval: 20, window: 40, maxInject: 8, pinBudget: 8, minScore: 1 };
   const FILE = 'rp-memory.json';
 
   const textOf = c => Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : String(c || '');
@@ -21,6 +21,7 @@
     const o = Object.assign({}, DEFAULTS, cfg || {});
     o.interval = Math.max(5, Math.min(200, o.interval | 0 || DEFAULTS.interval));
     o.maxInject = Math.max(0, Math.min(50, o.maxInject | 0));
+    o.pinBudget = Math.max(0, Math.min(50, o.pinBudget != null ? o.pinBudget | 0 : DEFAULTS.pinBudget));
     o.window = Math.max(o.interval, Math.min(200, o.window | 0 || DEFAULTS.window));
     return o;
   }
@@ -37,7 +38,9 @@
         for (let i = 0; i <= seg.length - n; i++) out.add(seg.slice(i, i + n));
       }
     });
-    return [...out].slice(0, 16);
+    // v0.16：保留更多中文关键词（不只前 16）；长词优先
+    const arr = [...out].sort((a, b) => b.length - a.length || a.localeCompare(b));
+    return arr.slice(0, 48);
   }
 
   function buildExtractPrompt(turns, existing) {
@@ -76,42 +79,85 @@
     const A = bigrams(a), B = bigrams(b); if (!A.size || !B.size) return norm(a) === norm(b) ? 1 : 0;
     let i = 0; A.forEach(x => { if (B.has(x)) i++; }); return i / Math.min(A.size, B.size);
   }
-  /** 粗去重 / 合并：同类型且相似度 ≥0.8（或互相包含）视为同一条，保留更长文本、合并关键词 */
+  /** 冲突对：极性相反的关系/状态，禁止相似度合并 */
+  const CONFLICT_PAIRS = [
+    ['喜欢', '讨厌'], ['爱', '恨'], ['朋友', '敌人'], ['信任', '不信任'], ['结盟', '决裂'],
+    ['存活', '死亡'], ['活着', '死了'], ['同意', '反对'], ['敌对', '合作'], ['忠诚', '背叛'],
+    ['在场', '缺席'], ['已婚', '未婚'], ['解锁', '上锁'],
+  ];
+  function detectConflict(a, b) {
+    const ta = norm(a), tb = norm(b);
+    if (!ta || !tb) return false;
+    for (const [x, y] of CONFLICT_PAIRS) {
+      const nx = norm(x), ny = norm(y);
+      if ((ta.includes(nx) && tb.includes(ny)) || (ta.includes(ny) && tb.includes(nx))) return true;
+    }
+    // 否定冲突：「不/没/并非」+ 共享核心词
+    const neg = /不|没|并非|未|无/;
+    if (neg.test(a) !== neg.test(b)) {
+      const ca = ta.replace(/不|没|并非|未|无/g, '');
+      const cb = tb.replace(/不|没|并非|未|无/g, '');
+      if (ca.length >= 2 && cb.length >= 2 && (ca.includes(cb) || cb.includes(ca) || similarity(ca, cb) >= 0.85)) return true;
+    }
+    return false;
+  }
+  /**
+   * 合并：冲突检测优先于相似度合并。
+   * 冲突 → 旧条目标记 superseded（失效），新条作为新版本写入；不合并文本。
+   * 同向相似 → 合并关键词/取更长文本。
+   */
   function mergeEntries(list, incoming, at, src) {
-    const out = (list || []).map(e => Object.assign({}, e)); let added = 0, merged = 0;
+    const out = (list || []).map(e => Object.assign({}, e)); let added = 0, merged = 0, superseded = 0, conflicts = 0;
     let seq = out.reduce((m, e) => Math.max(m, e.seq || 0), 0);
     (incoming || []).forEach(n => {
       const nn = norm(n.text);
-      const hit = out.find(e => e.type === n.type && (norm(e.text) === nn || norm(e.text).includes(nn) || nn.includes(norm(e.text)) || similarity(e.text, n.text) >= 0.8));
+      // 先找冲突（同类型）
+      const conflictHit = out.find(e => !e.disabled && !e.supersededBy && e.type === n.type && detectConflict(e.text, n.text));
+      if (conflictHit) {
+        seq++;
+        const id = 'm' + seq + '_' + (at % 100000);
+        conflictHit.supersededBy = id;
+        conflictHit.supersededAt = at;
+        conflictHit.disabled = true; // 失效标记：召回时跳过
+        out.push({ id, seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: (conflictHit.version | 0) + 1, supersedes: conflictHit.id });
+        added++; conflicts++; superseded++;
+        return;
+      }
+      const hit = out.find(e => !e.supersededBy && e.type === n.type && (norm(e.text) === nn || norm(e.text).includes(nn) || nn.includes(norm(e.text)) || similarity(e.text, n.text) >= 0.8));
       if (hit) {
         if (n.text.length > hit.text.length && !hit.edited) hit.text = n.text;
-        hit.keywords = [...new Set([...(hit.keywords || []), ...(n.keywords || [])])].slice(0, 10);
+        hit.keywords = [...new Set([...(hit.keywords || []), ...(n.keywords || [])])].slice(0, 16);
         hit.updatedAt = at; merged++;
       } else {
-        seq++; out.push({ id: 'm' + seq + '_' + (at % 100000), seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false });
+        seq++; out.push({ id: 'm' + seq + '_' + (at % 100000), seq, type: n.type, text: n.text, keywords: n.keywords || [], createdAt: at, updatedAt: at, source: src || 'auto', pinned: false, version: 1 });
         added++;
       }
     });
-    return { list: out, added, merged };
+    return { list: out, added, merged, conflicts, superseded };
   }
 
-  /** 相关性：关键词命中（权重 2，含中文子串互含）+ 文本 bigram 重叠；置顶条目始终注入。结果按 seq 排序，保证同一组条目注入文本稳定 */
+  /** 相关性：置顶独立预算；普通条目用 maxInject；已失效(superseded)跳过 */
   function selectRelevant(list, query, o) {
     o = settingsOf(o); const q = String(query || ''), qn = norm(q), qg = bigrams(q);
-    // 查询侧也抽中文关键词，避免长句 norm 后关键词被「吃掉」匹配
     const qKeys = new Set(autoKeywords(q).map(norm).filter(Boolean));
-    const scored = (list || []).filter(e => !e.disabled).map(e => {
-      let s = 0;
+    const active = (list || []).filter(e => !e.disabled && !e.supersededBy);
+    const scoreOne = e => {
+      let s0 = 0;
       (e.keywords || []).forEach(k => {
         const kn = norm(k); if (!kn) return;
-        if (qn.includes(kn) || kn.includes(qn) && qn.length >= 2) s += 2;
-        else if ([...qKeys].some(qk => qk.includes(kn) || kn.includes(qk))) s += 2;
+        if (qn.includes(kn) || kn.includes(qn) && qn.length >= 2) s0 += 2;
+        else if ([...qKeys].some(qk => qk.includes(kn) || kn.includes(qk))) s0 += 2;
       });
-      let ov = 0; bigrams(e.text).forEach(g => { if (qg.has(g)) ov++; }); s += Math.min(3, ov / 3);
-      return { e, s: e.pinned ? 1e9 : s };
-    }).filter(x => x.s >= o.minScore);
-    scored.sort((a, b) => b.s - a.s || (b.e.seq || 0) - (a.e.seq || 0));
-    return scored.slice(0, o.maxInject).map(x => x.e).sort((a, b) => (a.seq || 0) - (b.seq || 0));
+      let ov = 0; bigrams(e.text).forEach(g => { if (qg.has(g)) ov++; }); s0 += Math.min(3, ov / 3);
+      return s0;
+    };
+    const pinBudget = o.pinBudget != null ? o.pinBudget : DEFAULTS.pinBudget;
+    const pinned = active.filter(e => e.pinned).sort((a, b) => (a.seq || 0) - (b.seq || 0)).slice(0, pinBudget);
+    const pinIds = new Set(pinned.map(e => e.id));
+    const normals = active.filter(e => !pinIds.has(e.id)).map(e => ({ e, s: scoreOne(e) })).filter(x => x.s >= o.minScore);
+    normals.sort((a, b) => b.s - a.s || (b.e.seq || 0) - (a.e.seq || 0));
+    const picked = normals.slice(0, o.maxInject).map(x => x.e);
+    return pinned.concat(picked).sort((a, b) => (a.seq || 0) - (b.seq || 0));
   }
   function renderInjection(entries) {
     if (!entries || !entries.length) return '';
@@ -121,7 +167,7 @@
   const shouldExtract = (turns, lastTurn, interval) => turns - (lastTurn | 0) >= interval;
   function toMemoryText(entries) { return entries.map(e => '- [' + (TYPE_CN[e.type] || e.type) + '] ' + e.text).join('\n'); }
 
-  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, autoKeywords, buildExtractPrompt, parseExtraction, similarity, mergeEntries, selectRelevant, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
+  const RPMemory = { TYPES, TYPE_CN, DEFAULTS, FILE, settingsOf, autoKeywords, buildExtractPrompt, parseExtraction, similarity, detectConflict, CONFLICT_PAIRS, mergeEntries, selectRelevant, renderInjection, shouldExtract, toMemoryText, charKey, textOf };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;

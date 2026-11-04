@@ -136,22 +136,74 @@
     if (why) hit.push('why:' + wj.toFixed(2));
     return { a, m, hit };
   }
-  /** 一轮更新：prev（上一快照，可空）+ 解析结果（可空）+ 用户本轮话 → 新快照 */
+  /** 一轮更新：prev（上一快照，可空）+ 解析结果（可空）+ 用户本轮话 → 新快照。
+   * parsed===null → 未输出 <state>（missing_state），不等于明确中性 a:0。
+   */
   function step(prev, parsed, userText, now, opts) {
-    const s = decay(prev, now);
-    const gd = guard(parsed ? parsed.a : 0, parsed ? parsed.m : null, userText, Object.assign({}, opts, { why: parsed && parsed.why }));
-    const a = gd.a, m = gd.m;
+    const s0 = decay(prev, now);
     const day = dayKey(now);
     let net = prev && prev.g && prev.g.day === day ? prev.g.net || 0 : 0;
+
+    // 未输出 <state>：只衰减；护栏仍可因用户辱骂/越界强制改 a
+    if (parsed == null) {
+      const gd = guard(0, null, userText, Object.assign({}, opts, { why: null }));
+      const forced = gd.hit.some(h => h === 'abuse' || h === 'boundary' || h === 'abuse_dark' || h === 'boundary_dark' || h === 'boundary_nsfw');
+      if (!forced) {
+        return { v: 1, aff: s0.aff, vec: s0.vec, mood: s0.mood, ts: now, a: null, m: null,
+          g: { day, net, guard: gd.hit }, p: 'missing_state', stateMissing: true };
+      }
+      // 护栏强制：按修正后的 a 更新，仍标记 stateMissing
+      const a = gd.a, m = gd.m;
+      let d = DELTA[String(a)];
+      if (d > 0) { d *= (1 - s0.aff) / (1 - BASE_AFF); d = Math.max(0, Math.min(d, DAILY_GAIN_CAP - net)); }
+      else if (d < 0) d *= NEG_MULT;
+      const aff = clamp(s0.aff + d, 0, 1);
+      net = r4(net + (aff - s0.aff));
+      const tg = m ? TARGET[m] : BASE_VEC;
+      const vec = { val: r4(s0.vec.val + INERTIA * (tg.val - s0.vec.val)), aro: r4(s0.vec.aro + INERTIA * (tg.aro - s0.vec.aro)) };
+      return { v: 1, aff: r4(aff), vec, mood: classify(vec, s0.mood), ts: now, a, m,
+        g: { day, net, guard: gd.hit }, p: 'missing_state+guard', stateMissing: true };
+    }
+
+    // 明确输出（含 a:0 中性）
+    const gd = guard(parsed.a, parsed.m, userText, Object.assign({}, opts, { why: parsed.why }));
+    const a = gd.a, m = gd.m;
     let d = DELTA[String(a)];
-    if (d > 0) { d *= (1 - s.aff) / (1 - BASE_AFF); d = Math.max(0, Math.min(d, DAILY_GAIN_CAP - net)); }
+    if (d > 0) { d *= (1 - s0.aff) / (1 - BASE_AFF); d = Math.max(0, Math.min(d, DAILY_GAIN_CAP - net)); }
     else if (d < 0) d *= NEG_MULT;
-    const aff = clamp(s.aff + d, 0, 1);
-    net = r4(net + (aff - s.aff));
+    const aff = clamp(s0.aff + d, 0, 1);
+    net = r4(net + (aff - s0.aff));
     const tg = m ? TARGET[m] : BASE_VEC;
-    const vec = { val: r4(s.vec.val + INERTIA * (tg.val - s.vec.val)), aro: r4(s.vec.aro + INERTIA * (tg.aro - s.vec.aro)) };
-    return { v: 1, aff: r4(aff), vec, mood: classify(vec, s.mood), ts: now, a, m, g: { day, net, guard: gd.hit }, p: parsed ? (gd.hit.some(h => !/^why:/.test(h)) ? 'model+guard' : 'model') : (gd.hit.length ? 'guard' : 'none'), ...(parsed && parsed.why ? { why: parsed.why } : {}) };
+    const vec = { val: r4(s0.vec.val + INERTIA * (tg.val - s0.vec.val)), aro: r4(s0.vec.aro + INERTIA * (tg.aro - s0.vec.aro)) };
+    const whyLoc = parsed.why ? locateWhy(parsed.why, userText) : null;
+    return { v: 1, aff: r4(aff), vec, mood: classify(vec, s0.mood), ts: now, a, m,
+      g: { day, net, guard: gd.hit }, p: gd.hit.some(h => !/^why:/.test(h)) ? 'model+guard' : 'model',
+      stateMissing: false, explicitNeutral: a === 0,
+      ...(parsed.why ? { why: parsed.why } : {}),
+      ...(whyLoc ? { whyLoc } : {}) };
   }
+  /** why 证据尽量定位到用户原文中的起止下标（字符） */
+  function locateWhy(why, userText) {
+    const u = String(userText || ''), w = String(why || '').trim();
+    if (!w || !u) return null;
+    let i = u.indexOf(w);
+    if (i >= 0) return { start: i, end: i + w.length, quote: u.slice(i, i + w.length) };
+    // 宽松：去空白后再找
+    const strip = s => s.replace(/\s+/g, '');
+    const us = strip(u), ws = strip(w);
+    const j = us.indexOf(ws);
+    if (j < 0) return { start: -1, end: -1, quote: w, approx: true };
+    // 映射回原串大致位置
+    let ci = 0, start = -1, end = -1;
+    for (let k = 0; k < u.length; k++) {
+      if (/\s/.test(u[k])) continue;
+      if (ci === j) start = k;
+      if (ci === j + ws.length - 1) { end = k + 1; break; }
+      ci++;
+    }
+    return { start, end: end < 0 ? (start >= 0 ? start + w.length : -1) : end, quote: start >= 0 ? u.slice(start, end) : w, approx: true };
+  }
+
   /** 最新有效状态（可传 before：只看该消息之前） */
   function latest(conv, before) {
     const ms = (conv && conv.messages) || [];
@@ -203,7 +255,7 @@
   }
 
   const Affect = { BASE_AFF, AFF_HALF_LIFE, MOOD_HALF_LIFE, BASE_VEC, DELTA, NEG_MULT, DAILY_GAIN_CAP, INERTIA, HYS, TIER_TH, MOODS, TARGET,
-    tier, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, MODES, WHY_TH, stripState, stripContent, guard, step, latest, renderInjection, applyToMessages, dayKey, textOf };
+    tier, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, MODES, WHY_TH, stripState, stripContent, guard, step, locateWhy, latest, renderInjection, applyToMessages, dayKey, textOf };
 
   // ---------------- 插件 ----------------
   const reg = root.Plugins && root.Plugins.registry;

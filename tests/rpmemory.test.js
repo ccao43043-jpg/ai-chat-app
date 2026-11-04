@@ -21,7 +21,9 @@ test('相关性选择：关键词命中、置顶、停用、数量上限、顺�
   l[2].pinned = true;
   let s = M.selectRelevant(l, '我们去找艾琳吧', { maxInject: 8 }); assert.deepStrictEqual(s.map(e => e.text), ['艾琳是药剂师', '主角怕水']);
   l[0].disabled = true; s = M.selectRelevant(l, '艾琳', {}); assert.deepStrictEqual(s.map(e => e.text), ['主角怕水']);
-  assert.strictEqual(M.selectRelevant(l, '密道 艾琳', { maxInject: 1 }).length, 1);
+  const both = M.selectRelevant(l, '密道 艾琳', { maxInject: 1 });
+  assert.ok(both.some(e => e.pinned), '置顶独立预算应保留');
+  assert.ok(both.length >= 1 && both.length <= 2); // 置顶 + 至多 1 条普通
   assert.ok(M.renderInjection(s).startsWith('[MEMORY_RECALL]')); assert.strictEqual(M.renderInjection([]), '');
   assert.ok(M.shouldExtract(20, 0, 20) && !M.shouldExtract(19, 0, 20));
 });

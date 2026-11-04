@@ -68,7 +68,7 @@ test('自动摘要：达到阈值时先调用模型生成 #001，显示状态，
   reg.setForConversation(conv, 'rpcache', true);
   const d = reg.convData(conv, 'rpcache'); d.state = R.normalizeState(null);
   d.state.settings.summary = { enabled: true, trigger_tokens: 50, min_new_turns: 3, keep_recent_turns: 2 };
-  const host = mkHost(conv, settings, p => 'FACTS:\n- 摘要内容\n\nCHARACTER_KNOWLEDGE:\n- 无\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 无');
+  const host = mkHost(conv, settings, p => "FACTS:\n- 摘要内容：调查继续推进\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知失踪案\n\nPLAYER_KNOWLEDGE:\n- 玩家已知密道线索\n\nSECRET:\n- 幕后组织未公开\n\nUNRESOLVED:\n- 幕后组织身份\n\nRELATIONSHIPS:\n- 无\n\nOBJECTS:\n- 无\n\nLOCATION:\n- 北境");
   for (let i = 1; i <= 5; i++) await send(conv, settings, host, '第' + i + '轮行动，描写一段比较长的剧情内容');
   assert.strictEqual(host.calls.length, 0, '可摘要轮数不足 min_new_turns 时不摘要');
   const r = await send(conv, settings, host, '第6轮');

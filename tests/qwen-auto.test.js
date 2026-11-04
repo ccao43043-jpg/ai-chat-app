@@ -11,7 +11,7 @@ const reg = Plugins.registry;
 const preset = id => Object.assign({ apiKey: 'sk', id }, P.PRESETS.find(p => p.presetId === id));
 const QW = preset('qwen'), QI = preset('qwen-intl'), DS = preset('deepseek'), OA = preset('openai');
 const OR = preset('openrouter'), SF = preset('siliconflow');
-const SUMMARY = 'FACTS:\n- 摘要\n\nCHARACTER_KNOWLEDGE:\n- 无\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 无';
+const SUMMARY = "FACTS:\n- 摘要内容：调查继续推进\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知失踪案\n\nPLAYER_KNOWLEDGE:\n- 玩家已知密道线索\n\nSECRET:\n- 幕后组织未公开\n\nUNRESOLVED:\n- 幕后组织身份\n\nRELATIONSHIPS:\n- 无\n\nOBJECTS:\n- 无\n\nLOCATION:\n- 北境";
 
 // ---------------- 预设与请求 ----------------
 test('千问预设：中国 / 国际两个地址，默认模型，流式用量默认开启，识别业务空间专属域名', () => {
@@ -171,11 +171,11 @@ test('自适应摘要：缓存冷却时阈值 50% 即摘要；成本回本时 70
   const cost = { model: 'qwen3.7-plus', prices: R.DEFAULT_PRICES, at: 0 };
   const cold = R.plan(st, '', items, { cold: true, idleSec: 900, warm: 0, cost });
   assert.strictEqual(cold.summaryReason, 'cold');
-  const warm = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.9, strategy: 'explicit', cost });
+  const warm = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.9, hitSamples: 8, strategy: 'explicit', cost });
   assert.ok(warm.auto && warm.auto.breakEven > 0, '给出回本轮数');
   assert.strictEqual(warm.summaryReason, warm.auto.breakEven <= 12 ? 'adaptive' : null);
   // 命中率很低（缓存经常失效）→ 每轮多发历史更贵 → 更快回本
-  const low = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.1, strategy: 'implicit', cost });
+  const low = R.plan(st, '', items, { cold: false, warm: 1, hitRate: 0.1, hitSamples: 8, strategy: 'implicit', cost });
   assert.ok(low.auto.breakEven < warm.auto.breakEven);
   const off = R.plan(Object.assign({}, st, { settings: Object.assign({}, st.settings, { auto_summary: false }) }), '', items, { cold: true, warm: 0, cost });
   assert.strictEqual(off.summaryReason, null, '关闭自适应');

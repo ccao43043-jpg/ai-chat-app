@@ -1,3 +1,36 @@
+**v0.16.0：RP/缓存审查三阶段（剧情遗忘 → 记忆冲突召回 → 缓存成本）**
+
+阶段1（最高优先：历史压缩勿丢剧情）
+- Gemini Hybrid-5：默认 `summaryStrategy: semantic`（本地启发式保留决策/人名/结果）；保留 `fast_local` 开关；摘要带 `sourceFp` + quality；质量不足先退 fast_local，仍不足则**不推进 cut**（勿静默丢剧情）
+- rpcache：`commitChapter` 事务提交（关键知识分区齐全 + quality≥0.35）；`chapterSourceFp`；缺分区 / 低质量拒提交
+- `fallbackTrim` **默认临时**（只记 `overflow`，不永久推进 `window`）；摘要失败走 `temporaryTrimPlan`；显式 `permanent:true` 才固定起点
+- `parseSummary` / `scoreSummary`：`CRITICAL_SUMMARY` 缺失 → `ok:false` + `critMissing`
+
+阶段2（长期记忆冲突与召回）
+- 冲突检测优先于相似度合并（`CONFLICT_PAIRS` + 否定冲突）；冲突 → 旧条 `supersededBy`/`disabled`，新条 `version`/`supersedes`
+- 中文 `autoKeywords` 上限 16→48（长词滑窗）
+- 置顶记忆独立 `pinBudget`（默认 8），与 `maxInject` 分离
+- affect：`parsed===null` → `missing_state`（≠ 明确中性 `a:0` / `explicitNeutral`）；`locateWhy` 尽量定位用户原文引用
+- 世界书 `loreTrace` v2：注入 Token / 预算 used·remaining / 条目 tokens
+
+阶段3（缓存成本与 Token 预算）
+- `adaptiveSummary`：**无真实命中样本时不做**成本决策（禁止默认 80% hit-rate）
+- Token 校准按 `provider|model|modality` 隔离（`calibBy` / `calibOf` / `calibKey`）
+- Gemini 静态指纹升 SHA-256（`static_hash: sha256:…`，`STATIC_PROMPT_VERSION=2`）
+- 流式请求每次重试独立 `createStreamParser`（避免脏 parser）
+- 图片 Token：`itemTokens` 继续按图计入估算
+
+不做 / 刻意保留
+- 未推倒分层上下文（L1–L6）
+- 不为命中率牺牲剧情；不每轮重写全部长期记忆
+- 图片 TTL 细账、完整云端语义摘要 API：未做（本地启发式语义摘要已落地）
+
+已知问题
+- UI e2e「预算设置」步骤（手动改摘要阈值后读回）仍失败；基线 v0.15.0 同样失败，非本版引入
+- 护栏引号/旁白识别为启发式，混排可能误判
+
+测试：`tests/v016.test.js` + 既有套件；Android `0.16.0`（versionCode 54）/ 桌面 / npm `0.16.0`
+
 **v0.15.0：第三轮评审修复（P0 全量 + A1/A4/A6/E1/E2）**
 
 新增

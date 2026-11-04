@@ -212,6 +212,8 @@
     const strat = R.chooseStrategy(cap, s.cache_mode, rt.gapMedian);
     const model = s.summary_model || ap.model;
     return Object.assign({}, rt, { cap, budget: R.autoBudget(cap, ap.model, meta), strategy: strat.strategy, strategyWhy: strat.why,
+      provider: p.presetId || p.id || '', model: ap.model, modality: 'text',
+      calibMeta: { provider: p.presetId || p.id || '', model: ap.model, modality: 'text' },
       cost: { model: ap.model, summaryModel: model, prices: c.prices, mode: c.priceMode, peak: c.peak, at: now } });
   }
   /** V3：千问显式缓存断点：system 末尾（固定设定 + 记忆 + 章节）与稳定历史末尾；不足 1024 Token 的前缀不加，最多 4 个 */
@@ -270,11 +272,20 @@
     const prompt = merge ? R.buildConsolidatePrompt({ chapters, memory, batch: p.batch }) : R.buildSummaryPrompt({ chapters, memory, batch: p.batch });
     const text = await host.callModel(prompt, { maxTokens: 4096, model: st.settings.summary_model || undefined, setCancel });
     const r = R.parseSummary(text);
-    if (!r.ok) throw new Error('模型返回的摘要格式不完整（缺少 ' + r.missing.join(' / ') + '）');
+    if (!r.ok) {
+      const miss = (r.critMissing && r.critMissing.length ? r.critMissing : r.missing) || [];
+      throw new Error('模型返回的摘要格式不完整（缺少 ' + miss.join(' / ') + (r.quality != null ? '，质量 ' + r.quality : '') + '）');
+    }
     const ids = p.batch.map(m => m.id).filter(Boolean);
-    const o = { content: r.text, coveredIds: ids, at: Date.now(), source: merge ? 'merge' : source, rounds: p.batchRounds, atRound: p.rounds };
-    const state = merge ? R.consolidate(st, o) : R.addChapter(st, o);
-    return { state, no: R.activeSummary(state).no, count: ids.length, missing: r.missing, merged: merge, mergedCount: merge ? chapters.length : 0 };
+    const sourceFp = R.chapterSourceFp(p.batch, ids);
+    const o = { content: r.text, coveredIds: ids, at: Date.now(), source: merge ? 'merge' : source, rounds: p.batchRounds, atRound: p.rounds, sourceFp, quality: r.quality, parsed: r, batch: p.batch };
+    if (merge) {
+      const state = R.consolidate(st, o);
+      return { state, no: R.activeSummary(state).no, count: ids.length, missing: r.missing, quality: r.quality, sourceFp, merged: true, mergedCount: chapters.length };
+    }
+    const committed = R.commitChapter(st, o);
+    if (!committed.ok) throw new Error('章节提交被拒绝：' + (committed.reason || 'invalid') + (r.critMissing && r.critMissing.length ? '（缺 ' + r.critMissing.join('/') + '）' : ''));
+    return { state: committed.state, no: R.activeSummary(committed.state).no, count: ids.length, missing: r.missing, quality: r.quality, sourceFp, merged: false, mergedCount: 0 };
   }
 
   let coverMemo = { key: null, set: null };
@@ -333,9 +344,11 @@
           p = R.plan(st, base, items, env);
         }
         let trimmedNow = false;
-        if (p.overBudget) { // 仍超预算（摘要关闭 / 失败）：一次性截掉一大块旧历史，起点固定
-          st = R.fallbackTrim(st, p); p = R.plan(st, base, items, env); trimmedNow = true;
-          host.toast('上下文超出预算，本次只发送最近约 ' + fmtN(p.tokens.history) + ' Token 的历史（原文仍保存在本地）');
+        if (p.overBudget) {
+          // v0.16：摘要失败/超预算 → 临时裁剪，不得永久推进历史窗口
+          const tmp = R.temporaryTrimPlan(st, p, { reason: summaryError ? 'summary_failed' : 'over_budget_temp', error: summaryError });
+          st = tmp.state; p = tmp.plan; trimmedNow = true;
+          host.toast('上下文超出预算，本轮临时只发送约 ' + fmtN(p.tokens.history) + ' Token 历史（窗口未永久裁剪，原文保留；摘要成功后会恢复）');
         }
         d.state = st; normalized.add(st);
         const a = R.assemble(p);
@@ -376,7 +389,7 @@
         let st = d.state;
         if (st.pendingStaticCause || st.pendingHistoryCause) st = Object.assign({}, st, { pendingStaticCause: null, pendingHistoryCause: null });
         // V2：用真实输入 Token 校准本地估算
-        if (result.usage && result.usage.prompt) st = R.calibrate(st, info.tokens.raw_total, result.usage.prompt);
+        if (result.usage && result.usage.prompt) st = R.calibrate(st, info.tokens.raw_total, result.usage.prompt, { provider: (ctx.provider && (ctx.provider.presetId || ctx.provider.id)) || '', model: ctx.model || '', modality: 'text' });
         if (st !== d.state) { d.state = st; normalized.add(st); }
         const logs = R.appendLog(logs0, entry);
         saveLogAppend(host, ctx.conv, logs, entry);

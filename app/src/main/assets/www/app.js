@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.15.0';
+  const APP_VERSION = '0.16.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -1521,7 +1521,6 @@
     if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
     authed(req, p.id);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
-    const parser = Providers.createStreamParser(p.type);
     let status = 0, raw = '', gotDelta = false;
     const apply = deltas => deltas.forEach(d => {
       if (d.kind === 'usage') { bot.usage = Providers.mergeUsage(bot.usage, d.usage); return; }
@@ -1530,9 +1529,10 @@
       else if (d.kind === 'reasoning') bot.reasoning += d.text;
       else if (d.kind === 'error') bot.error = (bot.error ? bot.error + '\n' : '') + d.text;
     });
-    // A6：失败分类 + 指数退避重试（仅在还没收到正文时）
+    // A6：失败分类 + 指数退避重试（仅在还没收到正文时）；v0.16：每次重试独立 parser，避免脏状态
     for (let attempt = 0; ; attempt++) {
       status = 0; raw = ''; let netErr = null;
+      const parser = Providers.createStreamParser(p.type);
       const h = httpRequest(req, {
         onStatus: v => { status = v; },
         onChunk: t => {

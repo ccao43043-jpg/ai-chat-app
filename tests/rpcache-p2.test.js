@@ -53,7 +53,7 @@ test('P2 fallbackTrim 二分与原线性扫描结果一致（随机）', () => {
     st.settings.summary.keep_recent_turns = 1 + Math.floor(rnd() * 6);
     if (rnd() < 0.5) st.calib = 0.5 + rnd() * 2;
     const p = R.plan(st, '设定', conv(10 + Math.floor(rnd() * 120), 20 + Math.floor(rnd() * 300)));
-    assert.deepStrictEqual(R.fallbackTrim(st, p).window, linearTrim(st, p), 'case ' + t);
+    assert.deepStrictEqual(R.fallbackTrim(st, p, { permanent: true }).window, linearTrim(st, p), 'case ' + t);
   }
 });
 

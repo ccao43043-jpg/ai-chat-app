@@ -11,7 +11,7 @@ const P = require('../app/src/main/assets/www/providers.js');
 const reg = Plugins.registry;
 const preset = id => Object.assign({ apiKey: 'sk', id }, P.PRESETS.find(p => p.presetId === id));
 const DS = preset('deepseek');
-const SUMMARY = 'FACTS:\n- 摘要\n\nCHARACTER_KNOWLEDGE:\n- 无\n\nPLAYER_KNOWLEDGE:\n- 无\n\nSECRET:\n- 无\n\nUNRESOLVED:\n- 无';
+const SUMMARY = "FACTS:\n- 摘要内容：调查继续推进\n\nCHARACTER_KNOWLEDGE:\n- 张燕：只知失踪案\n\nPLAYER_KNOWLEDGE:\n- 玩家已知密道线索\n\nSECRET:\n- 幕后组织未公开\n\nUNRESOLVED:\n- 幕后组织身份\n\nRELATIONSHIPS:\n- 无\n\nOBJECTS:\n- 无\n\nLOCATION:\n- 北境";
 
 function mkHost(conv, settings, provider, reply) {
   const store = {}; const calls = []; const toasts = [];

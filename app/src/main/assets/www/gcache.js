@@ -8,9 +8,9 @@
   'use strict';
   const ID = 'gcache';
   // v1.1.0（算法规格 v1.0）：mode 新增 auto（推荐默认：隐式优先，前缀够长且稳定才打显式断点）；rpGuardrails: auto|on|off；sessionId：稳定 session_id
-  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true, hybrid: true, autoTarget: 'history', writePrice: 1.0, keepaliveMaxPings: 3, missAlert: true };
+  const DEFAULTS = { mode: 'auto', mergeSystem: true, ttl: '', responseCache: false, toast: true, sessionId: true, rpGuardrails: 'auto', diagToast: true, hybrid: true, autoTarget: 'history', writePrice: 1.0, keepaliveMaxPings: 3, missAlert: true, summaryStrategy: 'semantic' };
   /** 固定层版本：协议锚点文本 / 分层规则变更时必须 +1（变更会让 static_hash 变化，缓存需重新写入） */
-  const STATIC_PROMPT_VERSION = 1;
+  const STATIC_PROMPT_VERSION = 2; // v0.16: static fingerprint → SHA-256
   /** 诊断阈值：滚动命中率 <40% 触发诊断，≥70% 视为良好 */
   const DIAG_LOW = 40, DIAG_GOOD = 70, ROLL_N = 8;
   /** 公开价目倍率（相对普通输入价，按价目表估算；token 数始终取真实 usage）：Gemini 2.5+ 缓存读取约 0.25x，OpenRouter 显式写入约 1x（另有少量存储费） */
@@ -24,11 +24,17 @@
   }
   /** 静态层指纹：先按原始字符串 === 比较，与上次相同则复用上次哈希，避免重复计算 */
   let lastStatic = null, lastStaticHash = '';
+  function sha256hex(str) {
+    const R = root.RPCache || (typeof require === 'function' ? require('./rpcache.js') : null);
+    if (R && R.sha256) return R.sha256(str);
+    return hash(str); // 极端无 rpcache 时退回 FNV（测试环境应已加载）
+  }
   function staticHash(st) {
     const key = STATIC_PROMPT_VERSION + '\n' + st;
     if (key === lastStatic) return lastStaticHash;
-    lastStatic = key; lastStaticHash = hash(key); return lastStaticHash;
+    lastStatic = key; lastStaticHash = 'sha256:' + sha256hex(key); return lastStaticHash;
   }
+
   /** 是否为 OpenRouter 上的 Gemini 模型 */
   function isOpenRouterGemini(provider, model) {
     const p = provider || {};
@@ -99,7 +105,7 @@
     blocks.forEach(b => { if (b.kind === 'dynamic') seenDyn = true; else if (seenDyn) ordered = false; });
     return { blocks, staticText: st, dynamicText: dy, static_hash: staticHash(st), dynamic_hash: hash(dy), layered: known >= 2, ordered, static_prompt_version: STATIC_PROMPT_VERSION };
   }
-  const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, hash, STATIC_PROMPT_VERSION };
+  const PromptBuilder = { RP_ANCHOR, LAYERS, analyzeLayers, hash, staticHash, STATIC_PROMPT_VERSION };
 
   // ───────────────────────── CachePolicyEngine：隐式优先 ─────────────────────────
   /** Gemini 显式缓存最小前缀（Token，保守取值）：Flash 系 1024，Pro 系 4096 */
@@ -197,10 +203,47 @@
     return turns;
   }
   const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
-  /** 默认离线摘要：逐轮「用户要点 / 回复要点」截断拼接（确定性，可测试） */
-  function summarizeTurns(turns, startNo) {
+  /** 旧策略 fast_local：固定字符截断 */
+  function summarizeTurnsFast(turns, startNo) {
     return turns.map((t, i) => '第' + (startNo + i + 1) + '轮：' + t.map(m => (m.role === 'user' ? '玩家' : m.role === 'assistant' ? '回复' : m.role) + '「' + clip(partsText(m.content), m.role === 'user' ? 60 : 90) + '」').join(' → ')).join('\n');
   }
+  /** 语义摘要（本地启发式，保留决策/人名/结果；可切换回 fast_local） */
+  function summarizeTurnsSemantic(turns, startNo) {
+    const nameRe = /[\u4e00-\u9fff]{2,4}|[A-Z][a-z]{2,}/g;
+    const lines = [];
+    turns.forEach((t, i) => {
+      const no = startNo + i + 1;
+      const user = t.find(m => m.role === 'user');
+      const asst = [...t].reverse().find(m => m.role === 'assistant');
+      const ut = partsText(user && user.content).replace(/\s+/g, ' ').trim();
+      const at = partsText(asst && asst.content).replace(/\s+/g, ' ').trim();
+      // 取句尾（决策/结果常在末尾）+ 人名
+      const tail = (s, n) => { s = String(s || ''); return s.length <= n ? s : '…' + s.slice(-n); };
+      const names = [...new Set([...(ut.match(nameRe) || []), ...(at.match(nameRe) || [])])].slice(0, 6);
+      const uBit = clip(ut, 48);
+      const aBit = tail(at, 72);
+      lines.push('第' + no + '轮：玩家「' + uBit + '」→ 结果「' + aBit + '」' + (names.length ? '｜人物:' + names.join('/') : ''));
+    });
+    return lines.join('\n');
+  }
+  function summarizeTurns(turns, startNo, opts) {
+    opts = opts || {};
+    const strat = opts.strategy || 'semantic';
+    if (strat === 'fast_local') return summarizeTurnsFast(turns, startNo);
+    return summarizeTurnsSemantic(turns, startNo);
+  }
+  function scoreHybridSummary(text, batch) {
+    const t = String(text || '');
+    if (!t || t.length < 20) return 0;
+    const src = batchText(batch);
+    const names = src.match(/[\u4e00-\u9fff]{2,4}/g) || [];
+    const uniq = [...new Set(names)].slice(0, 12);
+    let hit = 0; uniq.forEach(n => { if (t.indexOf(n) >= 0) hit++; });
+    const cover = uniq.length ? hit / uniq.length : 0.5;
+    const dens = Math.min(1, t.length / Math.max(80, batch.length * 40));
+    return Math.round(Math.min(1, cover * 0.7 + dens * 0.3) * 100) / 100;
+  }
+
   // 冻结批次指纹：用于判定摘要是否仍有效（正确性相关），用 SHA-256 而非 32 位 FNV，避免碰撞导致改过的批次沿用旧摘要
   const batchText = batch => batch.flat().map(m => m.role + ':' + partsText(m.__orig != null ? m.__orig : m.content)).join('\n');
   const batchFp = batch => 'sha256:' + sha(batchText(batch));
@@ -217,24 +260,40 @@
    * apply(history, state) → { messagesForRequest, state, prefixChanged, summaryCreated, rawTurns, totalTurns, untilNext }
    * history：不含开头 system 与本轮 user 的历史消息；state 原地更新（调用方负责持久化）。
    */
-  function hwApply(history, state) {
+  function hwApply(history, state, opts) {
+    opts = opts || {};
     state = state && state.v ? state : Object.assign(emptyHybrid(), state || {});
     state.summaries = state.summaries || []; hwMigrateSent(state);
+    const strategy = opts.summaryStrategy || state.summaryStrategy || 'semantic';
     const turns = splitTurns(history || []);
-    let prefixChanged = false, summaryCreated = false;
-    if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; } // 历史被删到摘要范围内：作废重来
-    // 已冻结批次被编辑：按指纹校验，不一致则从该批起作废
+    let prefixChanged = false, summaryCreated = false, summaryFailed = false, summaryQuality = null;
+    if (turns.length < state.cut) { state.cut = 0; state.summaries = []; prefixChanged = true; }
     for (let i = 0; i < state.summaries.length; i++) {
-      const s = state.summaries[i];
-      if (!batchValid(s, turns.slice(s.from, s.to))) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
+      const s0 = state.summaries[i];
+      if (!batchValid(s0, turns.slice(s0.from, s0.to))) { state.summaries = state.summaries.slice(0, i); state.cut = i ? state.summaries[i - 1].to : 0; prefixChanged = true; break; }
     }
     while (turns.length - state.cut >= RAW_MAX) {
       const from = state.cut, to = from + (RAW_MAX - RAW_MIN), batch = turns.slice(from, to);
-      state.summaries.push({ from, to, fp: batchFp(batch), text: summarizeTurns(batch, from), at: new Date().toISOString().slice(0, 10) });
-      state.cut = to; summaryCreated = true; prefixChanged = true;
+      const text = summarizeTurns(batch, from, { strategy });
+      const quality = scoreHybridSummary(text, batch);
+      summaryQuality = quality;
+      if (quality < 0.35 && strategy === 'semantic') {
+        // 语义摘要质量不足：不推进 cut，勿静默丢剧情；可退回 fast_local 再试一次
+        const fallback = summarizeTurns(batch, from, { strategy: 'fast_local' });
+        const q2 = scoreHybridSummary(fallback, batch);
+        if (q2 >= 0.25) {
+          state.summaries.push({ from, to, fp: batchFp(batch), text: fallback, at: new Date().toISOString().slice(0, 10), quality: q2, strategy: 'fast_local', sourceFp: batchFp(batch) });
+          state.cut = to; summaryCreated = true; prefixChanged = true;
+        } else {
+          summaryFailed = true; break; // 保持旧窗口
+        }
+      } else {
+        state.summaries.push({ from, to, fp: batchFp(batch), text, at: new Date().toISOString().slice(0, 10), quality, strategy, sourceFp: batchFp(batch) });
+        state.cut = to; summaryCreated = true; prefixChanged = true;
+      }
     }
     let summaryMerged = false;
-    if (summaryCreated) { // 只在 20 轮边界（本次刚追加摘要）合并，前缀本就在此刻变化，不额外抖动
+    if (summaryCreated) {
       while (state.summaries.length >= SUM_MERGE_K && sumLen(state.summaries) > SUM_CAP) {
         const m = mergeSummaries(state.summaries, turns), old = sumLen(state.summaries.slice(0, SUM_MERGE_K));
         if (m.text.length >= old) break;
@@ -242,10 +301,11 @@
       }
     }
     const raw = turns.slice(state.cut).flat();
-    const out = state.summaries.length ? [{ role: 'system', content: SUM_HEAD + '\n' + state.summaries.map(s => s.text).join('\n') }].concat(raw) : raw;
+    const out = state.summaries.length ? [{ role: 'system', content: SUM_HEAD + '\n' + state.summaries.map(x => x.text).join('\n') }].concat(raw) : raw;
     const rawTurns = turns.length - state.cut;
-    return { messagesForRequest: out, state, prefixChanged, summaryCreated, summaryMerged, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
+    return { messagesForRequest: out, state, prefixChanged, summaryCreated, summaryMerged, summaryFailed, summaryQuality, rawTurns, totalTurns: turns.length, untilNext: RAW_MAX - rawTurns };
   }
+
   // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
   // 并记录原文 SHA-256 + 长度，替换前校验——原文变了（编辑 / 删除错位 / 哈希碰撞）就不替换。
   // 旧版以内容 FNV-32 为键：重复文本（连发「继续」）会互相覆盖、碰撞时静默替换，已废弃（旧条目加载时丢弃）。
@@ -267,7 +327,7 @@
   }
   /** 清掉旧版（以内容哈希为键、值为字符串）的条目 */
   function hwMigrateSent(state) { const o = state.sent || {}; Object.keys(o).forEach(k => { if (!o[k] || typeof o[k] !== 'object') delete o[k]; }); state.sent = o; }
-  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, apply: hwApply, splitTurns, summarizeTurns, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
+  const HybridWindow = { RAW_MIN, RAW_MAX, SUM_HEAD, SUM_CAP, SUM_MERGE_K, apply: hwApply, splitTurns, summarizeTurns, summarizeTurnsFast, summarizeTurnsSemantic, scoreHybridSummary, normalizeDates, recordSent: hwRecordSent, outbound: hwOutbound, sentKey, empty: emptyHybrid };
 
   // ───────────────────────── 诊断 ─────────────────────────
   /** 滚动命中率：只统计有真实 hit 字段的样本；无样本返回 null（未知） */
@@ -334,7 +394,7 @@
       const tail = lastUser > 0 ? msgs[lastUser] : null;
       let ord = 0;
       const hist = msgs.slice(k, lastUser > 0 ? lastUser : msgs.length).map((m, i) => hwOutbound(st, m, m.role === 'user' ? sentKey(ids[k + i], ord++) : null));
-      const w = hwApply(hist, st);
+      const w = hwApply(hist, st, { summaryStrategy: cfg.summaryStrategy || 'semantic' });
       let sentUser = null;
       if (tail) {
         const orig = tail.content;
