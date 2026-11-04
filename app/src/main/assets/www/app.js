@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.3';
+  const APP_VERSION = '0.21.4';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -961,13 +961,16 @@
       return;
     }
     const list = conv.messages;
+    // 换了对话 / 消息数组（重新加载、切分支、世界开聊替换 conv）：旧节点的按钮闭包指向旧消息对象，必须重建，
+    // 否则「编辑 / 删除 / 重新生成」改的是游离对象，界面和存档都不变（v0.21.4 修：世界对话里的消息无法编辑）
+    if (vsLastRange.list !== list) opts = Object.assign({}, opts, { force: true });
     // 短列表：直接全量（开销更小，也避免 spacer 抖动）
     if (list.length <= 40) {
       if (vsLastRange.empty || vsLastRange.start !== 0 || vsLastRange.end !== list.length || opts.force) {
         const keepScroll = box.scrollTop;
         box.innerHTML = '';
         list.forEach(m => { const el = buildMsgEl(m); box.appendChild(el); vsMeasure(el, m); });
-        vsLastRange = { start: 0, end: list.length, empty: false };
+        vsLastRange = { start: 0, end: list.length, empty: false, list };
         if (stick) stickToBottom();
         else box.scrollTop = keepScroll;
       } else if (stick) stickToBottom();
@@ -1015,7 +1018,7 @@
     win.querySelectorAll(':scope > .msg').forEach((el, j) => vsMeasure(el, list[start + j]));
     topSp.style.height = topH + 'px';
     botSp.style.height = bottomH + 'px';
-    vsLastRange = { start, end, empty: false };
+    vsLastRange = { start, end, empty: false, list };
     if (prevStick) stickToBottom();
     else if (anchorId) {
       let el2 = null;
@@ -1256,7 +1259,7 @@
     const box = $('#messages');
     const el = box.querySelector('.msg[data-id="' + m.id + '"]');
     const top = el ? el.getBoundingClientRect().top : null;
-    renderMessages();
+    renderMessages({ force: true }); // 切版本后条数可能不变，必须强制重建
     const el2 = box.querySelector('.msg[data-id="' + m.id + '"]');
     if (el2 && top != null) box.scrollTop = box.scrollTop + (el2.getBoundingClientRect().top - top);
   }
@@ -1360,7 +1363,7 @@
     m.content = t; m.edited = true;
     delete m.rpSent; // RP：冻结的发送原文作废，下一轮按修改后的内容进入历史
     const afN = affectReset(conv.messages.indexOf(m));
-    saveConv(); renderMessages(); toast(afN ? '已保存 · 好感/心情状态已从此处清除' : '已保存');
+    saveConv(); renderMessages({ force: true }); toast(afN ? '已保存 · 好感/心情状态已从此处清除' : '已保存');
   }
   const editUserMsg = editMsg;
 

@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-app",
-  "version": "0.21.3",
+  "version": "0.21.4",
   "private": true,
   "description": "AI Chat Android 应用（前端逻辑测试）",
   "scripts": {
@@ -8,7 +8,8 @@
     "eval": "node scripts/eval.mjs",
     "test:ui": "node tests/ui-e2e.js",
     "test:autochar": "node tests/autochar-e2e.js",
-    "fixtures": "node tests/fixtures/make-fixtures.js"
+    "fixtures": "node tests/fixtures/make-fixtures.js",
+    "test:edit": "node tests/edit-msg-e2e.js"
   },
   "devDependencies": {
     "puppeteer-core": "^23.0.0"
