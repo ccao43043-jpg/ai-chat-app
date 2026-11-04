@@ -1081,7 +1081,19 @@
       return { vendor: 'qwen', kind: 'implicit', auto: true, ttl: 600, explicit: null, label: '千问隐式缓存（自动，命中按输入价 20%）' };
     }
     if (p.type === 'anthropic' || /claude/.test(m)) return { vendor: 'anthropic', kind: 'explicit', auto: false, ttl: 300, explicit: { maxMarkers: 4, minTokens: 1024 }, label: 'Claude cache_control（需手动启用）' };
-    if (p.type === 'gemini' || /gemini/.test(m)) return { vendor: 'gemini', kind: 'implicit', auto: false, ttl: 300, explicit: null, label: 'Gemini 隐式缓存（需手动启用）' };
+    if (p.type === 'gemini' || /gemini/.test(m)) {
+      // C1：服务商 cacheAdapter / OpenRouter 域名 / openai+gemini 自动推断为可用时放宽 auto，便于与 gcache 协同；不改摘要/价格算法
+      const forced = String(p.cacheAdapter || '').trim().toLowerCase();
+      let adapter = (forced === 'openrouter' || forced === 'openai-compat' || forced === 'none') ? forced : '';
+      if (!adapter) {
+        if (p.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) adapter = 'openrouter';
+        else if ((!p.type || p.type === 'openai') && /gemini/.test(m)) adapter = 'openai-compat';
+        else adapter = 'none';
+      }
+      const auto = adapter === 'openrouter' || adapter === 'openai-compat';
+      return { vendor: 'gemini', kind: 'implicit', auto: auto, ttl: 300, explicit: null,
+        label: auto ? ('Gemini 隐式缓存（适配器 ' + adapter + '）') : 'Gemini 隐式缓存（需手动启用）' };
+    }
     if (p.presetId === 'openai' || /api\.openai\.com/.test(base) || /^(gpt-|o\d)/.test(bare)) return { vendor: 'openai', kind: 'implicit', auto: false, ttl: 600, explicit: null, label: 'OpenAI 自动前缀缓存（需手动启用）' };
     return { vendor: 'other', kind: 'none', auto: false, ttl: 0, explicit: null, label: '未知 / 无上下文缓存（不改写请求）' };
   }
