@@ -35,14 +35,37 @@
     lastStatic = key; lastStaticHash = 'sha256:' + sha256hex(key); return lastStaticHash;
   }
 
-  /** 是否为 OpenRouter 上的 Gemini 模型 */
+  /** 模型名是否像 Gemini（含 google/gemini、~google/gemini、路径段 gemini-） */
+  function isGeminiModel(model) {
+    const m = String(model || '').toLowerCase();
+    return m.startsWith('google/gemini') || m.startsWith('~google/gemini') || /(^|\/)gemini-/.test(m);
+  }
+  /**
+   * 缓存适配器（C1 / A0）：openrouter | openai-compat | none
+   * provider.cacheAdapter 手动覆盖；否则按域名 / 预设 / 模型自动推断。
+   */
+  function resolveCacheAdapter(provider, model) {
+    const p = provider || {};
+    const forced = String(p.cacheAdapter || '').trim().toLowerCase();
+    if (forced === 'openrouter' || forced === 'openai-compat' || forced === 'none') return forced;
+    if (forced === 'auto') { /* fall through */ }
+    if (p.presetId === 'openrouter' || /openrouter\.ai/i.test(String(p.baseUrl || ''))) return 'openrouter';
+    if (isGeminiModel(model) && (!p.type || p.type === 'openai')) return 'openai-compat';
+    return 'none';
+  }
+  /** 适配器是否进入 gcache 管线（前缀稳定 / 分层 / 统计 / 徽章） */
+  function cacheAdapterActive(adapter) { return adapter === 'openrouter' || adapter === 'openai-compat'; }
+  /** 是否允许发送 cache_control / session_id / OpenRouter 响应缓存头（仅 openrouter 完整能力） */
+  function cacheAdapterFull(adapter) { return adapter === 'openrouter'; }
+  /**
+   * 是否应对本请求启用 gcache：OpenAI 兼容 + Gemini + 适配器为 openrouter 或 openai-compat。
+   * 兼容旧名；openai-compat 也会返回 true（进入管线），但 apply 时不发 cache_control / session_id。
+   */
   function isOpenRouterGemini(provider, model) {
     const p = provider || {};
     if (p.type && p.type !== 'openai') return false;
-    const isOR = p.presetId === 'openrouter' || /openrouter\.ai/i.test(String(p.baseUrl || ''));
-    if (!isOR) return false;
-    const m = String(model || '').toLowerCase();
-    return m.startsWith('google/gemini') || m.startsWith('~google/gemini') || /(^|\/)gemini-/.test(m);
+    if (!isGeminiModel(model)) return false;
+    return cacheAdapterActive(resolveCacheAdapter(p, model));
   }
 
   const partsText = c => typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p && p.type === 'text' ? p.text : '[' + ((p && p.type) || '?') + ']').join('') : JSON.stringify(c == null ? '' : c);
@@ -446,9 +469,12 @@
    */
   function applyToRequest(req, cfg, extra) {
     cfg = Object.assign({}, DEFAULTS, cfg || {}); extra = extra || {};
+    // adapter：显式传入优先；缺省按 openrouter（保持旧测试 / 直接调用行为）。openai-compat 只做前缀稳定+统计，不发 cache_control / session_id。
+    const adapter = extra.adapter || cfg.cacheAdapter || 'openrouter';
+    const full = cacheAdapterFull(adapter);
     let body; try { body = JSON.parse(req.body); } catch (e) { return { req, applied: null, prefix: '' }; }
     const headers = Object.assign({}, req.headers);
-    if (cfg.responseCache) headers['X-OpenRouter-Cache'] = 'true';
+    if (full && cfg.responseCache) headers['X-OpenRouter-Cache'] = 'true';
     const msgs = Array.isArray(body.messages) ? body.messages : [];
     let applied = null, k = 0;
     // extra.ids：与 body.messages 尾部对齐的消息 id 并行数组（调用方传 ctx.messages[i]._src.id）；只用于 Hybrid 已发送表，不写入请求
@@ -497,8 +523,8 @@
     const decision = autoHist
       ? decideHistory(cfg, { model: body.model, cacheText: msgs.slice(0, lastU).map(m => partsText(m.content)).join('\n'), static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash })
       : decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash });
-    // 3. 断点：OpenRouter 对 Gemini 只用最后一个断点，先清掉其他插件（RP 缓存优化器强制模式）加的断点
-    if (cfg.mode !== 'off' && msgs.length) {
+    // 3. 断点：仅 openrouter 适配器打 cache_control；OpenRouter 对 Gemini 只用最后一个断点，先清掉其他插件加的断点
+    if (full && cfg.mode !== 'off' && msgs.length) {
       msgs.forEach(stripCC);
       if (decision.explicit) {
         let target = -1;
@@ -522,11 +548,11 @@
       }
     }
     body.messages = msgs;
-    // 4. OpenRouter 适配：稳定 session_id；model / provider 偏好原样保留
-    const sid = cfg.sessionId !== false && extra.sessionId ? extra.sessionId : '';
+    // 4. OpenRouter 适配：仅完整适配器写稳定 session_id；model / provider 偏好原样保留
+    const sid = full && cfg.sessionId !== false && extra.sessionId ? extra.sessionId : '';
     if (sid) OpenRouterAdapter.applySession(body, sid);
     const route = OpenRouterAdapter.routeOf(body);
-    return { req: Object.assign({}, req, { headers, body: JSON.stringify(body) }), applied, prefix, layers, decision, session_id: body.session_id || '', route, hybrid };
+    return { req: Object.assign({}, req, { headers, body: JSON.stringify(body) }), applied, prefix, layers, decision, session_id: body.session_id || '', route, hybrid, adapter };
   }
 
   /** 从统一 usage（providers.normalizeUsage）取缓存信息；服务商未返回 hit 字段时 known=false、pct=null（标「未知」，不冒充 0%） */
@@ -579,7 +605,7 @@
     return !!(conv && analyzeLayers(conv.systemPrompt || '').layered);
   }
 
-  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates, KeepAlive, expectedHit };
+  const api = { ID, DEFAULTS, STATIC_PROMPT_VERSION, isGeminiModel, resolveCacheAdapter, cacheAdapterActive, cacheAdapterFull, isOpenRouterGemini, applyToRequest, usageInfo, usageText, firstDiff, hash, PromptBuilder, CachePolicyEngine, MemoryManager, ProviderAdapters, OpenRouterAdapter, diagnose, rollingRate, PRICE, estimateCost, isRpConv, HybridWindow, normalizeDates, KeepAlive, expectedHit };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   root.GeminiCache = api;
 
@@ -598,7 +624,7 @@
 
   reg.register({
     id: ID, icon: '💎', name: 'Gemini 提示缓存（OpenRouter）', version: '1.4.0', perConversation: false, defaultEnabled: true,
-    desc: '只对 OpenRouter 上的 Gemini 模型生效（算法规格 v1.0）：隐式缓存优先，固定前缀够长且稳定时才打 cache_control 显式断点；系统提示分层指纹（static_hash）、每个对话稳定 session_id（sticky routing）、RP 协议锚点、L0 核心记忆保护、按真实 cached_tokens 统计命中与成本并在命中率 <40% 时自动诊断。其他服务商 / 模型的请求完全不变。',
+    desc: '对 OpenRouter / 自定义渠道的 Gemini 生效（可在服务商设置里选缓存适配器；算法规格 v1.0）：隐式缓存优先，固定前缀够长且稳定时才打 cache_control 显式断点；系统提示分层指纹（static_hash）、每个对话稳定 session_id（sticky routing）、RP 协议锚点、L0 核心记忆保护、按真实 cached_tokens 统计命中与成本并在命中率 <40% 时自动诊断。其他服务商 / 模型的请求完全不变。',
     hooks: {
       onBeforeRequest(ctx, host) {
         if (!isOpenRouterGemini(ctx.provider, ctx.model)) return ctx;
@@ -645,11 +671,13 @@
     transformRequest(req, ctx) {
       const o = ctx.opts && ctx.opts.orGemini; if (!o) return req;
       const s = statOf(ctx.conv);
+      const adapter = resolveCacheAdapter(ctx.provider, ctx.model);
+      const full = cacheAdapterFull(adapter);
       // Hybrid-5 冲突策略（A）：RP 缓存优化器对本对话生效时不启用 Zip 窗口（以 rpcache 的章节策略为准），gcache 仍负责 session_id / auto 断点 / 指纹 / 诊断
       const hyOn = o.hybrid !== false && !(ctx.meta && ctx.meta.gcacheRpcache) && ctx.conv;
       const hd = ctx.conv && reg.convData(ctx.conv, ID);
       if (hyOn) hd.hybrid = hd.hybrid && hd.hybrid.v ? hd.hybrid : HybridWindow.empty();
-      const r = applyToRequest(req, o, { sessionId: ctx.conv && sessionIdFor(ctx.conv.id), rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined) });
+      const r = applyToRequest(req, o, { adapter, sessionId: full && ctx.conv ? sessionIdFor(ctx.conv.id) : '', rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined) });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
       const now = Date.now();
@@ -710,9 +738,11 @@
     renderPanel(box, host) {
       const conv = host.conv(), e = host.esc;
       const p = conv && host.provider(conv), on = !!(conv && isOpenRouterGemini(p, conv.model));
+      const adapter = p ? resolveCacheAdapter(p, conv && conv.model) : 'none';
       const c = cfgOf(host);
       const L = [];
-      L.push('当前模型：' + e((conv && conv.model) || '?') + (on ? '（已识别为 OpenRouter Gemini ✅）' : '（非 OpenRouter Gemini，本插件不生效）'));
+      const adLabel = { openrouter: 'OpenRouter 完整适配', 'openai-compat': 'OpenAI 兼容（仅前缀稳定+统计）', none: '未启用' }[adapter] || adapter;
+      L.push('当前模型：' + e((conv && conv.model) || '?') + (on ? '（缓存适配：' + adLabel + ' ✅）' : '（缓存适配：' + adLabel + '，本插件不生效）'));
       L.push('策略：' + ({ auto: '自动（隐式优先）', off: '关闭', prefix: '系统前缀', history: '前缀+历史' }[c.mode] || c.mode) + '　合并 system：' + (c.mergeSystem ? '是' : '否') + '　TTL：' + (c.ttl || '默认') + '　响应缓存：' + (c.responseCache ? '开' : '关') + '　RP 锚点：' + ({ auto: '仅 RP', on: '总是', off: '关' }[c.rpGuardrails] || c.rpGuardrails));
       const s = conv && reg.convData(conv, ID).stat;
       if (!s || !s.requests) L.push('<br>本对话尚无请求统计。');

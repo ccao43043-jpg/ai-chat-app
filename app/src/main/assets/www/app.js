@@ -2354,6 +2354,7 @@
     $('#pe-name').value = editing.name;
     $('#pe-type').value = editing.type;
     $('#pe-base').value = editing.baseUrl;
+    $('#pe-cache-adapter').value = editing.cacheAdapter || '';
     $('#pe-key').value = hasKey(editing) ? KEY_MASK : ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
     Providers.normalizeModelFields(editing);
     Object.keys(PE_FIELDS).forEach(f => { $(PE_FIELDS[f]).value = editing[f] || ''; });
@@ -2432,6 +2433,8 @@
     if (!editModels.length) { toast('请至少添加一个模型'); return; }
     const p = { id: editing.id, presetId: editing.presetId, name: $('#pe-name').value.trim() || '未命名', type: $('#pe-type').value,
       baseUrl: base, models: editModels.slice() };
+    const ca = $('#pe-cache-adapter').value;
+    if (ca === 'openrouter' || ca === 'openai-compat' || ca === 'none') p.cacheAdapter = ca;
     const keyVal = $('#pe-key').value.trim();
     Object.keys(PE_FIELDS).forEach(f => { p[f] = $(PE_FIELDS[f]).value.trim(); });
     const th = $('#pe-thinking').value;

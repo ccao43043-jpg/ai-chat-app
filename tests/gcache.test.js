@@ -6,11 +6,16 @@ const OR = { type: 'openai', presetId: 'openrouter', baseUrl: 'https://openroute
 
 test('识别 OpenRouter Gemini', () => {
   assert.ok(G.isOpenRouterGemini(OR, 'google/gemini-2.5-flash'));
-  // v0.9.0：Key 不再暴露给页面，不能再靠 sk-or- 前缀识别，只认 presetId / Base URL
-  assert.ok(!G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://x.com', apiKey: 'sk-or-1' }, '~google/gemini-pro'));
+  assert.strictEqual(G.resolveCacheAdapter(OR, 'google/gemini-2.5-flash'), 'openrouter');
+  // C1 / A0：自定义 Base URL + Gemini + type=openai → 自动 openai-compat（进入管线）
+  assert.ok(G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://x.com', apiKey: 'sk-or-1' }, '~google/gemini-pro'));
+  assert.strictEqual(G.resolveCacheAdapter({ type: 'openai', baseUrl: 'https://x.com' }, '~google/gemini-pro'), 'openai-compat');
   assert.ok(!G.isOpenRouterGemini(OR, 'anthropic/claude-sonnet-4'));
-  assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'deepseek', baseUrl: 'https://api.deepseek.com' }, 'gemini-2.5'));
+  // deepseek 预设 + 名称含 gemini-：A0 仍判为 openai-compat（type=openai）
+  assert.ok(G.isOpenRouterGemini({ type: 'openai', presetId: 'deepseek', baseUrl: 'https://api.deepseek.com' }, 'gemini-2.5'));
+  // 原生 Gemini API（type=gemini）不进 gcache
   assert.ok(!G.isOpenRouterGemini({ type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com' }, 'gemini-2.5-flash'));
+  assert.strictEqual(G.resolveCacheAdapter({ type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com' }, 'gemini-2.5-flash'), 'none');
 });
 
 const msgs = [{ role: 'user', content: '你好' }, { role: 'assistant', content: '嗨' }, { role: 'user', content: '继续' }];
@@ -255,4 +260,62 @@ test('二级合并：合并后继续追加新摘要；400 轮受上限约束；�
   st.summaries.forEach(s => assert.strictEqual(s.fp, fpOf(mkLong(420), s)));
   const h = mkLong(420); h[2].content = '改过';
   const r = H.apply(h, st); assert.ok(r.prefixChanged); assert.ok(st.summaries.every(s => s.fp === fpOf(h, s)));
+});
+
+// ── C1：缓存适配器（自定义渠道 / A0） ──
+const CUSTOM = { type: 'openai', presetId: 'custom', baseUrl: 'https://deepgen.example/v1', models: ['google/gemini-2.5-flash-lite'] };
+const GEM = 'google/gemini-2.5-flash-lite';
+test('C1：自定义 Base URL + gemini + adapter openrouter → 识别可用且可发 cache_control/session_id', () => {
+  const p = Object.assign({}, CUSTOM, { cacheAdapter: 'openrouter' });
+  assert.strictEqual(G.resolveCacheAdapter(p, GEM), 'openrouter');
+  assert.ok(G.isOpenRouterGemini(p, GEM));
+  const req = P.buildChatRequest(p, GEM, msgs, '角色卡', {});
+  const sid = G.OpenRouterAdapter.sessionIdFor('c1');
+  const r = G.applyToRequest(req, { mode: 'prefix' }, { adapter: 'openrouter', sessionId: sid });
+  const b = JSON.parse(r.req.body);
+  assert.ok(b.messages[0].content[0].cache_control);
+  assert.strictEqual(b.session_id, sid);
+  assert.strictEqual(r.adapter, 'openrouter');
+});
+test('C1：自定义 Base URL + gemini + adapter openai-compat → 进管线但不含 cache_control/session_id', () => {
+  const p = Object.assign({}, CUSTOM, { cacheAdapter: 'openai-compat' });
+  assert.strictEqual(G.resolveCacheAdapter(p, GEM), 'openai-compat');
+  assert.ok(G.isOpenRouterGemini(p, GEM), '应进入插件管线');
+  const req = P.buildChatRequest(p, GEM, msgs, '角色卡', {});
+  const sid = G.OpenRouterAdapter.sessionIdFor('c1');
+  const r = G.applyToRequest(req, { mode: 'prefix', sessionId: true, responseCache: true }, { adapter: 'openai-compat', sessionId: sid });
+  const b = JSON.parse(r.req.body);
+  assert.ok(!JSON.stringify(b).includes('cache_control'), 'openai-compat 不发 cache_control');
+  assert.ok(!b.session_id, 'openai-compat 不注入 session_id');
+  assert.ok(!r.req.headers['X-OpenRouter-Cache'], 'openai-compat 不发响应缓存头');
+  assert.strictEqual(r.adapter, 'openai-compat');
+  assert.strictEqual(r.applied, null);
+  // 仍做前缀分析（管线生效）
+  assert.ok(r.layers && r.prefix === '角色卡');
+});
+test('C1：adapter none → 不生效', () => {
+  const p = Object.assign({}, CUSTOM, { cacheAdapter: 'none' });
+  assert.strictEqual(G.resolveCacheAdapter(p, GEM), 'none');
+  assert.ok(!G.isOpenRouterGemini(p, GEM));
+  // 即使域名是 openrouter，手动 none 也强制关闭
+  assert.strictEqual(G.resolveCacheAdapter(Object.assign({}, OR, { cacheAdapter: 'none' }), GEM), 'none');
+  assert.ok(!G.isOpenRouterGemini(Object.assign({}, OR, { cacheAdapter: 'none' }), GEM));
+});
+test('C1：默认 auto — openrouter.ai 仍为 openrouter；纯自定义无字段时 gemini+openai → openai-compat', () => {
+  assert.strictEqual(G.resolveCacheAdapter({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1' }, GEM), 'openrouter');
+  assert.ok(G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1' }, GEM));
+  assert.strictEqual(G.resolveCacheAdapter(CUSTOM, GEM), 'openai-compat');
+  assert.ok(G.isOpenRouterGemini(CUSTOM, GEM));
+  assert.strictEqual(G.resolveCacheAdapter({ type: 'openai', baseUrl: 'https://api.openai.com/v1' }, 'gpt-4o'), 'none');
+  assert.ok(!G.isOpenRouterGemini({ type: 'openai', baseUrl: 'https://api.openai.com/v1' }, 'gpt-4o'));
+  // cacheAdapter=auto 与空字段等价
+  assert.strictEqual(G.resolveCacheAdapter(Object.assign({}, CUSTOM, { cacheAdapter: 'auto' }), GEM), 'openai-compat');
+});
+test('C1：原有 OR 预设用例仍绿（完整能力）', () => {
+  assert.ok(G.isOpenRouterGemini(OR, 'google/gemini-2.5-flash'));
+  const req = P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs, '角色卡', {});
+  const r = G.applyToRequest(req, { mode: 'prefix' }, { sessionId: 'sid-or' });
+  const b = JSON.parse(r.req.body);
+  assert.ok(b.messages[0].content[0].cache_control);
+  assert.strictEqual(b.session_id, 'sid-or');
 });

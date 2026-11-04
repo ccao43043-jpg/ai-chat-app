@@ -250,6 +250,14 @@
         </select></label>
       <label class="field"><span>Base URL</span><input id="pe-base" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
       <div class="hint small" id="pe-base-hint"></div>
+      <label class="field"><span>缓存适配器<small>自定义中转域名时用于 Gemini 提示缓存：完整能力需选 OpenRouter；OpenAI 兼容只做前缀稳定与统计</small></span>
+        <select id="pe-cache-adapter">
+          <option value="">自动（按域名 / 模型推断）</option>
+          <option value="openrouter">OpenRouter（完整：cache_control + session_id）</option>
+          <option value="openai-compat">OpenAI 兼容（仅前缀稳定 + 统计）</option>
+          <option value="none">关闭（不启用 gcache 适配）</option>
+        </select>
+      </label>
       <label class="field"><span>API Key</span>
         <div class="input-row"><input id="pe-key" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-..."><button class="chip-btn" id="pe-key-toggle" type="button">显示</button></div></label>
     </div>
