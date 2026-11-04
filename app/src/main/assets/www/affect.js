@@ -147,6 +147,10 @@
   const CUSUM_D = 4;           // 驻留轮数
   const CHAR_SELF_W = 0.70;    // 多角色：自身权重
   const CHAR_SCENE_W = 0.30;   // 场景氛围权重
+  // KF 路径 vec：用滤波 â 驱动目标，步进增益跟 K 联动（legacy 仍用固定 INERTIA）
+  const VEC_KF_ALPHA = 0.35;   // 合成目标里 â→(val,aro) 的权重；其余留给 mood TARGET
+  const VEC_KF_G_MIN = 0.25;   // 每轮向目标靠近的最小增益
+  const VEC_KF_G_MAX = 0.65;   // 最大增益（避免单轮跳变）
   // 词典（轻量）：正/负词、否定、程度
   const LEX_POS = ['谢谢', '感谢', '喜欢', '爱你', '真棒', '厉害', '可爱', '开心', '高兴', '棒', '贴心', '抱抱', '亲亲', '想你', '优秀', '温柔', 'thank', 'love', 'great', 'amazing', 'cute', 'sweet', 'nice'];
   const LEX_NEG = ['滚', '闭嘴', '讨厌', '恨', '烦', '蠢', '白痴', '废物', '垃圾', '去死', '恶心', '失望', '分手', '生气', '伤心', '难过', '恨你', 'stupid', 'idiot', 'hate', 'fuck', 'shut'];
@@ -410,7 +414,78 @@
     const src = opts.settings || {};
     if (src.affectKf === false || src.affectEstimator === 'legacy') return false;
     if (opts.affectKf === false || opts.affectEstimator === 'legacy') return false;
+    if (opts.conv && (opts.conv.affectKf === false || opts.conv.affectEstimator === 'legacy')) return false;
     return true;
+  }
+
+  /** 会话估计器：conv.affectEstimator 优先，其次 settings；仅 'kf'|'legacy' */
+  function estimatorOf(conv, settings) {
+    const e = (conv && conv.affectEstimator) || (settings && settings.affectEstimator);
+    if (e === 'legacy' || e === 'kf') return e;
+    if (conv && conv.affectKf === false) return 'legacy';
+    if (settings && settings.affectKf === false) return 'legacy';
+    return 'kf';
+  }
+
+  /**
+   * KF 路径心情向量更新（设计：减少纯 INERTIA，用滤波状态驱动目标）。
+   *
+   * 算法：
+   * 1) tg_m = mood∈TARGET ? TARGET[mood] : BASE_VEC（离散标签锚点，与 legacy 同）
+   * 2) 由滤波 â=kf.x∈[-2,2] 推状态目标 tg_x：
+   *      val = clamp(â/2, -1, 1)
+   *      aro = clamp(BASE_VEC.aro + 0.4·|â|/2, 0, 1)   // |â| 大 → 唤醒略升
+   * 3) 合成目标 tg = (1-α)·tg_m + α·tg_x，α=VEC_KF_ALPHA
+   *    —— 标签仍主导方向，但 â 把目标从「纯自报 mood」往隐状态拉一截
+   * 4) 步进增益 g = clamp(0.5·INERTIA + 0.5·K, G_MIN, G_MAX)
+   *    K 来自本轮 kfUpdate；观测可信（K 较大）时更快跟上，尖峰被 robust 门控后 K 也不会让单轮跳飞
+   * 5) vec ← vec + g·(tg−vec)；分类仍走 classify(..., prev) 滞回
+   *
+   * legacy / stepLegacy 不调用本函数，继续固定 INERTIA，兼容既有单测。
+   */
+  function vecStepKf(s0vec, mood, kf) {
+    const prev = s0vec || BASE_VEC;
+    const tgMood = (mood && TARGET[mood]) ? TARGET[mood] : BASE_VEC;
+    const x = kf && kf.x != null && isFinite(kf.x) ? kf.x : 0;
+    const tgX = {
+      val: r4(clamp(x / 2, -1, 1)),
+      aro: r4(clamp(BASE_VEC.aro + 0.4 * Math.abs(x) / 2, 0, 1))
+    };
+    const a = VEC_KF_ALPHA;
+    const tg = {
+      val: r4((1 - a) * tgMood.val + a * tgX.val),
+      aro: r4((1 - a) * tgMood.aro + a * tgX.aro)
+    };
+    const K = kf && kf.K != null && isFinite(kf.K) ? kf.K : INERTIA;
+    const g = r4(clamp(0.5 * INERTIA + 0.5 * K, VEC_KF_G_MIN, VEC_KF_G_MAX));
+    return {
+      vec: {
+        val: r4(prev.val + g * (tg.val - prev.val)),
+        aro: r4(prev.aro + g * (tg.aro - prev.aro))
+      },
+      tg: tg, g: g, tgMood: tgMood, tgX: tgX
+    };
+  }
+
+  /** 面板短 hint：KF 状态（非调试墙） */
+  function formatKfHint(st) {
+    if (!st || !st.kf || st.kf.x == null) return '';
+    const bits = ['â=' + Number(st.kf.x).toFixed(2), 'P=' + Number(st.kf.P != null ? st.kf.P : 0).toFixed(3)];
+    const g = st.g || {};
+    if (g.yT != null) bits.push('yT=' + Number(g.yT).toFixed(2));
+    if (g.yModel != null) bits.push('yM=' + g.yModel);
+    if (g.yLex != null) bits.push('yL=' + Number(g.yLex).toFixed(2));
+    if (g.w != null) bits.push('w=' + Number(g.w).toFixed(2));
+    if (g.robust) bits.push('robust');
+    return bits.join(' · ');
+  }
+
+  /** 面板短 hint：CUSUM */
+  function formatCusumHint(st) {
+    if (!st || !st.cusum) return '';
+    const c = st.cusum;
+    return '档' + c.tier + '/5 · dwell=' + (c.dwell != null ? c.dwell : 0)
+      + ' · S+=' + Number(c.sp || 0).toFixed(2) + ' · S-=' + Number(c.sm || 0).toFixed(2);
   }
 
   // ---- 多角色隔离（轻量 API，UI 不做）----
@@ -510,17 +585,18 @@
     const aff = clamp(s0.aff + d, 0, 1);
     net = r4(net + (aff - s0.aff));
 
-    const tg = m ? TARGET[m] : BASE_VEC;
-    const vec = { val: r4(s0.vec.val + INERTIA * (tg.val - s0.vec.val)), aro: r4(s0.vec.aro + INERTIA * (tg.aro - s0.vec.aro)) };
+    // vec：KF 路径用滤波 â + K 驱动（见 vecStepKf）；不再纯 INERTIA
+    const vs = vecStepKf(s0.vec, m, kf);
+    const vec = vs.vec;
     const cu = cusumUpdate(prev && prev.cusum, kf.x, s0.aff);
     const whyLoc = parsedUse.why ? locateWhy(parsedUse.why, userText) : null;
     const hardGuard = guardHit.some(h => !/^why:/.test(h) && h !== 'inconsistent');
     const pBase = forcedMissing ? 'missing_state+guard' : (hardGuard ? 'model+guard' : 'model');
     const out = { v: 1, aff: r4(aff), vec: vec, mood: classify(vec, s0.mood), ts: now, a: a, m: m,
-      g: { day: day, net: net, guard: guardHit, inconsistent: !!cons.inconsistent, w: r4(w), yModel: yModel, yLex: yLex, yT: yT, robust: !!kf.robust },
+      g: { day: day, net: net, guard: guardHit, inconsistent: !!cons.inconsistent, w: r4(w), yModel: yModel, yLex: yLex, yT: yT, robust: !!kf.robust, vecG: vs.g },
       p: pBase + '+kf',
       stateMissing: !!forcedMissing, explicitNeutral: a === 0,
-      kf: { x: kf.x, P: kf.P },
+      kf: { x: kf.x, P: kf.P, K: kf.K },
       cusum: { sp: cu.sp, sm: cu.sm, dwell: cu.dwell, tier: cu.tier } };
     if (parsedUse.why) out.why = parsedUse.why;
     if (whyLoc) out.whyLoc = whyLoc;
@@ -677,9 +753,9 @@
 
   const Affect = { BASE_AFF, AFF_HALF_LIFE, MOOD_HALF_LIFE, AFF_HALF_LIFE_TURN, MOOD_HALF_LIFE_TURN, BASE_VEC, DELTA, NEG_MULT, DAILY_GAIN_CAP, INERTIA, HYS, TIER_TH, TIER_LABELS, MOODS, TARGET,
     MISS_WINDOW, MISS_THRESHOLD, DEMO_K, STRONG_REMIND,
-    KF_Q, KF_R, KF_W, KF_W_WHY, KF_W_INCONSISTENT, CUSUM_K_UP, CUSUM_K_DN, CUSUM_H_UP, CUSUM_H_DN, CUSUM_D, CHAR_SELF_W, CHAR_SCENE_W,
+    KF_Q, KF_R, KF_W, KF_W_WHY, KF_W_INCONSISTENT, CUSUM_K_UP, CUSUM_K_DN, CUSUM_H_UP, CUSUM_H_DN, CUSUM_D, CHAR_SELF_W, CHAR_SCENE_W, VEC_KF_ALPHA, VEC_KF_G_MIN, VEC_KF_G_MAX,
     tier, tierLabel, relationOf, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, clockOf, MODES, WHY_TH, stripState, stripContent, guard, step, stepLegacy, locateWhy, latest, fixedProtocol, renderInjection, applyToMessages, dayKey, textOf,
-    lexiconScore, kfUpdate, cusumUpdate, checkConsistency, useKfEstimator, affToX, deltaFromA,
+    lexiconScore, kfUpdate, cusumUpdate, checkConsistency, useKfEstimator, estimatorOf, vecStepKf, formatKfHint, formatCusumHint, affToX, deltaFromA,
     getAffectFor, setAffectFor, setSceneMood, blendAffect,
     missingStats, shouldDemoState, rebuildStateTag, guardStats, affectSnapshots };
 
@@ -688,8 +764,8 @@
   if (reg) {
     const ID = 'affect';
     reg.register({
-      id: ID, icon: '💓', name: '好感度 / 心情', version: '1.2.0', perConversation: false, defaultEnabled: true,
-      desc: '模型每轮自报 <state>{"a","m"}</state>。v1.2：KF 平滑 + CUSUM 档位 + 词典融合 + 自报一致性；estimator=legacy 可回退。',
+      id: ID, icon: '💓', name: '好感度 / 心情', version: '1.3.0', perConversation: false, defaultEnabled: true,
+      desc: '模型每轮自报 <state>{"a","m"}</state>。v1.3：KF 路径 vec 由滤波 â/K 驱动（减少纯 INERTIA）；面板 KF/CUSUM 短 hint + KF/旧版开关；v1.2 起含 KF+CUSUM+词典+一致性；estimator=legacy 可回退。',
       hooks: {
         onBeforeRequest(ctx) {
           const msgs = ctx.messages || [];
@@ -719,10 +795,10 @@
           const clock = clockOf(ctx.conv, ctx.meta);
           const prev = latest(ctx.conv, bot);
           const turn = clock === 'turn' ? ((prev && prev.turn) || 0) + 1 : undefined;
-          const est = (ctx.conv && ctx.conv.affectEstimator) || (ctx.settings && ctx.settings.affectEstimator) || 'kf';
+          const est = estimatorOf(ctx.conv, ctx.settings);
           const asstText = textOf(bot.content);
           bot.affect = step(prev, parsed, textOf(ctx.lastUser && ctx.lastUser.content), Date.now(), {
-            mode: modeOf(ctx.conv), clock, turn, estimator: est, assistantText: asstText, settings: ctx.settings
+            mode: modeOf(ctx.conv), clock, turn, estimator: est, assistantText: asstText, settings: ctx.settings, conv: ctx.conv
           });
           if (host && host.saveConv) host.saveConv(ctx.conv);
         },
@@ -736,31 +812,57 @@
       },
       renderPanel(box, host) {
         const conv = host.conv(), lt = latest(conv);
-        if (!lt) { box.innerHTML = '<div class="hint">本对话还没有好感 / 心情状态（模型回复末尾输出 &lt;state&gt; 后出现）。</div>'; return; }
+        const settings = host.settings ? host.settings() : (host.getSettings ? host.getSettings() : null);
+        const est = estimatorOf(conv, settings);
+        if (!lt) {
+          box.innerHTML = '<div class="hint">本对话还没有好感 / 心情状态（模型回复末尾输出 &lt;state&gt; 后出现）。</div>' +
+            '<label class="field inline"><span>估计器<small>KF=隐状态平滑；旧版=DELTA/INERTIA</small></span><select class="af-est">' +
+            '<option value="kf"' + (est === 'kf' ? ' selected' : '') + '>KF</option>' +
+            '<option value="legacy"' + (est === 'legacy' ? ' selected' : '') + '>旧版</option></select></label>';
+          box.querySelector('.af-est').onchange = e => {
+            conv.affectEstimator = e.target.value; host.saveConv(conv);
+            host.toast('估计器：' + (e.target.value === 'kf' ? 'KF' : '旧版'));
+            this.renderPanel(box, host);
+          };
+          return;
+        }
         const clock = clockOf(conv);
         const turn = clock === 'turn' ? (lt.turn || 0) : undefined;
         const s = decay(lt, Date.now(), { clock, turn });
         const md = modeOf(conv), sp = sparkline(series(conv, 30));
         const ms = missingStats(conv), gs = guardStats(conv);
         const rel = relationOf(s);
-        box.innerHTML = '<div class="hint">当前心情：' + host.esc(s.mood) + ' · 好感 ' + s.aff.toFixed(3) + '（' + host.esc(rel) + ' · 档 ' + tier(s.aff) + '/5）· 时钟 ' + clock + '</div>' +
+        const kfHint = formatKfHint(lt), cuHint = formatCusumHint(lt);
+        const tierShow = (lt.cusum && lt.cusum.tier != null) ? lt.cusum.tier : tier(s.aff);
+        box.innerHTML = '<div class="hint">当前心情：' + host.esc(s.mood) + ' · 好感 ' + s.aff.toFixed(3) + '（' + host.esc(rel) + ' · 档 ' + tierShow + '/5）· 时钟 ' + clock + ' · 估计器 ' + est + '</div>' +
           (sp ? '<div class="hint">好感走势（近 30 轮，虚线 = 基线）<br>' + sp + '</div>' : '') +
           (lt.why ? '<div class="hint">依据：' + host.esc(lt.why) + '</div>' : '') +
+          (kfHint ? '<div class="hint">KF：' + host.esc(kfHint) + '</div>' : '') +
+          (cuHint ? '<div class="hint">CUSUM：' + host.esc(cuHint) + '</div>' : '') +
           '<div class="hint">漏标率：' + ms.missing + '/' + ms.total + (ms.total ? '（' + Math.round(ms.rate * 100) + '%）' : '') +
           ' · 护栏：强制 ' + gs.hardCount + ' / soft ' + gs.softCount +
           (Object.keys(gs.all).length ? '（' + host.esc(Object.keys(gs.all).map(k => k + '×' + gs.all[k]).join(', ')) + '）' : '') + '</div>' +
+          '<label class="field inline"><span>估计器<small>KF=隐状态平滑；旧版=DELTA/INERTIA。写入本对话</small></span><select class="af-est">' +
+          '<option value="kf"' + (est === 'kf' ? ' selected' : '') + '>KF</option>' +
+          '<option value="legacy"' + (est === 'legacy' ? ' selected' : '') + '>旧版</option></select></label>' +
           '<label class="field inline"><span>护栏档位<small>黑暗向：越界词不强制；辱骂在模型 a≥0 时 soft。剧情引用不触发</small></span><select class="af-mode">' +
           MODES.map(x => '<option value="' + x + '"' + (x === md ? ' selected' : '') + '>' + ({ normal: '标准', dark: '黑暗向', nsfw: 'NSFW' }[x]) + '</option>').join('') + '</select></label>' +
           '<div class="hint">最近一轮：a=' + lt.a + ' · m=' + host.esc(lt.m || '-') + ' · 来源 ' + host.esc(lt.p || '-') + (lt.g && lt.g.guard && lt.g.guard.length ? ' · 护栏 ' + host.esc(lt.g.guard.join(',')) : '') + (lt.g ? ' · 今日净增 ' + (lt.g.net || 0).toFixed(3) : '') + '</div>' +
           '<div class="hint">注入示例（user 头）：<br><code>' + host.esc(renderTag(s)) + '</code></div>' +
           '<div class="hint">固定协议（system）：<br><code>' + host.esc(fixedProtocol()) + '</code></div>' +
           '<button class="chip-btn af-reset">重置本对话状态</button>';
+        box.querySelector('.af-est').onchange = e => {
+          conv.affectEstimator = e.target.value; host.saveConv(conv);
+          host.toast('估计器：' + (e.target.value === 'kf' ? 'KF' : '旧版'));
+          this.renderPanel(box, host);
+        };
         box.querySelector('.af-mode').onchange = e => { conv.affectMode = e.target.value; host.saveConv(conv); host.toast('护栏档位：' + e.target.selectedOptions[0].textContent); };
         box.querySelector('.af-reset').onclick = () => {
           invalidateFrom(conv, 0);
           host.saveConv(conv); host.toast('已重置'); this.renderPanel(box, host);
         };
       },
+
     });
   }
 
