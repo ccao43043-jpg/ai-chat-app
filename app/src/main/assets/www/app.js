@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.1';
+  const APP_VERSION = '0.21.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2251,6 +2251,9 @@
     Object.assign(conv, f);
     const applied = Worlds.applyWorldToConversation(conv, wd, RPCache, Date.now());
     conv = applied.conv;
+    if (!conv.messages) conv.messages = [];
+    const gm = Worlds.greetingMessage(wd, conv, Date.now(), uid);
+    if (gm) conv.messages.push(gm);
     saveConv();
     closeWorldEdit(); closeWorlds(); closeDrawer();
     renderAll();
@@ -2271,7 +2274,7 @@
     editingWorld.isNew = !wd;
     $('#wd-title').textContent = wd ? '编辑世界' : '新建世界';
     $('#wd-emoji').value = editingWorld.emoji; $('#wd-emoji-view').textContent = editingWorld.emoji;
-    $('#wd-name').value = wd ? wd.name : ''; $('#wd-desc').value = editingWorld.desc || '';
+    $('#wd-name').value = wd ? wd.name : ''; $('#wd-desc').value = editingWorld.desc || ''; $('#wd-greeting').value = editingWorld.greeting || '';
     $('#wd-delete').style.display = wd ? '' : 'none';
     $('#wd-start').style.display = wd ? '' : 'none';
     $('#wd-sync').style.display = wd ? '' : 'none';
@@ -2302,7 +2305,7 @@
     Worlds.BLOCK_IDS.forEach(id => { const el = $('#wd-block-' + id); blocks[id] = el ? el.value : ''; });
     return {
       id: editingWorld.id, emoji: $('#wd-emoji').value.trim() || '🌍', name,
-      desc: $('#wd-desc').value.trim(), blocks,
+      desc: $('#wd-desc').value.trim(), greeting: $('#wd-greeting').value, blocks,
       createdAt: editingWorld.createdAt || 0,
     };
   }
