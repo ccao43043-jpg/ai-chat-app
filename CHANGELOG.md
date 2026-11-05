@@ -1,3 +1,12 @@
+**v0.22.5：OpenRouter 配置页一键刷新最低价**
+
+- 服务商编辑 / 配置 API 页「模型分类」旁新增 **刷新价格**（仅 OpenRouter 显示）：对当前已选模型（文本 chips + 分类字段）有限并发拉取 `/models/{id}/endpoints`，用现有 floor 逻辑更新「最低 输入 / 输出」
+- 进行中按钮禁用并显示「刷新中…」；结束 toast 成功 / 失败条数；非 OpenRouter 隐藏按钮
+- 复用 `buildEndpointsRequest` / `floorPricingFromEndpoints` / 懒加载去重队列；支持 force 强制重拉
+- Android `0.22.5`（versionCode **73**）
+
+---
+
 **v0.22.4：本地资料库导入 / 导出（JSON · NDJSON · Markdown）**
 
 - 资料库管理页新增**导入**与**导出**：文件选择或粘贴文本，格式自动探测；冲突策略默认**合并**（同 id 覆盖，无 id 新建），可选**替换**

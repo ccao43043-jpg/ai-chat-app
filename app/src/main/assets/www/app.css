@@ -272,6 +272,7 @@ details.reasoning .r-text { white-space: pre-wrap; margin-top: 6px; line-height:
 .chip-btn.accent { background: var(--accent-soft); color: var(--accent); }
 .chip-btn:active { opacity: .75; }
 .chip-btn:disabled { opacity: .5; }
+.pe-cat-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
 .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .model-chips:empty::before { content: "还没有模型"; color: var(--fg-3); font-size: 13px; }
 .mchip { display: inline-flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 0 2px 0 10px; height: 34px; font-size: 13.5px; max-width: 100%; }

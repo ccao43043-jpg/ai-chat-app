@@ -48,6 +48,10 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.22.5：OpenRouter 配置页一键刷新最低价**
+- 服务商编辑页「模型分类」旁「刷新价格」：对已选模型并发拉取 endpoints 最低价并更新显示；仅 OpenRouter
+- Android `0.22.5`（versionCode 73）/ 桌面 / npm `0.22.5`
+
 **v0.22.4：本地资料库导入 / 导出（JSON · NDJSON · Markdown）**
 - 管理页导入/导出；NDJSON 最密，另支持原生 JSON 整库与紧凑 Markdown；默认合并（同 id 覆盖）
 - Android `0.22.4`（versionCode 72）/ 桌面 / npm `0.22.4`

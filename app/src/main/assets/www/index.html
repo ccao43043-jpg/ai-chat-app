@@ -232,7 +232,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.22.4 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.22.5 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -266,8 +266,12 @@
         <div class="input-row"><input id="pe-key" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-..."><button class="chip-btn" id="pe-key-toggle" type="button">显示</button></div></label>
     </div>
     <div class="group-title row">模型分类
-      <button class="chip-btn accent" id="pe-fetch" type="button">
-        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>从接口获取模型列表</button>
+      <span class="pe-cat-actions">
+        <button class="chip-btn" id="pe-refresh-price" type="button" style="display:none" title="重新拉取 OpenRouter endpoints 最低价">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>刷新价格</button>
+        <button class="chip-btn accent" id="pe-fetch" type="button">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>从接口获取模型列表</button>
+      </span>
     </div>
     <div class="group form" id="pe-cat-text">
       <div class="field"><span>文本模型<small>用于聊天；第一个为默认聊天模型，点 × 删除，点模型名设为默认</small></span></div>

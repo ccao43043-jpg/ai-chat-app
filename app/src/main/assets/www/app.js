@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.22.4';
+  const APP_VERSION = '0.22.5';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2681,6 +2681,7 @@
     $('#pe-base-hint').textContent = presetHints[editing.presetId] || baseHints[editing.type];
     $('#pe-delete').style.display = fresh ? 'none' : '';
     renderModelChips(); renderFieldPrices();
+    syncPriceRefreshBtn();
     $('#page-provider').classList.add('show');
     refreshOpenRouterFloorPrices(editModels.concat(Object.keys(PE_FIELDS).map(f => editing[f])).filter(Boolean));
   }
@@ -2837,27 +2838,74 @@
       });
     }
   }
-  function ensureOpenRouterFloor(modelId) {
+  function ensureOpenRouterFloor(modelId, opts) {
     if (!modelId || !isEditingOpenRouter()) return Promise.resolve(null);
+    const force = !!(opts && opts.force);
     const meta = editMeta[modelId];
-    if (meta && (meta.priceIsFloor || meta.priceFloor)) return Promise.resolve(meta.priceFloor || meta.price);
+    if (!force && meta && (meta.priceIsFloor || meta.priceFloor)) return Promise.resolve(meta.priceFloor || meta.price);
     if (floorInflight[modelId]) return floorInflight[modelId];
+    if (force && meta) { delete meta.priceIsFloor; delete meta.priceFloor; }
     let resolve; const p = new Promise(r => { resolve = r; });
     floorInflight[modelId] = p;
     floorQueue.push({ modelId, resolve });
     pumpFloorQueue();
     return p;
   }
-  function refreshOpenRouterFloorPrices(ids) {
-    if (!isEditingOpenRouter()) return;
+  function selectedModelsForFloor() {
+    const seen = new Set(), out = [];
+    editModels.concat(Object.keys(PE_FIELDS).map(f => ($(PE_FIELDS[f]) && $(PE_FIELDS[f]).value.trim()) || (editing && editing[f]) || '')).forEach(m => {
+      m = String(m || '').trim();
+      if (!m || seen.has(m)) return;
+      seen.add(m); out.push(m);
+    });
+    return out;
+  }
+  function refreshOpenRouterFloorPrices(ids, opts) {
+    if (!isEditingOpenRouter()) return Promise.resolve([]);
+    const force = !!(opts && opts.force);
+    const list = ids || selectedModelsForFloor();
     const seen = new Set();
-    (ids || []).forEach(m => {
+    const jobs = [];
+    list.forEach(m => {
       m = String(m || '').trim();
       if (!m || seen.has(m)) return;
       seen.add(m);
-      ensureOpenRouterFloor(m);
+      jobs.push(ensureOpenRouterFloor(m, { force: force }));
     });
+    return Promise.all(jobs);
   }
+  function syncPriceRefreshBtn() {
+    const btn = $('#pe-refresh-price'); if (!btn) return;
+    btn.style.display = isEditingOpenRouter() ? '' : 'none';
+  }
+  let priceRefreshBusy = false;
+  $('#pe-refresh-price').onclick = async () => {
+    if (!isEditingOpenRouter()) { toast('仅 OpenRouter 支持刷新价格'); return; }
+    if (priceRefreshBusy) return;
+    const typed = $('#pe-key').value.trim();
+    const base = $('#pe-base').value.trim();
+    if (!/^https?:\/\/.+/.test(base)) { toast('请先填写正确的 Base URL'); return; }
+    if (!typed) { toast('请先填写 API Key'); return; }
+    const ids = selectedModelsForFloor();
+    if (!ids.length) { toast('请先添加模型'); return; }
+    const btn = $('#pe-refresh-price');
+    priceRefreshBusy = true; btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '刷新中…';
+    try {
+      const results = await refreshOpenRouterFloorPrices(ids, { force: true });
+      refreshFloorUi();
+      let ok = 0, fail = 0;
+      results.forEach(r => { if (r) ok++; else fail++; });
+      if (!fail) toast('价格已刷新（' + ok + '）');
+      else if (!ok) toast('刷新失败（' + fail + '）');
+      else toast('已刷新 ' + ok + '，失败 ' + fail);
+    } catch (e) {
+      toast('刷新失败：' + (e && e.message ? e.message : e));
+    } finally {
+      priceRefreshBusy = false; btn.disabled = false; btn.innerHTML = old;
+    }
+  };
+  $('#pe-base').addEventListener('input', syncPriceRefreshBtn);
+  $('#pe-type').addEventListener('change', syncPriceRefreshBtn);
 
   // 从接口获取模型列表
   let fetched = [], fetchSel = new Set(), fetchCat = 'all';
