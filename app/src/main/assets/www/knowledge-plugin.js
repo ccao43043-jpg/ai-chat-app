@@ -48,7 +48,7 @@
 
   /** 当前面板选中的 worldId（模块级，切换对话不丢） */
   let selectedWorldId = null;
-  let ui = { catId: null, q: '', mode: 'list', editEntry: null, editCat: null };
+  let ui = { catId: null, q: '', mode: 'list', editEntry: null, editCat: null, importMode: 'merge', importText: '', importFormat: '' };
 
   function pickWorld(host, preferId) {
     const list = worldsOf(host);
@@ -242,6 +242,8 @@
       '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">' +
       '<button type="button" class="chip-btn accent kn-add-entry"' + (cat ? '' : ' disabled') + '>＋ 新建条目</button>' +
       '<button type="button" class="chip-btn kn-rename-cat"' + (cat ? '' : ' disabled') + '>重命名分类</button>' +
+      '<button type="button" class="chip-btn kn-import">导入</button>' +
+      '<button type="button" class="chip-btn kn-export">导出</button>' +
       '<button type="button" class="chip-btn kn-cat-up" title="分类前移"' + (cat ? '' : ' disabled') + '>←</button>' +
       '<button type="button" class="chip-btn kn-cat-down" title="分类后移"' + (cat ? '' : ' disabled') + '>→</button>' +
       '</div>' +
@@ -282,6 +284,16 @@
       ui.mode = 'entry'; ui.editEntry = { catId: cat.id, entry: null };
       renderEntryEditor(box, host, worldId, cat.id, null);
     };
+    const imp = box.querySelector('.kn-import');
+    if (imp) imp.onclick = () => {
+      ui.mode = 'import';
+      renderImport(box, host, worldId);
+    };
+    const exp = box.querySelector('.kn-export');
+    if (exp) exp.onclick = () => {
+      ui.mode = 'export';
+      renderExport(box, host, worldId);
+    };
     box.querySelectorAll('.kn-entry').forEach(card => {
       card.onclick = e => {
         if (e.target.closest('.kn-pin-btn')) return;
@@ -312,6 +324,155 @@
     const down = box.querySelector('.kn-cat-down');
     if (up) up.onclick = () => moveCat(host, box, worldId, -1);
     if (down) down.onclick = () => moveCat(host, box, worldId, 1);
+  }
+
+
+  function formatLabel(fmt) {
+    if (fmt === 'json') return '原生 JSON（整库，信息密度中）';
+    if (fmt === 'ndjson') return 'NDJSON / JSONL（每行一条，信息密度最高）';
+    if (fmt === 'markdown') return '紧凑 Markdown（可读 + 较密）';
+    if (fmt === 'empty') return '空内容';
+    return '未识别';
+  }
+
+  function downloadText(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function renderImport(box, host, worldId) {
+    const detected = ui.importText ? K.detectImportFormat(ui.importText) : '';
+    ui.importFormat = detected && detected !== 'empty' && detected !== 'unknown' ? detected : ui.importFormat;
+    const mode = ui.importMode === 'replace' ? 'replace' : 'merge';
+    box.innerHTML =
+      '<div class="hint">导入资料 · 世界 ' + esc(host, worldId) + '</div>' +
+      '<div class="hint soft">支持三种格式（信息密度从高到低）：<br>' +
+      '1. <b>NDJSON / JSONL</b>（推荐，最密）每行一条 entry<br>' +
+      '2. <b>原生 JSON</b> 整库 <code>knowledge_world_*.json</code><br>' +
+      '3. <b>紧凑 Markdown</b> <code>## 分类</code> / <code>### 标题</code></div>' +
+      '<div class="group form">' +
+      '<label class="field"><span>选择文件<small>.json / .ndjson / .jsonl / .md</small></span>' +
+      '<input type="file" class="kn-file" accept=".json,.ndjson,.jsonl,.md,.markdown,.txt,application/json,text/plain,text/markdown"></label>' +
+      '<label class="field"><span>或粘贴文本</span><textarea class="kn-import-text" rows="10" placeholder=\'{"categoryId":"housing","title":"别墅","content":"…","keywords":["别墅"]}\'>' +
+      esc(host, ui.importText || '') + '</textarea></label>' +
+      '<div class="hint">格式探测：' + esc(host, formatLabel(detected || 'unknown')) + '</div>' +
+      '<label class="field"><span>冲突策略</span>' +
+      '<select class="kn-import-mode">' +
+      '<option value="merge"' + (mode === 'merge' ? ' selected' : '') + '>合并（默认：同 id 覆盖，无 id 新建）</option>' +
+      '<option value="replace"' + (mode === 'replace' ? ' selected' : '') + '>替换（清空原条目后导入）</option>' +
+      '</select></label>' +
+      '</div>' +
+      '<div class="btn-row" style="display:flex;gap:8px;margin-top:12px">' +
+      '<button class="pill-btn kn-cancel" type="button">取消</button>' +
+      '<button class="pill-btn primary kn-do-import" type="button" style="flex:1.4">开始导入</button>' +
+      '</div>';
+
+    const ta = box.querySelector('.kn-import-text');
+    const refreshDetect = () => {
+      ui.importText = ta.value;
+      const d = K.detectImportFormat(ui.importText);
+      const hint = box.querySelector('.hint:nth-of-type(3)') || box.querySelectorAll('.hint')[2];
+      // re-render detect line simply:
+      const labels = box.querySelectorAll('.hint');
+      labels.forEach(el => {
+        if (String(el.textContent || '').indexOf('格式探测') === 0) {
+          el.textContent = '格式探测：' + formatLabel(d);
+        }
+      });
+    };
+    ta.oninput = refreshDetect;
+
+    box.querySelector('.kn-file').onchange = e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        ui.importText = String(rd.result || '');
+        ta.value = ui.importText;
+        refreshDetect();
+        host.toast('已读取文件「' + f.name + '」');
+      };
+      rd.onerror = () => host.toast('读取文件失败');
+      rd.readAsText(f);
+    };
+    box.querySelector('.kn-import-mode').onchange = e => {
+      ui.importMode = e.target.value === 'replace' ? 'replace' : 'merge';
+    };
+    box.querySelector('.kn-cancel').onclick = () => {
+      ui.mode = 'list'; ui.importText = '';
+      plugin.renderPanel(box, host, worldId);
+    };
+    box.querySelector('.kn-do-import').onclick = () => {
+      const text = ta.value;
+      if (!String(text || '').trim()) { host.toast('请选择文件或粘贴内容'); return; }
+      const mode2 = box.querySelector('.kn-import-mode').value === 'replace' ? 'replace' : 'merge';
+      ui.importMode = mode2;
+      try {
+        const parsed = K.parseImport(text);
+        let doc = loadDoc(host, worldId);
+        const result = K.mergeDoc(doc, parsed, { mode: mode2, worldId, now: Date.now() });
+        persist(host, result.doc);
+        const parts = [];
+        parts.push('新增 ' + result.added);
+        parts.push('更新 ' + result.updated);
+        if (result.categoriesCreated) parts.push('新分类 ' + result.categoriesCreated);
+        host.toast('导入完成（' + formatLabel(parsed.format).split('（')[0] + ' · ' + (mode2 === 'replace' ? '替换' : '合并') + '）：' + parts.join('，'));
+        ui.mode = 'list'; ui.importText = '';
+        plugin.renderPanel(box, host, worldId);
+      } catch (err) {
+        host.toast('导入失败：' + String(err && err.message || err));
+      }
+    };
+  }
+
+  function renderExport(box, host, worldId) {
+    const doc = loadDoc(host, worldId);
+    const count = (doc.categories || []).reduce((n, c) => n + (c.entries || []).length, 0);
+    box.innerHTML =
+      '<div class="hint">导出资料 · 世界 ' + esc(host, worldId) + ' · ' + count + ' 条</div>' +
+      '<div class="hint soft">NDJSON 信息密度最高，适合大批量备份；原生 JSON 可完整往返；Markdown 便于阅读编辑。</div>' +
+      '<div class="group form" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">' +
+      '<button type="button" class="chip-btn accent kn-ex-ndjson">导出 NDJSON（最密）</button>' +
+      '<button type="button" class="chip-btn kn-ex-json">导出原生 JSON</button>' +
+      '<button type="button" class="chip-btn kn-ex-md">导出紧凑 Markdown</button>' +
+      '<button type="button" class="chip-btn kn-ex-copy-ndjson">复制 NDJSON 到剪贴板</button>' +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:12px"><button class="pill-btn kn-cancel" type="button">返回</button></div>';
+
+    const base = 'knowledge_world_' + worldId;
+    box.querySelector('.kn-ex-ndjson').onclick = () => {
+      downloadText(base + '.ndjson', K.exportNdjson(doc), 'application/x-ndjson;charset=utf-8');
+      host.toast('已导出 NDJSON');
+    };
+    box.querySelector('.kn-ex-json').onclick = () => {
+      downloadText(base + '.json', K.exportJSON(doc), 'application/json;charset=utf-8');
+      host.toast('已导出 JSON');
+    };
+    box.querySelector('.kn-ex-md').onclick = () => {
+      downloadText(base + '.md', K.exportMarkdown(doc), 'text/markdown;charset=utf-8');
+      host.toast('已导出 Markdown');
+    };
+    box.querySelector('.kn-ex-copy-ndjson').onclick = async () => {
+      const t = K.exportNdjson(doc);
+      try {
+        if (host.copyText) host.copyText(t);
+        else if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(t);
+        else {
+          const ta = document.createElement('textarea');
+          ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        host.toast('已复制 NDJSON');
+      } catch (e) { host.toast('复制失败：' + String(e && e.message || e)); }
+    };
+    box.querySelector('.kn-cancel').onclick = () => {
+      ui.mode = 'list';
+      plugin.renderPanel(box, host, worldId);
+    };
   }
 
   function moveCat(host, box, worldId, delta) {
@@ -377,10 +538,10 @@
     id: ID,
     icon: '📚',
     name: '本地资料库',
-    version: '1.0.0',
+    version: '1.1.0',
     perConversation: false,
     defaultEnabled: false,
-    desc: '按世界隔离的本地设定资料（住宅 / 物品 / 地点等）。阶段 1：管理与存储；阶段 2 再按关键词注入到 user 消息（不写 L1）。',
+    desc: '按世界隔离的本地设定资料（住宅 / 物品 / 地点等）。阶段 1：管理、存储、导入/导出（JSON / NDJSON / Markdown）；阶段 2 再按关键词注入到 user 消息（不写 L1）。',
     hooks: {
       // 阶段 1：故意不实现 onBeforeRequest / [LOCAL_KNOWLEDGE] 注入
     },
@@ -413,6 +574,14 @@
         renderCatEditor(box, host, worldId, ui.editCat);
         return;
       }
+      if (ui.mode === 'import') {
+        renderImport(box, host, worldId);
+        return;
+      }
+      if (ui.mode === 'export') {
+        renderExport(box, host, worldId);
+        return;
+      }
       ui.mode = 'list';
       renderList(box, host, worldId);
     },
@@ -423,7 +592,7 @@
     id: ID,
     open(host, worldId) {
       selectedWorldId = worldId || selectedWorldId;
-      ui.mode = 'list'; ui.editEntry = null; ui.editCat = null; ui.q = '';
+      ui.mode = 'list'; ui.editEntry = null; ui.editCat = null; ui.q = ''; ui.importText = '';
       if (host && host.openPanel) host.openPanel(ID, worldId || selectedWorldId);
     },
     selectedWorldId: () => selectedWorldId,

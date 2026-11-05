@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-app",
-  "version": "0.22.3",
+  "version": "0.22.4",
   "private": true,
   "description": "AI Chat Android 应用（前端逻辑测试）",
   "scripts": {

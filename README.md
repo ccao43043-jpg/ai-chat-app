@@ -48,6 +48,10 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.22.4：本地资料库导入 / 导出（JSON · NDJSON · Markdown）**
+- 管理页导入/导出；NDJSON 最密，另支持原生 JSON 整库与紧凑 Markdown；默认合并（同 id 覆盖）
+- Android `0.22.4`（versionCode 72）/ 桌面 / npm `0.22.4`
+
 **v0.22.3：本地资料库（阶段 1 · 管理页 + 本地存储）**
 - 按世界隔离的本地资料（CRUD / 置顶 / 关键词检索）；入口在世界页与插件，不占主屏卡片
 - 阶段 1 只存设置与管理 UI，不注入请求；Android `0.22.3`（versionCode 71）/ 桌面 / npm `0.22.3`

@@ -154,3 +154,140 @@ test('keywords 字符串拆分', () => {
   assert.deepEqual(K.normalizeKeywords('别墅，房间、车库'), ['别墅', '房间', '车库']);
   assert.deepEqual(K.normalizeKeywords([' a ', '', 'b']), ['a', 'b']);
 });
+
+test('detectImportFormat：json / ndjson / markdown', () => {
+  assert.equal(K.detectImportFormat('{"worldId":"w","categories":[]}'), 'json');
+  assert.equal(K.detectImportFormat('{"categoryId":"housing","title":"别墅","content":"x"}'), 'ndjson');
+  assert.equal(K.detectImportFormat('{"categoryId":"housing","title":"a","content":"1"}\n{"categoryId":"housing","title":"b","content":"2"}\n'), 'ndjson');
+  assert.equal(K.detectImportFormat('## housing 住宅布局\n### 主角别墅\n\n一楼\n'), 'markdown');
+  assert.equal(K.detectImportFormat(''), 'empty');
+});
+
+test('parseImport + mergeDoc：原生 JSON 合并同 id 覆盖', () => {
+  let doc = K.emptyDoc('w-imp');
+  doc = K.addEntry(doc, 'housing', { id: 'e-keep', title: '旧别墅', content: '旧', keywords: ['旧'] }, 10);
+  doc = K.addEntry(doc, 'housing', { id: 'e-other', title: '仓库', content: '杂', keywords: [] }, 11);
+
+  const raw = K.exportJSON({
+    worldId: 'w-imp',
+    updatedAt: 1,
+    categories: [{
+      id: 'housing', name: '住宅布局', order: 0,
+      entries: [
+        { id: 'e-keep', title: '新别墅', content: '新内容', keywords: ['别墅'], pinned: true },
+        { id: 'e-new', title: '花园', content: '南侧', keywords: ['花园'] },
+      ],
+    }],
+  });
+  const parsed = K.parseImport(raw);
+  assert.equal(parsed.format, 'json');
+  const r = K.mergeDoc(doc, parsed, { mode: 'merge', worldId: 'w-imp', now: 100 });
+  assert.equal(r.updated, 1);
+  assert.equal(r.added, 1);
+  const housing = K.findCategory(r.doc, 'housing');
+  const keep = housing.entries.find(e => e.id === 'e-keep');
+  assert.equal(keep.title, '新别墅');
+  assert.equal(keep.content, '新内容');
+  assert.equal(keep.pinned, true);
+  assert.ok(housing.entries.find(e => e.id === 'e-new'));
+  assert.ok(housing.entries.find(e => e.id === 'e-other'));
+});
+
+test('parseImport + mergeDoc：NDJSON 合并与替换', () => {
+  let doc = K.emptyDoc('w-nd');
+  doc = K.addEntry(doc, 'housing', { id: 'e1', title: '旧', content: 'c0', keywords: [] }, 1);
+
+  const nd = [
+    '{"categoryId":"housing","id":"e1","title":"别墅","content":"一楼","keywords":["别墅","车库"]}',
+    '{"categoryId":"locations","title":"雨港","content":"靠海","keywords":"港口,码头","pinned":true}',
+    '{"category":"inventory","title":"黑伞","content":"折叠伞"}',
+  ].join('\n');
+  assert.equal(K.detectImportFormat(nd), 'ndjson');
+  const parsed = K.parseImport(nd);
+  assert.equal(parsed.format, 'ndjson');
+  assert.equal(parsed.entries.length, 3);
+
+  const merged = K.mergeDoc(doc, parsed, { mode: 'merge', worldId: 'w-nd', now: 50 });
+  assert.equal(merged.updated, 1);
+  assert.equal(merged.added, 2);
+  assert.equal(K.findEntry(merged.doc, 'housing', 'e1').entry.title, '别墅');
+  assert.deepEqual(K.findEntry(merged.doc, 'housing', 'e1').entry.keywords, ['别墅', '车库']);
+  assert.equal(K.findCategory(merged.doc, 'locations').entries.length, 1);
+  assert.equal(K.findCategory(merged.doc, 'locations').entries[0].pinned, true);
+  assert.equal(K.findCategory(merged.doc, 'inventory').entries[0].title, '黑伞');
+
+  const replaced = K.mergeDoc(merged.doc, parsed, { mode: 'replace', worldId: 'w-nd', now: 60 });
+  // replace 清空后重新导入 3 条
+  const total = replaced.doc.categories.reduce((n, c) => n + c.entries.length, 0);
+  assert.equal(total, 3);
+  assert.equal(replaced.added, 3);
+});
+
+test('parseImport + mergeDoc：紧凑 Markdown', () => {
+  const md = [
+    '## housing 住宅布局',
+    '### 主角别墅',
+    'keywords: 别墅, 房间, 车库',
+    'pinned: true',
+    '',
+    '一楼客厅很大。',
+    '二楼主卧朝南。',
+    '',
+    '## mystery-zone 未知区',
+    '### 秘密基地',
+    'keywords: 基地',
+    '',
+    '藏在山里。',
+    '',
+  ].join('\n');
+  assert.equal(K.detectImportFormat(md), 'markdown');
+  const parsed = K.parseImport(md);
+  assert.equal(parsed.format, 'markdown');
+  assert.equal(parsed.entries.length, 2);
+  const r = K.mergeDoc(K.emptyDoc('w-md'), parsed, { mode: 'merge', worldId: 'w-md', now: 7 });
+  const villa = K.findCategory(r.doc, 'housing').entries[0];
+  assert.equal(villa.title, '主角别墅');
+  assert.equal(villa.pinned, true);
+  assert.deepEqual(villa.keywords, ['别墅', '房间', '车库']);
+  assert.match(villa.content, /一楼客厅/);
+  assert.match(villa.content, /二楼主卧/);
+  const mystery = K.findCategory(r.doc, 'mystery-zone');
+  assert.ok(mystery);
+  assert.equal(mystery.name, '未知区');
+  assert.equal(mystery.entries[0].title, '秘密基地');
+});
+
+test('exportJSON / exportNdjson / exportMarkdown 往返', () => {
+  let doc = K.emptyDoc('w-ex');
+  doc = K.addEntry(doc, 'housing', {
+    id: 'e-a', title: '别墅', content: '一楼\n二楼', keywords: ['别墅'], tags: ['家'], pinned: true,
+  }, 1);
+  doc = K.addEntry(doc, 'locations', { id: 'e-b', title: '雨港', content: '靠海', keywords: ['港'] }, 2);
+
+  const json = K.exportJSON(doc);
+  const backJ = K.mergeDoc(K.emptyDoc('w-ex'), K.parseImport(json), { mode: 'replace', worldId: 'w-ex', now: 9 });
+  assert.equal(K.findEntry(backJ.doc, 'housing', 'e-a').entry.title, '别墅');
+
+  const nd = K.exportNdjson(doc);
+  assert.ok(nd.split('\n').filter(Boolean).length >= 2);
+  const backN = K.mergeDoc(K.emptyDoc('w-ex'), K.parseImport(nd), { mode: 'replace', worldId: 'w-ex', now: 10 });
+  assert.equal(backN.added, 2);
+
+  const md = K.exportMarkdown(doc);
+  assert.match(md, /## housing/);
+  assert.match(md, /### 别墅/);
+  const backM = K.mergeDoc(K.emptyDoc('w-ex'), K.parseImport(md), { mode: 'replace', worldId: 'w-ex', now: 11 });
+  assert.equal(backM.added, 2);
+  assert.equal(K.findCategory(backM.doc, 'housing').entries[0].pinned, true);
+});
+
+test('未知 category 无名称时归 other', () => {
+  const nd = '{"categoryId":"no-such-cat","title":"x","content":"y"}';
+  const r = K.mergeDoc(K.emptyDoc('w-o'), K.parseImport(nd), { mode: 'merge', worldId: 'w-o', now: 1 });
+  // no-such-cat 像 id（含横线），ensureCategory 会自动建；再测纯中文归类
+  const nd2 = '{"category":"只是中文类名","title":"z","content":"w"}';
+  const r2 = K.mergeDoc(K.emptyDoc('w-o2'), K.parseImport(nd2), { mode: 'merge', worldId: 'w-o2', now: 2 });
+  const created = r2.doc.categories.find(c => c.name === '只是中文类名' || c.entries.some(e => e.title === 'z'));
+  assert.ok(created);
+  assert.equal(created.entries[0].title, 'z');
+});

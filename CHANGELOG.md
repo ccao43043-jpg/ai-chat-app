@@ -1,3 +1,16 @@
+**v0.22.4：本地资料库导入 / 导出（JSON · NDJSON · Markdown）**
+
+- 资料库管理页新增**导入**与**导出**：文件选择或粘贴文本，格式自动探测；冲突策略默认**合并**（同 id 覆盖，无 id 新建），可选**替换**
+- 支持格式（信息密度从高到低）：
+  1. **NDJSON / JSONL**（推荐，最密）：每行一条 entry（`categoryId`/`category`、`title`、`content`；可选 `keywords`/`pinned`/`id`/`tags`）
+  2. **原生 JSON**：现有 `knowledge_world_*.json` 整库结构
+  3. **紧凑 Markdown**：`## categoryId 名称` + `### 标题` + 可选 meta + 正文
+- 逻辑：`knowledge.js`（`detectImportFormat` / `parseImport` / `mergeDoc` / `exportJSON` / `exportNdjson` / `exportMarkdown`）；UI：`knowledge-plugin.js`
+- 单测覆盖三种解析与合并；`npm test` 全绿
+- Android `0.22.4`（versionCode **72**）
+
+---
+
 **v0.22.3：本地资料库（阶段 1 · 管理页 + 本地存储）**
 
 - 新增按世界隔离的本地资料库：存储键 `knowledge_world_<worldId>.json`，默认分类（住宅布局 / 物品衣服车辆 / 做过的事 / 地点 / 其他）
