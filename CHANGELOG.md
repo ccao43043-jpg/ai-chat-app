@@ -1,3 +1,9 @@
+**v0.21.6：发送结束后补齐「编辑」按钮**
+
+- 根因：操作按钮只在 `!running` 时生成；生成期间建好的用户气泡没有「编辑」，结束后条数 / 虚拟滚动窗口未变时 `renderMessages` 跳过重建 → 刚发出的消息（含世界对话）一直没有编辑按钮。
+- 修复：`setRunning` 切换运行态时置 `actionsStale`，下次 `renderMessages` 强制重建（短列表与 >40 条虚拟滚动同路径）。
+- 回归：`npm run test:edit` 覆盖世界对话（长列表）与普通对话：发送 → 等回复 → 编辑按钮存在 → 保存 → 离开再回来仍可编辑。
+
 **v0.21.5：OpenRouter 优先最低价供应商**
 
 - **默认按价格路由**：OpenRouter（预设或 baseUrl 含 `openrouter.ai`）请求体自动带 `provider: { sort: "price" }`（等价模型名 `:floor`），优先使用当前最便宜的端点，而非默认负载均衡 / 吞吐优先

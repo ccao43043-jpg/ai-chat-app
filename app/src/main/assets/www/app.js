@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.5';
+  const APP_VERSION = '0.21.6';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -804,6 +804,10 @@
   let vsScrollBound = false;
   let vsRaf = 0;
   let vsLastRange = { start: -1, end: -1, empty: true };
+  // v0.21.6：操作按钮（编辑 / 删除 / 重新生成）只在 !running 时生成。生成期间建好的用户气泡没有「编辑」，
+  // 结束后条数不变、短列表 / 虚拟滚动窗口未变时 renderMessages 不重建 → 刚发出的消息一直没有编辑按钮。
+  // 运行态切换后下一次渲染强制重建（含 >40 条虚拟滚动路径）。
+  let actionsStale = false;
   function vsEstimate(m) {
     const h = vsHeight.get(m);
     if (h != null) return h;
@@ -961,6 +965,7 @@
       return;
     }
     const list = conv.messages;
+    if (actionsStale) { actionsStale = false; opts = Object.assign({}, opts, { force: true }); }
     // 换了对话 / 消息数组（重新加载、切分支、世界开聊替换 conv）：旧节点的按钮闭包指向旧消息对象，必须重建，
     // 否则「编辑 / 删除 / 重新生成」改的是游离对象，界面和存档都不变（v0.21.4 修：世界对话里的消息无法编辑）
     if (vsLastRange.list !== list) opts = Object.assign({}, opts, { force: true });
@@ -1369,6 +1374,7 @@
 
   // ---------------- 发送 / 生成 ----------------
   function setRunning(r) {
+    if (!!running !== !!r) actionsStale = true;
     running = r;
     const btn = $('#btn-send');
     btn.classList.toggle('stop', !!r);

@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.21.6：发送结束后补齐「编辑」按钮**
+
+- 生成结束强制重建消息操作栏，刚发出的用户消息（含世界对话）会出现「编辑」
+- Android `0.21.6`（versionCode 66）/ 桌面 / npm `0.21.6`
+
 **v0.21.5：OpenRouter 优先最低价供应商**
 
 - OpenRouter 请求默认带 `provider.sort = "price"`，优先路由到最便宜端点
