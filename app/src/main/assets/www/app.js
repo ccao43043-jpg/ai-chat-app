@@ -705,7 +705,8 @@
     // 顶栏方案1：紧凑状态条，只显示「命中率」+「心情」；模板入口在输入栏 tpl-chip / 模型菜单
     const raw = conv ? Plugins.registry.headerBadges(settings, conv, pluginHost) : [];
     const hit = raw.find(b => b.plugin === 'rpcache' && b.kind === 'hit') || raw.find(b => b.plugin === 'gcache' && b.kind === 'hit')
-      || raw.find(b => b.plugin === 'rpcache') || raw.find(b => b.plugin === 'gcache');
+      || raw.find(b => b.plugin === 'mmcache' && b.kind === 'hit')
+      || raw.find(b => b.plugin === 'rpcache') || raw.find(b => b.plugin === 'gcache') || raw.find(b => b.plugin === 'mmcache');
     const mood = raw.find(b => b.plugin === 'affect' && b.kind === 'mood');
     const segs = [hit, mood].filter(Boolean);
     bar.innerHTML = '';
@@ -1675,6 +1676,8 @@
     let req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
     const gcp = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache'); // v0.8.2：OpenRouter Gemini 提示缓存
     if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
+    const mmp = rctx.opts && rctx.opts.orMiniMax && Plugins.registry.get('mmcache'); // MiniMax 提示缓存（plugins/cache/mmcache.js）
+    if (mmp) { try { req = mmp.transformRequest(req, rctx); } catch (e) { console.warn('[mmcache]', e); } }
     authed(req, p.id);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
     let status = 0, raw = '', gotDelta = false;

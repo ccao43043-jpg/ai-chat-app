@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const W = '../app/src/main/assets/www/';
 const TU = require(W + 'timeutil.js');
 const S = require(W + 'search.js');
-const G = require(W + 'gcache.js');
+const G = require(W + 'plugins/cache/gcache.js');
 const R = require(W + 'rpcache.js');
 const T = require(W + 'templates.js');
 const P = require(W + 'providers.js');
@@ -27,7 +27,7 @@ test('P1：TZ=Asia/Shanghai 进程下搜索「今天」与 Hybrid 摘要 at 为�
   const [d, ctx] = JSON.parse(execFileSync(process.execPath, ['-e', code], { env: Object.assign({}, process.env, { TZ: 'Asia/Shanghai' }) }).toString());
   assert.strictEqual(d, '2026-11-05');
   assert.ok(ctx.includes('2026-11-05') && !ctx.includes('2026-11-04'));
-  const src = ['search.js', 'gcache.js', 'templates.js'].map(f => fs.readFileSync(path.join(__dirname, W, f), 'utf8')).join('\n');
+  const src = ['search.js', 'plugins/cache/gcache.js', 'templates.js'].map(f => fs.readFileSync(path.join(__dirname, W, f), 'utf8')).join('\n');
   assert.ok(!/toISOString\(\)\.slice\(0,\s*10\)/.test(src), '禁止用 UTC 日期当「今天」');
   assert.strictEqual(S.buildSearchContext([{ title: 'a', url: 'https://a.com', content: 'x' }], 'q', { now: new Date('2026-11-05T00:06:00+08:00'), timeZone: 'Asia/Shanghai' }).includes('2026-11-05'), true);
 });

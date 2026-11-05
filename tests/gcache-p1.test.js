@@ -1,7 +1,7 @@
 // v0.8.9 P1：Hybrid「已发送版本」表按消息身份索引 + 原文 SHA-256/长度校验（docs/plugins/plugin-optimization.md 3.1 / 4.1）
 const test = require('node:test');
 const assert = require('node:assert');
-const G = require('../app/src/main/assets/www/gcache.js');
+const G = require('../app/src/main/assets/www/plugins/cache/gcache.js');
 
 function runner(withIds) {
   const hybrid = G.HybridWindow.empty(), hist = [];
