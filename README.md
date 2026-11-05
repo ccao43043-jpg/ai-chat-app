@@ -48,6 +48,9 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.22.2：OpenRouter 模型价显示改为 endpoints 最低价（标「最低」）**
+- Android `0.22.2`（versionCode 70）/ 桌面 / npm `0.22.2`
+
 **v0.22.1：回退 v0.22.0 主界面 UI（恢复对话为默认主界面与原侧栏）**
 - Android `0.22.1`（versionCode 69）/ 桌面 / npm `0.22.1`
 

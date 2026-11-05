@@ -196,29 +196,81 @@
    * 缺失、0、负数（如 openrouter/auto 的 -1）均不保存；全部缺失返回 null。
    */
   function parsePricing(pr) {
+    return pricingFromRaw(pr, 1);
+  }
+  /** 将美元/Token（及 image 美元/张）按 factor 折算为现有 $/M 结构；factor 通常为 1 或 (1-discount) */
+  function pricingFromRaw(pr, factor) {
     if (!pr || typeof pr !== 'object') return null;
+    const f = Number(factor); const mul = isFinite(f) && f > 0 ? f : 0;
+    if (!mul) return null;
     const num = v => { const n = Number(v); return isFinite(n) && n > 0 ? n : 0; };
     const r = x => Math.round(x * 1e6) / 1e6;
     const o = {};
     const perM = { prompt: pr.prompt, completion: pr.completion, cacheRead: pr.input_cache_read, imageOut: pr.image_output };
-    Object.keys(perM).forEach(k => { const n = num(perM[k]); if (n) o[k] = r(n * 1e6); });
-    const img = num(pr.image); if (img) o.image = r(img);
+    Object.keys(perM).forEach(k => { const n = num(perM[k]) * mul; if (n > 0) o[k] = r(n * 1e6); });
+    const img = num(pr.image) * mul; if (img > 0) o.image = r(img);
     return Object.keys(o).length ? o : null;
+  }
+  /**
+   * endpoints 单项 pricing：标价 × (1 - discount) 后转为 $/M。
+   * discount 缺省 0，钳制到 [0,1]；0/负有效价丢弃。
+   */
+  function effectiveTokenPricing(pr) {
+    if (!pr || typeof pr !== 'object') return null;
+    let disc = Number(pr.discount);
+    if (!isFinite(disc)) disc = 0;
+    if (disc < 0) disc = 0;
+    if (disc > 1) disc = 1;
+    return pricingFromRaw(pr, 1 - disc);
+  }
+  /** 在 endpoints 数组中选有效价最低的一端（比较 prompt+completion，同分再比 prompt） */
+  function floorPricingFromEndpoints(endpoints) {
+    if (!Array.isArray(endpoints) || !endpoints.length) return null;
+    let best = null, bestSum = Infinity, bestPrompt = Infinity;
+    endpoints.forEach(ep => {
+      const eff = effectiveTokenPricing(ep && ep.pricing);
+      if (!eff) return;
+      const sum = (eff.prompt || 0) + (eff.completion || 0);
+      const prompt = eff.prompt || 0;
+      if (sum < bestSum || (sum === bestSum && prompt < bestPrompt)) {
+        best = eff; bestSum = sum; bestPrompt = prompt;
+      }
+    });
+    return best;
+  }
+  /** GET {base}/models/{modelId}/endpoints（modelId 按路径段 encode，保留 /） */
+  function buildEndpointsRequest(provider, modelId) {
+    const base = trimSlash(provider.baseUrl);
+    const key = (provider.apiKey || '').trim();
+    const pathId = String(modelId || '').split('/').map(encodeURIComponent).join('/');
+    return { url: base + '/models/' + pathId + '/endpoints', method: 'GET', headers: { 'Authorization': 'Bearer ' + key } };
+  }
+  /** 解析 endpoints 响应 -> endpoints 数组 */
+  function parseEndpointsResponse(text) {
+    let obj; try { obj = JSON.parse(text); } catch (e) { return []; }
+    if (Array.isArray(obj)) return obj;
+    if (obj && Array.isArray(obj.endpoints)) return obj.endpoints;
+    if (obj && obj.data && Array.isArray(obj.data.endpoints)) return obj.data.endpoints;
+    if (obj && Array.isArray(obj.data)) return obj.data;
+    return [];
   }
   function fmtUsd(n) {
     if (n >= 100) return '$' + n.toFixed(0);
     if (n >= 0.01) return '$' + n.toFixed(2);
     return '$' + Number(n.toPrecision(2));
   }
-  /** meta -> 「输入 $0.50 / 输出 $3.00 · 百万Token」/「约 $0.01/张」/「—」 */
+  /** meta -> 「输入 $0.50 / 输出 $3.00 · 百万Token」/「约 $0.01/张」/「—」；floor 时前缀「最低 」 */
   function formatModelPrice(meta) {
-    const p = meta && meta.price; if (!p) return '—';
+    const p = (meta && (meta.priceFloor || meta.price)); if (!p) return '—';
     const parts = [];
     if (p.prompt || p.completion) {
       parts.push((p.prompt ? '输入 ' + fmtUsd(p.prompt) : '输入 —') + ' / ' + (p.completion ? '输出 ' + fmtUsd(p.completion) : '输出 —') + ' · 百万Token');
     } else if (p.imageOut) parts.push('图片输出 ' + fmtUsd(p.imageOut) + ' · 百万Token');
     if (p.image && !parts.length) parts.push('约 ' + fmtUsd(p.image) + '/张');
-    return parts.length ? parts.join(' · ') : '—';
+    if (!parts.length) return '—';
+    const body = parts.join(' · ');
+    const isFloor = !!(meta && (meta.priceIsFloor || meta.priceFloor));
+    return isFloor ? '最低 ' + body : body;
   }
   function formatContext(n) { return n >= 1e6 ? +(n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'K' : String(n); }
 
@@ -683,7 +735,7 @@
 
   const api = { claudeCacheAnchors, PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, formatModelPrice, formatContext,
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
     isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

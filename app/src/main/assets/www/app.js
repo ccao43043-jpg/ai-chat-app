@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.22.1';
+  const APP_VERSION = '0.22.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2670,6 +2670,7 @@
     $('#pe-delete').style.display = fresh ? 'none' : '';
     renderModelChips(); renderFieldPrices();
     $('#page-provider').classList.add('show');
+    refreshOpenRouterFloorPrices(editModels.concat(Object.keys(PE_FIELDS).map(f => editing[f])).filter(Boolean));
   }
   function renderModelChips() {
     const box = $('#pe-model-chips'); box.innerHTML = '';
@@ -2699,6 +2700,7 @@
   }
   function modelInfoLine(m) {
     const meta = editMeta[m]; if (!meta) return '';
+    if (isEditingOpenRouter() && !(meta.priceIsFloor || meta.priceFloor)) ensureOpenRouterFloor(m);
     const parts = [];
     if (meta.context) parts.push(Providers.formatContext(meta.context));
     const t = Providers.formatModelPrice(meta); if (t !== '—') parts.push(t);
@@ -2766,6 +2768,85 @@
     saveSettings(); closeProviderEdit(); renderHeader();
   };
 
+
+  // OpenRouter：用 /models/{id}/endpoints 拉各供应商价，显示最低有效价（与 provider.sort=price 一致）
+  const floorInflight = Object.create(null);
+  let floorActive = 0, floorQueue = [];
+  const FLOOR_CONCURRENCY = 6;
+  function isEditingOpenRouter() {
+    if (!editing) return false;
+    return Providers.isOpenRouterProvider({ presetId: editing.presetId, baseUrl: ($('#pe-base') && $('#pe-base').value) || editing.baseUrl });
+  }
+  function peProviderForFloor() {
+    const typed = $('#pe-key').value.trim();
+    const useStored = typed === KEY_MASK;
+    return {
+      presetId: editing && editing.presetId,
+      type: $('#pe-type').value,
+      baseUrl: $('#pe-base').value.trim(),
+      apiKey: useStored ? '' : typed,
+      _authId: useStored && editing ? editing.id : ''
+    };
+  }
+  function applyFloorToMeta(modelId, floor) {
+    if (!floor || !modelId) return false;
+    if (!editMeta[modelId]) editMeta[modelId] = {};
+    editMeta[modelId].price = floor;
+    editMeta[modelId].priceIsFloor = true;
+    return true;
+  }
+  function refreshFloorUi() {
+    renderModelChips(); renderFieldPrices();
+    if ($('#fetch-sheet') && $('#fetch-sheet').classList.contains('show')) renderFetchList();
+  }
+  async function doFetchOpenRouterFloor(modelId) {
+    const prov = peProviderForFloor();
+    if (!/^https?:\/\/.+/.test(prov.baseUrl)) return null;
+    if (!$('#pe-key').value.trim()) return null;
+    try {
+      const r = await httpSimple(authed(Providers.buildEndpointsRequest(prov, modelId), prov._authId));
+      if (r.status >= 400 || !r.status) return null;
+      return Providers.floorPricingFromEndpoints(Providers.parseEndpointsResponse(r.text));
+    } catch (e) { return null; }
+  }
+  function pumpFloorQueue() {
+    while (floorActive < FLOOR_CONCURRENCY && floorQueue.length) {
+      const job = floorQueue.shift();
+      floorActive++;
+      doFetchOpenRouterFloor(job.modelId).then(floor => {
+        let changed = false;
+        if (floor) changed = applyFloorToMeta(job.modelId, floor);
+        if (changed) refreshFloorUi();
+        job.resolve(floor);
+      }).finally(() => {
+        floorActive--;
+        delete floorInflight[job.modelId];
+        pumpFloorQueue();
+      });
+    }
+  }
+  function ensureOpenRouterFloor(modelId) {
+    if (!modelId || !isEditingOpenRouter()) return Promise.resolve(null);
+    const meta = editMeta[modelId];
+    if (meta && (meta.priceIsFloor || meta.priceFloor)) return Promise.resolve(meta.priceFloor || meta.price);
+    if (floorInflight[modelId]) return floorInflight[modelId];
+    let resolve; const p = new Promise(r => { resolve = r; });
+    floorInflight[modelId] = p;
+    floorQueue.push({ modelId, resolve });
+    pumpFloorQueue();
+    return p;
+  }
+  function refreshOpenRouterFloorPrices(ids) {
+    if (!isEditingOpenRouter()) return;
+    const seen = new Set();
+    (ids || []).forEach(m => {
+      m = String(m || '').trim();
+      if (!m || seen.has(m)) return;
+      seen.add(m);
+      ensureOpenRouterFloor(m);
+    });
+  }
+
   // 从接口获取模型列表
   let fetched = [], fetchSel = new Set(), fetchCat = 'all';
   const FETCH_CATS = [['all', '全部'], ['text', '文本'], ['image', '图片'], ['video', '视频'], ['embedding', '嵌入'], ['audio', '音频']];
@@ -2790,6 +2871,7 @@
       renderFetchList();
       if (/openrouter\.ai/i.test(prov.baseUrl) && fetched.some(m => ['image', 'video'].includes(catOf(m)))) toast('已包含图片/视频等模型，可切换分类查看');
       $('#fetch-sheet').classList.add('show'); $('#fetch-mask').classList.add('show');
+      refreshOpenRouterFloorPrices(editModels.concat(Object.keys(PE_FIELDS).map(f => $(PE_FIELDS[f]).value.trim())).filter(Boolean));
     } catch (e) {
       dialog({ title: '获取失败', body: String(e.message || e) + '\n\n部分服务商不提供模型列表接口，可手动输入模型名。', okText: '知道了', info: true });
     } finally { btn.disabled = false; btn.innerHTML = old; }

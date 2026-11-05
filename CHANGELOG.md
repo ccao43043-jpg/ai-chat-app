@@ -1,3 +1,11 @@
+**v0.22.2：OpenRouter 模型价显示改为 endpoints 最低价**
+
+- OpenRouter 服务商编辑页 / 获取模型列表：价格改为拉取 `/models/{id}/endpoints` 后取有效最低价（含 discount），文案前缀「最低」，与请求侧 `provider.sort=price` 一致
+- 已选模型芯片优先并发拉取；列表项懒加载（有限并发），未加载完前可能短暂显示目录 top provider 价
+- Android `0.22.2`（versionCode **70**）
+
+---
+
 **v0.22.1：回退 v0.22.0 主界面 UI**
 
 - 回退 v0.22.0 的主界面角色卡片网格与底部导航，移除 `home-cards.js`
