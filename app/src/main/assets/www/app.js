@@ -1119,6 +1119,13 @@
         else if (!m.pending && !m.reasoning && !(m.images && m.images.length)) { const e = document.createElement('div'); e.className = 'muted'; e.textContent = m.stopped ? '（已停止）' : '（空回复）'; body.appendChild(e); }
       }
       if (body.childNodes.length) (botCol || el).appendChild(body);
+      if (!m.pending && m.usage && !m.imageGen) {
+        // 缓存显示：仅在服务商返回缓存字段（cached_tokens 等）时出现
+        const pv = getProvider(conv.providerId);
+        const meta = pv && pv.modelMeta && pv.modelMeta[m.model];
+        const ct = Providers.cacheViewText(Providers.cacheView(m.usage, meta && meta.price));
+        if (ct) { const cl = document.createElement('div'); cl.className = 'msg-cache'; cl.textContent = '⚡ ' + ct.text; cl.title = ct.title; (botCol || el).appendChild(cl); }
+      }
     }
     if (!m.pending) {
       const act = document.createElement('div'); act.className = 'actions';

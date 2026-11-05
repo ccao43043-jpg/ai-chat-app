@@ -487,7 +487,18 @@
         out.cacheSupported = true; out.source = 'deepseek';
       } else if (num(det.cached_tokens) !== undefined) { // OpenAI 等
         out.hit = det.cached_tokens; out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'openai';
+      } else if (num(u.cache_read_input_tokens) !== undefined || num(u.cached_tokens) !== undefined) {
+        // 部分 OpenAI 兼容端点（如 MiniMax 原生 / 某些中转）把命中数放在顶层
+        out.hit = num(u.cache_read_input_tokens) !== undefined ? u.cache_read_input_tokens : u.cached_tokens;
+        out.miss = (out.prompt || 0) - out.hit; out.cacheSupported = true; out.source = 'openai';
       }
+      // OpenRouter：本次实际扣费（美元，已含缓存折扣）与缓存节省
+      if (num(u.cost) !== undefined) out.cost = u.cost;
+      if (u.cost_details && num(u.cost_details.upstream_inference_cost) !== undefined) out.upstreamCost = u.cost_details.upstream_inference_cost;
+      // cache_discount：正数 = 因缓存少付的美元；cost_cache：负数 = 节省（部分路由返回此形态）
+      if (num(u.cache_discount) !== undefined) out.cacheSaved = u.cache_discount;
+      else if (num(u.cost_cache) !== undefined && u.cost_cache < 0) out.cacheSaved = -u.cost_cache;
+      else if (u.cost_details && num(u.cost_details.cache_discount) !== undefined) out.cacheSaved = u.cost_details.cache_discount;
       // OpenRouter（Gemini / Claude 等）：缓存写入 Token
       if (num(det.cache_write_tokens) !== undefined && det.cache_write_tokens > 0 && out.cacheWrite === undefined) out.cacheWrite = det.cache_write_tokens;
       // 千问显式缓存：创建缓存的 Token（按输入价 125% 计费）
@@ -497,6 +508,43 @@
       }
     }
     return Object.keys(out).length ? out : null;
+  }
+  /**
+   * 单条回复的缓存显示数据。无缓存字段时返回 null（不显示假 0）。
+   * price：模型价格 { prompt, cacheRead }（美元/百万 Token，可选），仅在服务商没返回节省金额时用于估算。
+   * -> { hit, prompt, rate(0–100, 1 位小数), write, saved, savedEstimated, cost }
+   */
+  function cacheView(u, price) {
+    if (!u || !u.cacheSupported || num(u.hit) === undefined) return null;
+    const prompt = num(u.prompt);
+    const rate = prompt ? Math.round(u.hit / prompt * 1000) / 10 : null;
+    const v = { hit: u.hit, prompt: prompt == null ? null : prompt, rate, write: u.cacheWrite || 0, saved: null, savedEstimated: false, cost: num(u.cost) == null ? null : u.cost };
+    if (num(u.cacheSaved) !== undefined) v.saved = u.cacheSaved;
+    else if (u.hit > 0 && price && num(price.prompt) !== undefined && num(price.cacheRead) !== undefined && price.prompt > price.cacheRead) {
+      v.saved = u.hit * (price.prompt - price.cacheRead) / 1e6; v.savedEstimated = true;
+    }
+    return v;
+  }
+  function fmtUsdSmall(x) {
+    if (x == null) return '';
+    if (x === 0) return '$0';
+    if (x < 0.0001) return '<$0.0001';
+    return '$' + (x < 0.01 ? x.toFixed(4) : x < 1 ? x.toFixed(3) : x.toFixed(2));
+  }
+  /** 缓存显示文案（简体中文）：{ text, title } 或 null */
+  function cacheViewText(v) {
+    if (!v) return null;
+    const n = x => Number(x).toLocaleString('en-US');
+    if (!v.hit) {
+      const t = '缓存未命中' + (v.write ? ' · 写入 ' + n(v.write) : '');
+      return { text: t, title: '服务商返回 cached_tokens = 0' + (v.prompt != null ? '（输入 ' + n(v.prompt) + ' Token）' : '') };
+    }
+    const parts = ['缓存命中 ' + n(v.hit) + (v.prompt != null ? ' / ' + n(v.prompt) : '') + ' Token'];
+    if (v.rate != null) parts.push('命中率 ' + v.rate + '%');
+    if (v.saved != null && v.saved > 0) parts.push((v.savedEstimated ? '约省 ' : '节省 ') + fmtUsdSmall(v.saved));
+    if (v.write) parts.push('写入 ' + n(v.write));
+    const title = parts.join('，') + (v.cost != null ? '；本次实际费用 ' + fmtUsdSmall(v.cost) : '') + (v.savedEstimated ? '（节省额按模型价估算）' : '');
+    return { text: parts.join(' · '), title };
   }
   function mergeUsage(a, b) {
     if (!b) return a || null;
@@ -732,7 +780,7 @@
 
   const api = { claudeCacheAnchors, PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
-    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
+    parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
     isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
