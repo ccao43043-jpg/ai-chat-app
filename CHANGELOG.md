@@ -1,3 +1,12 @@
+**v0.22.6：OpenRouter 最低价修正 · 消息缓存显示 · MiniMax 缓存插件**
+
+- OpenRouter Flex 最低价不再二次乘 discount（API 价已含折）
+- 消息级缓存命中显示：命中 Token / 命中率 / 节省金额（OpenRouter cached_tokens、cost、cache_discount）
+- 新增 MiniMax 提示缓存插件 mmcache；缓存相关插件迁入 `www/plugins/cache/`
+- Android `0.22.6`（versionCode **74**）
+
+---
+
 **v0.22.5：OpenRouter 配置页一键刷新最低价**
 
 - 服务商编辑 / 配置 API 页「模型分类」旁新增 **刷新价格**（仅 OpenRouter 显示）：对当前已选模型（文本 chips + 分类字段）有限并发拉取 `/models/{id}/endpoints`，用现有 floor 逻辑更新「最低 输入 / 输出」
