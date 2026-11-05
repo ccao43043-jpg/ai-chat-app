@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.21.6';
+  const APP_VERSION = '0.22.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -608,25 +608,26 @@
         }
         if (hl !== null) { code.innerHTML = hl; code.classList.add('hljs'); }
       } catch (e) { /* ignore */ }
-      if (pre && pre.parentNode && !pre.parentNode.classList.contains('code-block')) {
-        const wrap = document.createElement('div'); wrap.className = 'code-block';
-        const head = document.createElement('div'); head.className = 'code-head';
-        head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
-        head.querySelector('button').onclick = () => copyText(raw);
-        if (pre.parentNode === node && node.nodeName === 'PRE') {
-          // node 本身是 pre：包完后根变成 wrap
-          wrap.appendChild(head); wrap.appendChild(pre);
-          root = wrap;
-        } else {
-          pre.replaceWith(wrap); wrap.appendChild(head); wrap.appendChild(pre);
-        }
-      } else if (pre && !pre.parentNode) {
+      if (pre && !pre.parentNode) {
         const wrap = document.createElement('div'); wrap.className = 'code-block';
         const head = document.createElement('div'); head.className = 'code-head';
         head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
         head.querySelector('button').onclick = () => copyText(raw);
         wrap.appendChild(head); wrap.appendChild(pre);
         root = wrap;
+      } else if (pre && pre.parentNode && !pre.parentNode.classList.contains('code-block')) {
+        const wrap = document.createElement('div'); wrap.className = 'code-block';
+        const head = document.createElement('div'); head.className = 'code-head';
+        head.innerHTML = '<span>' + esc(lang || 'code') + '</span><button>' + ICON.copy + '复制</button>';
+        head.querySelector('button').onclick = () => copyText(raw);
+        // node 本身是 pre（含 materialize 后仍挂在临时父节点上）：包完后根必须变成 wrap，
+        // 否则 applyBlockDiff 会把 pre 从 wrap 里再挪走，导致丢失 .code-block。
+        if (pre === node || node.nodeName === 'PRE') {
+          wrap.appendChild(head); wrap.appendChild(pre);
+          root = wrap;
+        } else {
+          pre.replaceWith(wrap); wrap.appendChild(head); wrap.appendChild(pre);
+        }
       }
     });
     const links = root.querySelectorAll ? root.querySelectorAll('a') : [];
@@ -785,7 +786,7 @@
       };
       el.onclick = () => {
         if (running) { toast('请先停止当前生成'); return; }
-        openConv(m.id); closeDrawer();
+        openConv(m.id); closeDrawer(); showChat();
       };
       list.appendChild(el);
     });
@@ -1993,12 +1994,117 @@
   $('#btn-menu').onclick = openDrawer;
   $('#drawer-mask').onclick = closeDrawer;
   $('#conv-search').addEventListener('input', renderConvList);
-  const startNew = () => { if (running) { toast('请先停止当前生成'); return; } newConv(); closeDrawer(); };
+  const startNew = () => { if (running) { toast('请先停止当前生成'); return; } newConv(); closeDrawer(); showChat(); };
   $('#btn-new').onclick = startNew;
   $('#drawer-new').onclick = startNew;
   $('#btn-settings').onclick = () => { closeDrawer(); setTimeout(openSettings, 120); };
   $('#btn-personas').onclick = () => { closeDrawer(); setTimeout(() => openPersonas(), 120); };
   $('#btn-worlds').onclick = () => { closeDrawer(); setTimeout(() => openWorlds(), 120); };
+
+
+  // ---------------- 主页角色卡片 / 底栏 ----------------
+  let homeFilter = 'all';
+  let uiMode = 'home'; // 'home' | 'chat'
+  function setBottomNavActive(page) {
+    document.querySelectorAll('#bottom-nav .bn-item').forEach(b => {
+      b.classList.toggle('active', b.dataset.page === page);
+    });
+  }
+  function showHome() {
+    uiMode = 'home';
+    document.body.classList.add('home-mode');
+    document.body.classList.remove('chat-mode');
+    setBottomNavActive('home');
+    renderCardGrid(homeFilter);
+    closeDrawer();
+  }
+  function showChat() {
+    uiMode = 'chat';
+    document.body.classList.add('chat-mode');
+    document.body.classList.remove('home-mode');
+    setBottomNavActive('home');
+  }
+  window.showHome = showHome; window.showChat = showChat; window.renderCardGrid = renderCardGrid;
+  function startChatWithPersona(ps) {
+    startFromPersona(ps);
+    showChat();
+  }
+  function renderCardGrid(filter) {
+    const box = $('#card-grid'); if (!box) return;
+    homeFilter = filter || homeFilter || 'all';
+    document.querySelectorAll('#home-tabs button').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === homeFilter);
+    });
+    const HC = window.HomeCards;
+    const cards = HC ? HC.filterCards(personas, homeFilter) : (personas || []).map(ps => ({
+      id: ps.id, name: ps.name, desc: (ps.desc || ps.systemPrompt || '').slice(0, 72), emoji: ps.emoji || '🎭', cover: '', tags: [], lore: !!ps.loreText
+    }));
+    if (!cards.length) {
+      box.innerHTML = '<div class="card-grid-empty">还没有角色<br>可在「设置 → 助手与角色」中添加或导入</div>';
+      return;
+    }
+    box.innerHTML = '';
+    cards.forEach(c => {
+      const ps = personas.find(x => x.id === c.id);
+      const el = document.createElement('article');
+      el.className = 'char-card';
+      el.dataset.id = c.id;
+      const tags = [];
+      if (c.lore) tags.push('已绑定世界书');
+      if (c.builtin) tags.push('内置');
+      (c.tags || []).forEach(t => tags.push(t));
+      const coverInner = c.cover
+        ? '<img src="' + esc(c.cover) + '" alt="">'
+        : '<span class="cover-emoji">' + esc(c.emoji || '🎭') + '</span>';
+      el.innerHTML = '<div class="cover">' + coverInner + '</div>' +
+        '<div class="info"><h3>' + esc(c.name) + '</h3><p>' + esc(c.desc || '点此开始对话') + '</p>' +
+        (tags.length ? '<div class="tags">' + tags.slice(0, 3).map(t => '<span>' + esc(t) + '</span>').join('') + '</div>' : '') +
+        '</div>';
+      el.onclick = () => { if (ps) startChatWithPersona(ps); };
+      box.appendChild(el);
+    });
+  }
+  const btnMenuHome = $('#btn-menu-home');
+  if (btnMenuHome) btnMenuHome.onclick = openDrawer;
+  const btnHomeSearch = $('#btn-home-search');
+  if (btnHomeSearch) btnHomeSearch.onclick = async () => {
+    const q = await dialog({ title: '搜索角色', body: '输入名称或简介关键词', input: true, value: '', okText: '搜索' });
+    if (q == null) return;
+    const key = String(q).trim().toLowerCase();
+    const box = $('#card-grid'); if (!box) return;
+    if (!key) { renderCardGrid(homeFilter); return; }
+    const HC = window.HomeCards;
+    const cards = (HC ? HC.filterCards(personas, 'all') : []).filter(c =>
+      (c.name || '').toLowerCase().includes(key) || (c.desc || '').toLowerCase().includes(key));
+    document.querySelectorAll('#home-tabs button').forEach(b => b.classList.remove('active'));
+    if (!cards.length) { box.innerHTML = '<div class="card-grid-empty">没有匹配「' + esc(String(q).trim()) + '」的角色</div>'; return; }
+    box.innerHTML = '';
+    cards.forEach(c => {
+      const ps = personas.find(x => x.id === c.id);
+      const el = document.createElement('article'); el.className = 'char-card'; el.dataset.id = c.id;
+      const coverInner = c.cover ? '<img src="' + esc(c.cover) + '" alt="">' : '<span class="cover-emoji">' + esc(c.emoji || '🎭') + '</span>';
+      el.innerHTML = '<div class="cover">' + coverInner + '</div><div class="info"><h3>' + esc(c.name) + '</h3><p>' + esc(c.desc || '点此开始对话') + '</p></div>';
+      el.onclick = () => { if (ps) startChatWithPersona(ps); };
+      box.appendChild(el);
+    });
+  };
+  document.querySelectorAll('#home-tabs button').forEach(b => {
+    b.onclick = () => renderCardGrid(b.dataset.filter || 'all');
+  });
+  document.querySelectorAll('#bottom-nav .bn-item').forEach(b => {
+    b.onclick = () => {
+      const page = b.dataset.page;
+      if (page === 'home') {
+        // 「对话」：有当前对话内容则进聊天，否则回角色主页
+        if (conv && conv.messages && conv.messages.length) showChat();
+        else showHome();
+        return;
+      }
+      if (page === 'worlds') { setBottomNavActive('worlds'); openWorlds(); return; }
+      if (page === 'settings') { setBottomNavActive('settings'); openSettings(); return; }
+    };
+  });
+
 
   // ---------------- 模型快速切换 ----------------
   function selectModel(pid, model) {
@@ -2123,6 +2229,8 @@
       const p = configured()[0]; if (p) { conv.providerId = p.id; conv.model = p.models[0] || ''; }
     }
     renderAll();
+    if (uiMode === 'home') { setBottomNavActive('home'); renderCardGrid(homeFilter); }
+    else setBottomNavActive('home');
   }
   ['#set-system', '#set-temp', '#set-maxtokens', '#set-imgsize'].forEach(s => $(s).addEventListener('change', readGeneral));
   $('#set-stream').onchange = readGeneral;
@@ -2226,7 +2334,11 @@
     renderWorldGrid();
     $('#page-worlds').classList.add('show');
   }
-  function closeWorlds() { $('#page-worlds').classList.remove('show'); }
+  function closeWorlds() {
+    $('#page-worlds').classList.remove('show');
+    if (uiMode === 'home') setBottomNavActive('home');
+    else setBottomNavActive('home');
+  }
   $('#wl-add').onclick = () => openWorldEdit(null);
   function renderWorldGrid() {
     const box = $('#world-grid'); box.innerHTML = '';
@@ -2274,6 +2386,7 @@
     saveConv();
     closeWorldEdit(); closeWorlds(); closeDrawer();
     renderAll();
+    showChat();
     toast('已用「' + wd.name + '」开聊（沉浸式 RP + RP 缓存）');
   }
   function syncWorldToCurrent(wd) {
@@ -2493,6 +2606,8 @@
     saveConv();
     closePersonas(); closeDrawer();
     renderAll();
+    // 从助手页开聊也进入聊天壳；主页卡片路径会再调一次 showChat（幂等）
+    showChat();
     toast('已切换到「' + ps.name + '」' + (ps.loreText ? '（已导入世界书）' : ''));
   }
 
@@ -3176,6 +3291,10 @@
   }
   $('#btn-plugins').onclick = () => { closeDrawer(); setTimeout(openPlugins, 120); };
   $('#set-plugins').onclick = () => openPlugins();
+
+  if ($('#set-personas')) $('#set-personas').onclick = () => { closeSettings(); openPersonas(); };
+  if ($('#set-templates')) $('#set-templates').onclick = () => { closeSettings(); openTemplates(); };
+  if ($('#set-imagegen')) $('#set-imagegen').onclick = () => { closeSettings(); openImageGen(); };
   $('#btn-imagegen-page').onclick = () => { closeDrawer(); setTimeout(() => openImageGen(), 120); };
   $('#btn-usage').onclick = () => { closeDrawer(); setTimeout(openUsage, 120); };
   $('#set-usage').onclick = () => openUsage();
@@ -3761,7 +3880,7 @@
     box.querySelectorAll('[data-ut]').forEach(b => b.onclick = () => { usTab = b.dataset.ut; renderUsagePage(); });
     box.querySelectorAll('.us-jump[data-cid]').forEach(el => el.onclick = () => {
       const id = el.getAttribute('data-cid'); if (!id) return;
-      closeUsage(); openConv(id); closeDrawer();
+      closeUsage(); openConv(id); closeDrawer(); showChat();
     });
     if (usTab === 'prices') {
       const mode = box.querySelector('#us-price-mode');
@@ -3802,4 +3921,6 @@
   if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
   renderSearchChip();
   updateSendState();
+  // v0.22.0：默认进入角色卡片主页；用户从侧栏点对话再进聊天壳
+  showHome();
 })();

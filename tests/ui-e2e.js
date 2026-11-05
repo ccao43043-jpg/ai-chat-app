@@ -147,6 +147,9 @@ async function scenario(browser, theme) {
   const shot = async name => { await sleep(450); await page.evaluate(() => document.querySelector('#toast').classList.remove('show')); await sleep(220); await page.screenshot({ path: path.join(DOCS, theme + '-' + name + '.png') }); };
   await page.goto(PAGE);
   await sleep(400);
+  // v0.22.0：默认 home-mode，E2E 进入聊天壳以便操作顶栏/输入框
+  await page.evaluate(() => { if (typeof showChat === 'function') showChat(); else { document.body.classList.add('chat-mode'); document.body.classList.remove('home-mode'); } });
+  await sleep(100);
   const r = {};
 
   // 1) 迁移检查
@@ -253,7 +256,7 @@ async function scenario(browser, theme) {
   const pickModel = name => page.evaluate(n => [...document.querySelectorAll('#model-menu .pm-item')].find(e => e.textContent.trim() === n).click(), name);
 
   // 8) 助手库：从抽屉进入，内置 8 个助手
-  await page.click('#btn-personas'); await sleep(550);
+  await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-personas'); await sleep(550);
   r.personaCards = await page.$$eval('#persona-grid .persona-card:not(.add) .pcard-name', els => els.map(e => e.textContent));
   assert.strictEqual(r.personaCards.length, 8);
   assert.ok(r.personaCards.includes('翻译官') && r.personaCards.includes('心理倾听'));
@@ -389,7 +392,11 @@ async function scenario(browser, theme) {
 
 
   // 13) 插件：DeepSeek RP 缓存优化器 V2
-  const rpConv = () => page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache && c.plugins.rpcache.enabled) return c; } return null; });
+  // saveConvSoon 约 500ms 合并写盘；读 __mem 前先 pagehide 触发 flushSaves，避免读到旧快照
+  const flushSaves = () => page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  const stripAffect = s => String(s || '').replace(/^\[AFFECT\][^\n]*\n(?:\[AFFECT_REMIND\][^\n]*\n)?/, '');
+  const stripAffectSys = s => String(s || '').replace(/\n?\[AFFECT_RULE\][^\n]*/g, '');
+  const rpConv = async () => { await flushSaves(); return page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.plugins && c.plugins.rpcache && c.plugins.rpcache.enabled) return c; } return null; }); };
   const rpLogs = async () => { const c = await rpConv(); return page.evaluate(id => { const l = window.__mem['rplog_' + id + '.jsonl']; if (l != null) return l.split('\n').filter(x => x.trim()).map(x => JSON.parse(x)); return JSON.parse(window.__mem['rplog_' + id + '.json'] || '[]'); }, c.id); }; // v0.9.0 起日志为 JSONL
   const waitIdle = () => page.waitForFunction(() => !document.querySelector('#btn-send').classList.contains('stop'), { timeout: 20000 });
   const panelClick = sel => page.evaluate(s => document.querySelector('#pp-body ' + s).click(), sel);
@@ -415,7 +422,7 @@ async function scenario(browser, theme) {
   await page.click('#btn-menu'); await sleep(350);
   r.pluginRow = await page.$eval('#plugin-count', e => e.textContent);
   assert.ok(r.pluginRow.includes('已启用') || r.pluginRow.includes('2 个内置插件'), r.pluginRow);
-  await page.click('#btn-plugins'); await sleep(650);
+  await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-plugins'); await sleep(650);
   r.pluginCards = await page.$$eval('#plugin-list .plugin-card .plc-name', els => els.map(e => e.textContent));
   assert.ok(r.pluginCards[0].startsWith('RP 缓存优化器') && r.pluginCards[1].startsWith('Token 用量显示'), JSON.stringify(r.pluginCards));
   await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(200);
@@ -562,7 +569,8 @@ async function scenario(browser, theme) {
   const afterSum = await lastPost();
   const am = afterSum.body.messages;
   assert.ok(am[0].content.includes('[CHAPTER_SUMMARY #001]\nFACTS:'), '摘要在 system（L3）');
-  assert.ok(am[0].content.indexOf('[LONG_TERM_MEMORY]') < am[0].content.indexOf('[CHAPTER_SUMMARY #001]'));
+  // C-2：static → summary → memory（章节在长期记忆之前，避免 memory 变动毒化 summary 缓存）
+  assert.ok(am[0].content.indexOf('[CHAPTER_SUMMARY #001]') < am[0].content.indexOf('[LONG_TERM_MEMORY]'));
   assert.strictEqual(am.filter(x => x.role === 'user').length, 3, '保留最近 2 轮 + 当前输入');
   assert.ok(!am.some(x => x.content.includes('失踪的商人最后来过这里吗')), '被摘要的消息不再发送');
   const c13 = await rpConv();
@@ -621,7 +629,8 @@ async function scenario(browser, theme) {
   await closePanels();
   await sendRP('我们去商会门口看看。');
   const dm = (await lastPost()).body.messages;
-  assert.ok(dm[dm.length - 1].content.startsWith('我们去商会门口看看。\n\n[MEMORY_UPDATE]\n张燕已经知道账本的存在。\n\n[CURRENT_STATE]\n'), dm[dm.length - 1].content);
+  // v0.15.0：情感护栏可能在用户消息前加 [AFFECT]/[AFFECT_REMIND]
+  assert.ok(dm[dm.length - 1].content.includes('我们去商会门口看看。\n\n[MEMORY_UPDATE]\n张燕已经知道账本的存在。\n\n[CURRENT_STATE]\n'), dm[dm.length - 1].content);
   assert.ok(!dm[0].content.includes('张燕已经知道账本'), '增量不在 system');
   await page.click('#conv-bar .hbadge'); await sleep(450); await tab('blocks'); await sleep(200);
   await panelClick('#rp-merge-delta'); await sleep(350);
@@ -649,7 +658,7 @@ async function scenario(browser, theme) {
   await sendRP('普通消息');
   const plain = (await lastPost()).body.messages;
   assert.ok(!plain.some(x => x.content.includes('[WORLD]') || x.content.includes('[CURRENT_STATE]')), '关闭后不再注入');
-  assert.strictEqual(plain[plain.length - 1].content, '普通消息');
+  assert.strictEqual(stripAffect(plain[plain.length - 1].content), '普通消息');
 
   // 13b) v0.5.0：千问（阿里云百炼）预设 + RP 优化器自动策略（显式缓存断点、自动预算）
   await page.click('#btn-menu'); await sleep(350);
@@ -674,7 +683,7 @@ async function scenario(browser, theme) {
   for (let i = 0; i < 4 && await page.evaluate(() => document.querySelector('.page.show') != null); i++) { await page.evaluate(() => window.onAndroidBack()); await sleep(350); }
   // 插件全局设置：自动启用 → 支持缓存的服务商上所有对话（演示自动启用；默认是「角色扮演类对话」）
   await page.click('#btn-menu'); await sleep(350);
-  await page.click('#btn-plugins'); await sleep(600);
+  await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-plugins'); await sleep(600);
   await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(250);
   assert.strictEqual(await page.$eval('#rp-auto-mode', e => e.value), 'rp');
   r.autoModes = await page.$$eval('#rp-auto-mode option', e => e.map(x => x.textContent));
@@ -692,7 +701,7 @@ async function scenario(browser, theme) {
   const q2 = await sendRP('拔剑');
   const markIdx = q2.body.messages.map((m, i) => Array.isArray(m.content) && m.content.some(p => p.cache_control) ? i : -1).filter(i => i >= 0);
   assert.ok(markIdx.length >= 1 && markIdx.length <= 4, '自动显式缓存断点 ' + JSON.stringify(markIdx));
-  assert.strictEqual(q2.body.messages[q2.body.messages.length - 1].content, '拔剑', '本轮输入不加断点');
+  assert.strictEqual(stripAffect(q2.body.messages[q2.body.messages.length - 1].content), '拔剑', '本轮输入不加断点');
   r.qwBadges = await page.$$eval('.msg.assistant', els => els.length ? [...els[els.length - 1].querySelectorAll('.mbadge')].map(b => b.textContent) : []);
   assert.ok(r.qwBadges.some(t => t.startsWith('缓存 ')), JSON.stringify(r.qwBadges));
   r.qwHeader = await page.$$eval('#conv-bar .hbadge', e => e.map(x => x.textContent));
@@ -715,15 +724,17 @@ async function scenario(browser, theme) {
   await page.evaluate(() => { document.querySelector('#page-plugin .page-body').scrollTop = 0; });
   await shot('rp-auto');
   // 手动改预算 → 自动预算关闭，保留手动值
-  await page.evaluate(() => { const i = document.querySelector('#rp-maxctx'); i.value = 120000; i.dispatchEvent(new Event('change')); }); await sleep(250);
+  await page.evaluate(() => { const i = document.querySelector('#rp-maxctx'); i.value = 120000; i.dispatchEvent(new Event('change')); });
+  await flushSaves();
   r.manual = await page.evaluate(() => { for (const k of Object.keys(window.__mem)) if (k.startsWith('conv_')) { const c = JSON.parse(window.__mem[k]); if (c.model === 'qwen3.7-plus' && c.plugins && c.plugins.rpcache && c.plugins.rpcache.state) return c.plugins.rpcache.state.settings; } return null; });
   assert.deepStrictEqual([r.manual.auto_budget, r.manual.max_context, r.manual.summary.trigger_tokens], [false, 120000, 48000]);
   await closePanels();
   // 恢复默认自动启用模式与 DeepSeek 模型，避免影响后续步骤
   await page.click('#btn-menu'); await sleep(350);
-  await page.click('#btn-plugins'); await sleep(600);
+  await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-plugins'); await sleep(600);
   await page.evaluate(() => document.querySelectorAll('#plugin-list .plugin-card')[0].querySelector('.plc-set').click()); await sleep(250);
-  await page.evaluate(() => { const s = document.querySelector('#rp-auto-mode'); s.value = 'rp'; s.dispatchEvent(new Event('change')); }); await sleep(200);
+  await page.evaluate(() => { const s = document.querySelector('#rp-auto-mode'); s.value = 'rp'; s.dispatchEvent(new Event('change')); });
+  await flushSaves();
   await closePanels();
   assert.strictEqual(await page.evaluate(() => JSON.parse(window.__mem['settings.json']).plugins.rpcache.auto_mode), 'rp');
   await page.click('#btn-new'); await sleep(300);
@@ -737,7 +748,7 @@ async function scenario(browser, theme) {
   const tmRows = () => page.$$eval('#tm-list .tm-row .pi-name', e => e.map(x => x.textContent));
   const tmMore = name => page.evaluate(n => [...document.querySelectorAll('#tm-list .tm-row')].find(e => e.querySelector('.pi-name').textContent.startsWith(n)).querySelector('.ci-more').click(), name);
   r.tplBuiltin = await tplStore();
-  assert.strictEqual(r.tplBuiltin.length, 8, '首次启动写入 8 个内置模板');
+  assert.strictEqual(r.tplBuiltin.length, 10, '首次启动写入 10 个内置模板');
   await page.click('#btn-new'); await sleep(300);
   assert.strictEqual(await page.$eval('#tpl-chip-label', e => e.textContent), '模板');
   await page.click('#btn-template'); await sleep(450);
@@ -756,7 +767,7 @@ async function scenario(browser, theme) {
   await setInput('什么是 TCP？'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250);
   const concise = r.tplBuiltin.find(t => t.id === 't-concise').content;
   r.tplReq = await lastPost();
-  assert.deepStrictEqual(r.tplReq.body.messages[0], { role: 'system', content: concise });
+  assert.deepStrictEqual({ role: 'system', content: stripAffectSys(r.tplReq.body.messages[0].content) }, { role: 'system', content: concise });
   let cc = await curConv();
   assert.strictEqual(cc.templateId, 't-concise'); assert.strictEqual(cc.systemPrompt, concise);
   await shot('template-chat');
@@ -778,7 +789,7 @@ async function scenario(browser, theme) {
   await page.click('#tv-ok'); await sleep(400);
   await setInput('合同违约怎么办？'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250);
   r.varReq = await lastPost();
-  assert.strictEqual(r.varReq.body.messages[0].content, '请以资深律师的身份和专业视角回答我的问题，语气严谨。');
+  assert.strictEqual(stripAffectSys(r.varReq.body.messages[0].content), '请以资深律师的身份和专业视角回答我的问题，语气严谨。');
   assert.ok(r.varReq.body.messages.some(m => m.role === 'assistant'), '历史保留');
   r.recent = await page.evaluate(() => JSON.parse(window.__mem['settings.json']).recentTemplates);
   assert.deepStrictEqual(r.recent, ['t-role', 't-concise']);
@@ -806,10 +817,10 @@ async function scenario(browser, theme) {
 
   // 管理页：新建 / 编辑 / 复制 / 收藏 / 排序 / 删除 / 导入导出 / 默认模板
   await page.click('#btn-menu'); await sleep(350);
-  assert.ok((await page.$eval('#template-count', e => e.textContent)).includes('8 个模板'));
-  await page.click('#btn-templates'); await sleep(550);
+  assert.ok((await page.$eval('#template-count', e => e.textContent)).includes('10 个模板'));
+  await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-templates'); await sleep(550);
   assert.ok(await page.$eval('#page-templates', e => e.classList.contains('show')));
-  assert.strictEqual((await tmRows()).length, 8);
+  assert.strictEqual((await tmRows()).length, 10);
   await page.click('#tm-new'); await sleep(450);
   await page.evaluate(() => { const set = (id, v) => { const i = document.querySelector(id); i.value = v; i.dispatchEvent(new Event('input')); };
     set('#te-emoji', '🦉'); set('#te-name', '小红书文案'); set('#te-tags', '写作, 营销'); set('#te-content', '你是小红书爆款文案写手，主题是{{主题}}，多用 emoji 和短句。'); });
@@ -818,7 +829,7 @@ async function scenario(browser, theme) {
   await shot('template-edit');
   await page.click('#te-save'); await sleep(450);
   r.rows = await tmRows();
-  assert.strictEqual(r.rows.length, 9);
+  assert.strictEqual(r.rows.length, 11);
   let ts = await tplStore();
   assert.strictEqual(ts[0].name, '小红书文案'); assert.deepStrictEqual(ts[0].tags, ['写作', '营销']); assert.strictEqual(ts[0].emoji, '🦉');
   // 编辑（点行）
@@ -826,7 +837,7 @@ async function scenario(browser, theme) {
   assert.strictEqual(await page.$eval('#te-title', e => e.textContent), '编辑模板');
   await page.evaluate(() => { document.querySelector('#te-name').value = '小红书爆款'; });
   await page.click('#te-save'); await sleep(400);
-  ts = await tplStore(); assert.strictEqual(ts.length, 9); assert.strictEqual(ts[0].name, '小红书爆款');
+  ts = await tplStore(); assert.strictEqual(ts.length, 11); assert.strictEqual(ts[0].name, '小红书爆款');
   // 复制
   await tmMore('小红书爆款'); await sleep(350);
   r.tmActions = await page.$$eval('#action-list .action-item', e => e.map(x => x.textContent.trim()));
@@ -854,16 +865,16 @@ async function scenario(browser, theme) {
   await tmMore('代码审查'); await sleep(350); await actionClick('删除'); await sleep(350);
   assert.ok((await page.$eval('#dialog-body', e => e.textContent)).includes('内置模板删除后不会再自动出现'));
   await page.click('#dialog-ok'); await sleep(400);
-  ts = await tplStore(); assert.strictEqual(ts.length, 8); assert.ok(!ts.some(t => t.id === 't-coder'));
+  ts = await tplStore(); assert.strictEqual(ts.length, 10); assert.ok(!ts.some(t => t.id === 't-coder'));
   assert.deepStrictEqual(await page.evaluate(() => JSON.parse(window.__mem['settings.json']).removedTemplates), ['t-coder']);
   // 导出 / 导入
   await page.click('#tm-more'); await sleep(350); await actionClick('导出全部'); await sleep(300);
   r.exported = await page.evaluate(() => JSON.parse(window.__copied));
-  assert.strictEqual(r.exported.format, 'ai-chat-templates'); assert.strictEqual(r.exported.templates.length, 8);
+  assert.strictEqual(r.exported.format, 'ai-chat-templates'); assert.strictEqual(r.exported.templates.length, 10);
   await page.click('#tm-more'); await sleep(350); await actionClick('粘贴 JSON 导入'); await sleep(350);
   await page.evaluate(() => { document.querySelector('#dialog-input').value = JSON.stringify({ templates: [{ name: '周报助手', emoji: '📈', content: '把我的要点整理成周报：本周完成、问题、下周计划。' }, { name: '中英互译', content: 'dup' }].concat(JSON.parse(window.__copied).templates.slice(0, 2)) }); });
   await page.click('#dialog-ok'); await sleep(450);
-  ts = await tplStore(); assert.strictEqual(ts.length, 10, '新增 2 个（同名不同内容也算新），重复的 2 个跳过');
+  ts = await tplStore(); assert.strictEqual(ts.length, 12, '新增 2 个（同名不同内容也算新），重复的 2 个跳过');
   assert.ok(ts.some(t => t.name === '周报助手'));
   await page.click('#tm-more'); await sleep(350); await actionClick('粘贴 JSON 导入'); await sleep(350);
   await page.evaluate(() => { document.querySelector('#dialog-input').value = '{broken'; }); await page.click('#dialog-ok'); await sleep(450);
@@ -881,7 +892,7 @@ async function scenario(browser, theme) {
   assert.ok((await page.$eval('#tpl-chip-label', e => e.textContent)).includes('润色改写'));
   assert.strictEqual(await page.$('#conv-bar .hbadge.tpl'), null, '新对话默认模板也不进顶栏');
   await setInput('这句话帮我改一下：我们公司产品非常的好用'); await page.click('#btn-send'); await sleep(200); await waitIdle(); await sleep(250);
-  assert.strictEqual((await lastPost()).body.messages[0].content, r.tplBuiltin.find(t => t.id === 't-polish').content);
+  assert.strictEqual(stripAffectSys((await lastPost()).body.messages[0].content), r.tplBuiltin.find(t => t.id === 't-polish').content);
   // 设置页里也能改默认模板
   await page.click('#btn-menu'); await sleep(350); await page.click('#btn-settings'); await sleep(500);
   assert.strictEqual(await page.$eval('#set-deftpl', e => e.value), 't-polish');
@@ -1024,7 +1035,7 @@ async function scenario(browser, theme) {
   rc = await rpConv();
   assert.strictEqual(rc.messages.length, nBefore - 2);
   assert.strictEqual(rc.messages[rc.messages.length - 2].content, '我们换条路，往东走。');
-  assert.ok((await lastPost()).body.messages.pop().content.startsWith('我们换条路，往东走。\n\n[CURRENT_STATE]'));
+  assert.ok(stripAffect((await lastPost()).body.messages.pop().content).startsWith('我们换条路，往东走。\n\n[CURRENT_STATE]'));
   { const l = (await rpLogs()).slice(-1)[0]; assert.ok(l.summary_happened || l.reasons.some(x => x.includes('编辑并重新发送了较早的消息')), JSON.stringify(l.reasons)); }
   assert.strictEqual(rc.messages[rc.messages.length - 2].versions.length, 2, '编辑重发开出新分支');
   // RP 分层设定：全屏编辑后仍需点「保存」才生效（显式更新路径不变）
@@ -1042,7 +1053,7 @@ async function scenario(browser, theme) {
   assert.strictEqual(JSON.stringify((await rpConv()).plugins.rpcache.state.blocks), stBefore, '未保存则不改变');
   await closePanels();
   // 模板编辑页的全屏编辑
-  await page.click('#btn-menu'); await sleep(350); await page.click('#btn-templates'); await sleep(500);
+  await page.click('#btn-menu'); await sleep(350); await page.evaluate(() => { const d = document.querySelector('.drawer-more'); if (d) d.open = true; }); await page.click('#btn-templates'); await sleep(500);
   await page.click('#tm-new'); await sleep(450);
   await page.evaluate(() => document.querySelector('#page-template .ta-expand').click()); await sleep(400);
   ei = await edInfo();
@@ -1111,8 +1122,8 @@ async function scenario(browser, theme) {
   assert.strictEqual(await msgCount(), 2); assert.strictEqual(await msgAt(1, '.vs-label'), '3 / 3');
   await sendT('版本测试：第三分支的问题');
   assert.strictEqual(await msgCount(), 4);
-  q = (await lastPost()).body.messages.map(m => m.content);
-  assert.ok(q[1].startsWith('版本回复 4') && !q.some(c => c.includes('继续')), JSON.stringify(q));
+  q = (await lastPost()).body.messages;
+  assert.ok(q.some(m => m.role === 'assistant' && m.content.startsWith('版本回复 4')) && !q.some(m => String(m.content).includes('继续')), JSON.stringify(q.map(m => m.content.slice(0, 24))));
   await clickIn(1, '.vs-label'); await sleep(350);
   r.verMenu = await page.$$eval('#action-list .action-item', e => e.map(x => x.textContent.trim()));
   assert.ok(r.verMenu[0].startsWith('切换到第 1 个') && r.verMenu.includes('只保留当前版本（第 3 个）') && r.verMenu.includes('删除当前版本'), JSON.stringify(r.verMenu));
@@ -1202,7 +1213,13 @@ async function scenario(browser, theme) {
 
   // 17) 用量统计（全局页面，非插件）
   // 回填：启动时已把旧对话里带 usage 的消息写入 usage-stats.json
-  const usState = () => page.evaluate(() => JSON.parse(window.__mem['usage-stats.json'] || 'null'));
+  // v0.9.0：用量改为 usage-stats.jsonl + usage-stats-meta.json
+  const usState = async () => { await flushSaves(); return page.evaluate(() => {
+    const meta = JSON.parse(window.__mem['usage-stats-meta.json'] || 'null');
+    const raw = window.__mem['usage-stats.jsonl'] || '';
+    const log = raw ? raw.split('\n').filter(x => x.trim()).map(x => JSON.parse(x)) : [];
+    return meta ? Object.assign({}, meta, { log }) : null;
+  }); };
   let us0 = await usState();
   assert.ok(us0 && us0.backfilled, '启动后完成回填');
   assert.ok(us0.log.some(e => e.key && e.key.startsWith('bf:') && e.prompt === 12 && e.completion === 8), JSON.stringify(us0.log.slice(0, 3)));
