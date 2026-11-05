@@ -1,3 +1,14 @@
+**v0.22.3：本地资料库（阶段 1 · 管理页 + 本地存储）**
+
+- 新增按世界隔离的本地资料库：存储键 `knowledge_world_<worldId>.json`，默认分类（住宅布局 / 物品衣服车辆 / 做过的事 / 地点 / 其他）
+- `knowledge.js` 纯逻辑 CRUD + 关键词检索；`knowledge-plugin.js` 管理面板（分类增删改排序、条目 CRUD / 置顶、本地搜索、世界切换）
+- 入口：世界列表「资料库」、世界编辑页、模型菜单、插件页；**不改动**主屏卡片 UI
+- 预留全局开关 + 注入总闸 + 单对话开关（默认关）；**阶段 1 不实现** `onBeforeRequest` / `[LOCAL_KNOWLEDGE]` 注入，不写 L1 / system
+- 单测：`tests/knowledge.test.js`；`npm test` 全绿
+- Android `0.22.3`（versionCode **71**）
+
+---
+
 **v0.22.2：OpenRouter 模型价显示改为 endpoints 最低价**
 
 - OpenRouter 服务商编辑页 / 获取模型列表：价格改为拉取 `/models/{id}/endpoints` 后取有效最低价（含 discount），文案前缀「最低」，与请求侧 `provider.sort=price` 一致

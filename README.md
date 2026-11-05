@@ -48,6 +48,10 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.22.3：本地资料库（阶段 1 · 管理页 + 本地存储）**
+- 按世界隔离的本地资料（CRUD / 置顶 / 关键词检索）；入口在世界页与插件，不占主屏卡片
+- 阶段 1 只存设置与管理 UI，不注入请求；Android `0.22.3`（versionCode 71）/ 桌面 / npm `0.22.3`
+
 **v0.22.2：OpenRouter 模型价显示改为 endpoints 最低价（标「最低」）**
 - Android `0.22.2`（versionCode 70）/ 桌面 / npm `0.22.2`
 

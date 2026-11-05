@@ -232,7 +232,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.22.2 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.22.3 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -389,6 +389,7 @@
   <header class="topbar">
     <button class="icon-btn" data-back aria-label="返回"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div class="page-title">世界模板</div>
+    <button class="text-btn" id="wl-knowledge" type="button" title="本地资料库">资料库</button>
     <button class="icon-btn" id="wl-add" aria-label="新建世界"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   </header>
   <div class="page-body">
@@ -421,7 +422,8 @@
     <div class="group" style="margin-top:12px">
       <button class="pill-btn primary" id="wd-start" type="button" style="width:100%">用此世界开聊</button>
       <button class="ghost-btn" id="wd-sync" type="button" style="width:100%;margin-top:8px">同步到当前对话</button>
-      <div class="hint" style="margin-top:8px">开聊自动套用「沉浸式 RP（全自动）」。同步会覆盖当前对话的对应 L1 块并启用 RP 缓存；未打开的对话不受影响。</div>
+      <button class="ghost-btn" id="wd-knowledge" type="button" style="width:100%;margin-top:8px">📚 本地资料库</button>
+      <div class="hint" style="margin-top:8px">开聊自动套用「沉浸式 RP（全自动）」。同步会覆盖当前对话的对应 L1 块并启用 RP 缓存；未打开的对话不受影响。资料库按世界隔离，不写入 L1。</div>
     </div>
     <button class="ghost-btn danger" id="wd-delete" style="margin-top:16px">删除此世界</button>
   </div>
@@ -638,6 +640,8 @@
 <script src="usage-stats.js"></script>
 <script src="balance.js"></script>
 <script src="plugins.js"></script>
+<script src="knowledge.js"></script>
+<script src="knowledge-plugin.js"></script>
 <script src="rpcache.js"></script>
 <script src="rp-plugin.js"></script>
 <script src="gcache.js"></script>

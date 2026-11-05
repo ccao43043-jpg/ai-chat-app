@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.22.2';
+  const APP_VERSION = '0.22.3';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -2038,11 +2038,15 @@
     const t3 = document.createElement('button'); t3.className = 'pm-item tool';
     t3.innerHTML = '<span class="pm-emoji">🎭</span><span class="pm-name">本对话插件 · RP 缓存优化' + (Plugins.registry.isActive('rpcache', settings, conv) ? '（已开启）' : '') + '</span>';
     t3.onclick = () => { closeModelMenu(); openPluginPanel('rpcache'); };
+    const t3k = document.createElement('button'); t3k.className = 'pm-item tool';
+    t3k.innerHTML = '<span class="pm-emoji">📚</span><span class="pm-name">本地资料库' + (conv.worldName ? ' · ' + esc(conv.worldName) : '') + '</span>';
+    t3k.onclick = () => { closeModelMenu(); openPluginPanel('knowledge', conv.worldId || ''); };
     const t4 = document.createElement('button'); t4.className = 'pm-item tool';
     t4.innerHTML = '<span class="pm-emoji">📋</span><span class="pm-name">提示词模板' + (conv.templateName ? ' · ' + esc(conv.templateName) : ' · 切换系统提示词') + '</span>';
     t4.onclick = () => { closeModelMenu(); openTemplateSheet(); };
     tools.appendChild(t4);
-    if (list.length) { tools.appendChild(t1); tools.appendChild(t3); }
+    if (list.length) { tools.appendChild(t1); tools.appendChild(t3); tools.appendChild(t3k); }
+    else tools.appendChild(t3k);
     tools.appendChild(t2);
     menu.appendChild(tools);
     menu.classList.add('show'); $('#menu-mask').classList.add('show'); $('#model-pill').classList.add('open');
@@ -2228,6 +2232,10 @@
   }
   function closeWorlds() { $('#page-worlds').classList.remove('show'); }
   $('#wl-add').onclick = () => openWorldEdit(null);
+  $('#wl-knowledge').onclick = () => {
+    const prefer = (editingWorld && editingWorld.id) || (conv && conv.worldId) || (worlds[0] && worlds[0].id) || '';
+    openPluginPanel('knowledge', prefer);
+  };
   function renderWorldGrid() {
     const box = $('#world-grid'); box.innerHTML = '';
     worlds.forEach(wd => {
@@ -2347,6 +2355,10 @@
   };
   $('#wd-sync').onclick = async () => {
     const item = readWorldForm();
+  $('#wd-knowledge').onclick = () => {
+    if (!editingWorld || !editingWorld.id || editingWorld.isNew) { toast('请先保存世界'); return; }
+    openPluginPanel('knowledge', editingWorld.id);
+  };
     if (!item.name) { toast('请填写世界名称'); return; }
     worlds = Worlds.upsert(worlds, item); saveWorlds();
     const wd = worlds.find(x => x.id === item.id);
@@ -3171,6 +3183,7 @@
   const pluginHost = {
     settings: () => settings, saveSettings, conv: () => conv,
     saveConv: c => saveConvSoon(c || conv),
+    worlds: () => worlds,
     store: { get: (n, d) => Store.get(n, d), set: (n, v) => Store.set(n, v), del: n => Store.del(n),
       append: (n, v) => Store.append(n, v), readJsonl: n => Store.readJsonl(n), writeJsonl: (n, v) => Store.writeJsonl(n, v) },
     toast, dialog, esc,
