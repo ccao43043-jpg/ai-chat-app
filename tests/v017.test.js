@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const R = require('../app/src/main/assets/www/rpcache.js');
-const G = require('../app/src/main/assets/www/gcache.js');
+const G = require('../app/src/main/assets/www/plugins/cache/gcache.js');
 const M = require('../app/src/main/assets/www/rpmemory.js');
 
 const u = (i, t) => ({ id: 'u' + i, role: 'user', content: t || '玩家第' + i + '轮：推开门，观察四周。' });

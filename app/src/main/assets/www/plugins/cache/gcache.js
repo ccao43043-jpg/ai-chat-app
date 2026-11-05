@@ -25,7 +25,7 @@
   /** 静态层指纹：先按原始字符串 === 比较，与上次相同则复用上次哈希，避免重复计算 */
   let lastStatic = null, lastStaticHash = '';
   function sha256hex(str) {
-    const R = root.RPCache || (typeof require === 'function' ? require('./rpcache.js') : null);
+    const R = root.RPCache || (typeof require === 'function' ? require('../../rpcache.js') : null);
     if (R && R.sha256) return R.sha256(str);
     return hash(str); // 极端无 rpcache 时退回 FNV（测试环境应已加载）
   }
@@ -261,7 +261,7 @@
     return { from, to, fp: batchFp(turns.slice(from, to)), text, level: 2, at: k[k.length - 1].at };
   }
   /** 仅剥「带秒或带时区」的机器时间戳；纯 HH:MM（如剧情「下午 13:45」）原样保留 */
-  const localDate = now => (root.TimeUtil || (typeof require === 'function' ? require('./timeutil.js') : null)).localDateStr(now); // v0.21.3：本地日期
+  const localDate = now => (root.TimeUtil || (typeof require === 'function' ? require('../../timeutil.js') : null)).localDateStr(now); // v0.21.3：本地日期
   function normalizeDates(s) {
     return String(s == null ? '' : s).replace(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)(?:[ T]|\s*)(?:\d{1,2}[:：]\d{2}[:：]\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{1,2}[:：]\d{2}(?:Z|[+-]\d{2}:?\d{2}))/g, '$1');
   }
@@ -472,7 +472,7 @@
   // v1.4.0（P1 修复）：「已发送版本」表按消息身份索引（消息 id；无 id 时退化为历史中第 n 条 user 的序号），
   // 并记录原文 SHA-256 + 长度，替换前校验——原文变了（编辑 / 删除错位 / 哈希碰撞）就不替换。
   // 旧版以内容 FNV-32 为键：重复文本（连发「继续」）会互相覆盖、碰撞时静默替换，已废弃（旧条目加载时丢弃）。
-  const sha = s => (root.RPCache || (typeof require === 'function' ? require('./rpcache.js') : null)).sha256(s);
+  const sha = s => (root.RPCache || (typeof require === 'function' ? require('../../rpcache.js') : null)).sha256(s);
   const sentKey = (id, ord) => (id != null && id !== '' ? 'i:' + id : ord != null ? 'u#' + ord : null);
   function hwRecordSent(state, key, original, sent) {
     if (key == null || typeof original !== 'string') return;

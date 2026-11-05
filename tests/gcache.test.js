@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const G = require('../app/src/main/assets/www/gcache.js');
+const G = require('../app/src/main/assets/www/plugins/cache/gcache.js');
 const P = require('../app/src/main/assets/www/providers.js');
 const OR = { type: 'openai', presetId: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-x' };
 
@@ -199,7 +199,7 @@ test('Hybrid-5：user 尾部剧情时分不剥（约在 14:30）', () => {
 test('Hybrid-5：非 OpenRouter+Gemini 不识别（插件不改请求）；冲突策略 A：rpcache 同开不启用 Zip', () => {
   assert.ok(!G.isOpenRouterGemini({ type: 'openai', presetId: 'openai', baseUrl: 'https://api.openai.com/v1' }, 'gpt-4o'));
   assert.ok(!G.isOpenRouterGemini(OR, 'openai/gpt-4o'));
-  const src = require('fs').readFileSync(require.resolve('../app/src/main/assets/www/gcache.js'), 'utf8');
+  const src = require('fs').readFileSync(require.resolve('../app/src/main/assets/www/plugins/cache/gcache.js'), 'utf8');
   assert.match(src, /hyOn = o\.hybrid !== false && !\(ctx\.meta && ctx\.meta\.gcacheRpcache\)/);
   assert.strictEqual(G.DEFAULTS.hybrid, true);
 });
@@ -212,7 +212,7 @@ test('Hybrid-5：编辑已冻结批次 → 作废并重建，历史删短 → �
 
 // ── v0.8.8：auto+Hybrid 断点放到本轮 user 之前 / 保活分析 / 写入价 ──
 test('auto+Hybrid：断点在本轮 user 之前，历史进缓存；autoTarget=prefix 可切回', () => {
-  const G = require('../app/src/main/assets/www/gcache.js');
+  const G = require('../app/src/main/assets/www/plugins/cache/gcache.js');
   const sys = '【世界观】\n' + '世界'.repeat(700);
   const msgs = [{ role: 'system', content: sys }, { role: 'user', content: '你好' }, { role: 'assistant', content: '嗨' }, { role: 'user', content: '继续' }];
   const req = { url: 'x', headers: {}, body: JSON.stringify({ model: 'google/gemini-2.5-flash', messages: msgs }) };
@@ -230,7 +230,7 @@ test('auto+Hybrid：断点在本轮 user 之前，历史进缓存；autoTarget=p
   assert.ok(!n.decision.history);
 });
 test('保活分析与写入价', () => {
-  const G = require('../app/src/main/assets/www/gcache.js'), K = G.KeepAlive;
+  const G = require('../app/src/main/assets/www/plugins/cache/gcache.js'), K = G.KeepAlive;
   assert.equal(K.pingsForGap(100, 270, 3), 0);
   assert.equal(K.pingsForGap(600, 270, 3), 2);
   assert.ok(K.recommend([600, 700, 500], 300, 270, 3).enable);
