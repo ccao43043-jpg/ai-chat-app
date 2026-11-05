@@ -1050,3 +1050,6 @@ html, body { background: var(--bg); }
 .budget-line.warn>i{background:#e0a100}.budget-line.over>i{background:#e5484d}
 .af-spark{display:block;margin-top:4px;color:var(--accent,#4f8cff)}
 .rp-lore-trace{margin:4px 0 8px}.rp-lore-trace summary{cursor:pointer}
+
+/* 单条回复的缓存命中信息（OpenRouter cached_tokens / cache_discount） */
+.msg-cache { font-size: 11px; color: var(--fg-3); margin: 4px 0 0; line-height: 1.4; font-variant-numeric: tabular-nums; }
