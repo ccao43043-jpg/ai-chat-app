@@ -146,8 +146,6 @@ async function scenario(browser, theme) { const seed0 = global.seed;
     };
   }, seed0);
   await page.goto(PAGE); await sleep(800);
-  await page.evaluate(() => { if (typeof showChat === 'function') showChat(); else { document.body.classList.add('chat-mode'); document.body.classList.remove('home-mode'); } });
-  await sleep(100);
   return { page, errors };
 }
 // v0.21.6：「没有编辑按钮」——生成期间建的用户气泡没有编辑按钮，结束后不重建。覆盖：发送 → 等回复 → 编辑按钮存在 → 保存 → 离开再回来仍是新内容；世界对话与普通对话同路径
