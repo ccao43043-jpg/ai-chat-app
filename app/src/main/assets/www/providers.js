@@ -198,7 +198,7 @@
   function parsePricing(pr) {
     return pricingFromRaw(pr, 1);
   }
-  /** 将美元/Token（及 image 美元/张）按 factor 折算为现有 $/M 结构；factor 通常为 1 或 (1-discount) */
+  /** 将美元/Token（及 image 美元/张）按 factor 折算为现有 $/M 结构；factor 通常为 1（OpenRouter catalog/endpoints 价已含折扣，勿再乘 1-discount） */
   function pricingFromRaw(pr, factor) {
     if (!pr || typeof pr !== 'object') return null;
     const f = Number(factor); const mul = isFinite(f) && f > 0 ? f : 0;
@@ -212,16 +212,13 @@
     return Object.keys(o).length ? o : null;
   }
   /**
-   * endpoints 单项 pricing：标价 × (1 - discount) 后转为 $/M。
-   * discount 缺省 0，钳制到 [0,1]；0/负有效价丢弃。
+   * endpoints 单项 pricing → $/M。OpenRouter 返回的 prompt/completion 已是折后实付价，
+   * pricing.discount 仅为元数据，绝不能再乘 (1 - discount)（否则 Flex 会被二次打折）。
+   * 0/负价丢弃。
    */
   function effectiveTokenPricing(pr) {
     if (!pr || typeof pr !== 'object') return null;
-    let disc = Number(pr.discount);
-    if (!isFinite(disc)) disc = 0;
-    if (disc < 0) disc = 0;
-    if (disc > 1) disc = 1;
-    return pricingFromRaw(pr, 1 - disc);
+    return pricingFromRaw(pr, 1);
   }
   /** 在 endpoints 数组中选有效价最低的一端（比较 prompt+completion，同分再比 prompt） */
   function floorPricingFromEndpoints(endpoints) {

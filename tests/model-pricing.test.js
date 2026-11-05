@@ -22,20 +22,20 @@ test('formatModelPrice', () => {
   assert.strictEqual(P.formatContext(128000), '128K');
 });
 
-test('effectiveTokenPricing applies discount and drops non-positive', () => {
+test('effectiveTokenPricing ignores discount (prices already discounted) and drops non-positive', () => {
   assert.deepStrictEqual(
     P.effectiveTokenPricing({ prompt: '0.00000004', completion: '0.00000015', input_cache_read: '0.000000004', discount: 0.8 }),
-    { prompt: 0.008, completion: 0.03, cacheRead: 0.0008 }
+    { prompt: 0.04, completion: 0.15, cacheRead: 0.004 }
   );
   assert.deepStrictEqual(
     P.effectiveTokenPricing({ prompt: '0.00000015', completion: '0.0000006', discount: 0 }),
     { prompt: 0.15, completion: 0.6 }
   );
-  assert.strictEqual(P.effectiveTokenPricing({ prompt: '0.000001', completion: '0.000002', discount: 1 }), null);
+  assert.deepStrictEqual(P.effectiveTokenPricing({ prompt: '0.000001', completion: '0.000002', discount: 1 }), { prompt: 1, completion: 2 });
   assert.strictEqual(P.effectiveTokenPricing({ prompt: '-1', completion: '-1', discount: 0.5 }), null);
   assert.deepStrictEqual(
-    P.effectiveTokenPricing({ prompt: '0.000001', completion: '0.000002', discount: 2 }), // clamp to 1 → all free → null
-    null
+    P.effectiveTokenPricing({ prompt: '0.000001', completion: '0.000002', discount: 2 }), // discount ignored
+    { prompt: 1, completion: 2 }
   );
   // missing discount ≡ 0
   assert.deepStrictEqual(
@@ -47,10 +47,15 @@ test('effectiveTokenPricing applies discount and drops non-positive', () => {
 test('floorPricingFromEndpoints picks lowest effective endpoint', () => {
   const endpoints = [
     { provider_name: 'Top', pricing: { prompt: '0.000001', completion: '0.000003', discount: 0 } }, // $1 / $3
-    { provider_name: 'Flex', pricing: { prompt: '0.0000004', completion: '0.0000015', discount: 0.5 } }, // eff $0.2 / $0.75
+    { provider_name: 'Flex', pricing: { prompt: '0.0000004', completion: '0.0000015', discount: 0.5 } }, // already discounted: $0.4 / $1.5
     { provider_name: 'Mid', pricing: { prompt: '0.0000005', completion: '0.000002', discount: 0 } }, // $0.5 / $2
   ];
-  assert.deepStrictEqual(P.floorPricingFromEndpoints(endpoints), { prompt: 0.2, completion: 0.75 });
+  assert.deepStrictEqual(P.floorPricingFromEndpoints(endpoints), { prompt: 0.4, completion: 1.5 });
+  // Gemini 3.8 Flash shape: Flex $0.375/$1.875 vs Standard $0.75/$3.75 (both already 50% off)
+  assert.deepStrictEqual(P.floorPricingFromEndpoints([
+    { provider_name: 'Standard', pricing: { prompt: '0.00000075', completion: '0.00000375', discount: 0.5 } },
+    { provider_name: 'Flex', pricing: { prompt: '0.000000375', completion: '0.000001875', discount: 0.5 } },
+  ]), { prompt: 0.375, completion: 1.875 });
   // tie on sum → lower prompt wins
   assert.deepStrictEqual(P.floorPricingFromEndpoints([
     { pricing: { prompt: '0.0000006', completion: '0.0000004' } }, // 0.6+0.4
