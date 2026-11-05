@@ -16,8 +16,8 @@ android {
         applicationId 'com.aichat.app'
         minSdk 24
         targetSdk 34
-        versionCode 64
-        versionName '0.21.4'
+        versionCode 65
+        versionName '0.21.5'
     }
 
     signingConfigs {

@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.21.5：OpenRouter 优先最低价供应商**
+
+- OpenRouter 请求默认带 `provider.sort = "price"`，优先路由到最便宜端点
+- Android `0.21.5`（versionCode 65）/ 桌面 / npm `0.21.5`
+
 **v0.21.4：修复消息编辑无效**
 
 - 重新打开对话后「编辑 → 保存」不生效（世界对话报告）已修复

@@ -373,6 +373,11 @@
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
     if (opts.jsonMode && jsonModeSupported(provider)) body.response_format = { type: 'json_object' }; // v0.7.5：设定提取等结构化调用
+    // OpenRouter：优先选择最低价格的供应商（provider.sort = "price"，等价于模型名 :floor）
+    // 这样实际路由会尽量使用当前最便宜的端点，而不是默认的负载均衡/吞吐量优先。
+    if (provider.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) {
+      body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+    }
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
     if (stream) headers['Accept'] = 'text/event-stream';
     return { url: base + '/chat/completions', method: 'POST', headers, body: JSON.stringify(body) };

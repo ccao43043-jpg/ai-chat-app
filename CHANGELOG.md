@@ -1,3 +1,11 @@
+**v0.21.5：OpenRouter 优先最低价供应商**
+
+- **默认按价格路由**：OpenRouter（预设或 baseUrl 含 `openrouter.ai`）请求体自动带 `provider: { sort: "price" }`（等价模型名 `:floor`），优先使用当前最便宜的端点，而非默认负载均衡 / 吞吐优先
+- **不影响其他服务商**：DeepSeek / 通用 OpenAI 兼容等请求不变；本次默认开启，无开关
+- **单测**：`tests/providers.test.js` 覆盖 OpenRouter 预设、自定义 openrouter.ai baseUrl 与非 OpenRouter 对照
+
+---
+
 **v0.21.4：修复消息编辑无效（世界对话报告）**
 
 - **现象**：重新打开同一对话（消息条数不变）后，点用户消息「编辑 → 保存」提示已保存但内容不变；世界对话最易触发，普通对话同样存在

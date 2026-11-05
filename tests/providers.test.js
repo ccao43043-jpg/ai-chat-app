@@ -253,3 +253,14 @@ test('isFluxTierModel / pixelSizeToTier 辅助', () => {
   assert.strictEqual(P.closestAspectRatio(1024, 1792), '9:16');
   assert.strictEqual(P.closestAspectRatio(1792, 1024), '16:9');
 });
+
+test('OpenRouter 优先最低价供应商（provider.sort=price）', () => {
+  const b1 = JSON.parse(P.buildChatRequest(preset('openrouter'), 'openai/gpt-4o-mini', msgs, '').body);
+  assert.deepStrictEqual(b1.provider, { sort: 'price' });
+  const b2 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k' }, 'm', msgs, '').body);
+  assert.deepStrictEqual(b2.provider, { sort: 'price' });
+  const b3 = JSON.parse(P.buildChatRequest(preset('deepseek'), 'deepseek-flash', msgs, '').body);
+  assert.strictEqual(b3.provider, undefined);
+  const b4 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://x.com/v1', apiKey: 'k' }, 'm', msgs, '').body);
+  assert.strictEqual(b4.provider, undefined);
+});
