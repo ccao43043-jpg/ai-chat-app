@@ -148,26 +148,53 @@ async function scenario(browser, theme) { const seed0 = global.seed;
   await page.goto(PAGE); await sleep(800);
   return { page, errors };
 }
+// v0.21.6：「没有编辑按钮」——生成期间建的用户气泡没有编辑按钮，结束后不重建。覆盖：发送 → 等回复 → 编辑按钮存在 → 保存 → 离开再回来仍是新内容；世界对话与普通对话同路径
+const userEditBtn = (page, idx) => page.evaluate(i => { const us = [...document.querySelectorAll('.msg.user')]; const u = i == null ? us[us.length - 1] : us[i]; return !!(u && [...u.querySelectorAll('.actions button')].find(b => b.title === '编辑')); }, idx);
+const TITLES = { wc1: '🌍 测试', nc1: '普通' };
+const openConvItem = (page, id) => page.evaluate(t => { [...document.querySelectorAll('.conv-item')].find(e => e.querySelector('.ci-title').textContent === t).click(); }, TITLES[id]);
+async function sendAndWait(page, text) {
+  await page.evaluate(t => { const i = document.querySelector('#input'); i.value = t; i.dispatchEvent(new Event('input')); document.querySelector('#btn-send').click(); }, text);
+  for (let k = 0; k < 100; k++) { await sleep(100); if (await page.evaluate(() => !document.querySelector('#btn-send').classList.contains('stop') && !document.querySelector('.msg .typing'))) break; }
+  await sleep(300);
+}
+async function editLastUser(page, text) {
+  await page.evaluate(() => { const us = [...document.querySelectorAll('.msg.user')]; [...us[us.length - 1].querySelectorAll('.actions button')].find(b => b.title === '编辑').click(); });
+  await sleep(200);
+  await page.evaluate(t => { document.querySelector('#ed-text').value = t; document.querySelector('#ed-save').click(); }, text);
+  await sleep(300);
+}
+const lastUserText = page => page.evaluate(() => { const us = [...document.querySelectorAll('.msg.user .bubble')]; return us[us.length - 1].textContent; });
+const storedUsers = (page, id) => page.evaluate(id => JSON.parse(window.__mem['conv_' + id + '.json']).messages.filter(m => m.role === 'user').map(m => m.content), id);
+
 (async () => {
   const W = { id: 'wc1', title: '🌍 测试', providerId: 'deepseek', model: 'deepseek-chat', systemPrompt: '', worldId: 'w1', worldName: '测试', worldEmoji: '🌍',
-    messages: [{ id: 'g1', role: 'assistant', content: '开场白', createdAt: 1 }, { id: 'u1', role: 'user', content: '我的原话', createdAt: 2 }, { id: 'a1', role: 'assistant', content: '回复', createdAt: 3 }],
-    plugins: { rpcache: { enabled: true } }, createdAt: 1, updatedAt: 3 };
-  var seed = { 'settings.json': JSON.stringify(OLD_SETTINGS), 'convs.json': JSON.stringify([{ id: 'wc1', title: 'x', updatedAt: 3 }]), 'conv_wc1.json': JSON.stringify(W) };
-  global.seed = seed;
+    // 长 RP 对话（> 40 条走虚拟滚动窗口路径，用户现场即长对话）
+    messages: [{ id: 'g1', role: 'assistant', content: '开场白', createdAt: 1 }].concat(...Array.from({ length: 30 }, (_, i) => [{ id: 'u' + i, role: 'user', content: i ? '第' + i + '句' : '我的原话', createdAt: 2 + i * 2 }, { id: 'a' + i, role: 'assistant', content: '回复' + i, createdAt: 3 + i * 2 }])),
+    plugins: { rpcache: { enabled: true } }, createdAt: 1, updatedAt: 5 };
+  const N = { id: 'nc1', title: '普通', providerId: 'deepseek', model: 'deepseek-chat', systemPrompt: '', messages: [{ id: 'nu1', role: 'user', content: '普通原话', createdAt: 1 }, { id: 'na1', role: 'assistant', content: '普通回复', createdAt: 2 }], createdAt: 1, updatedAt: 4 };
+  global.seed = { 'settings.json': JSON.stringify(OLD_SETTINGS), 'convs.json': JSON.stringify([{ id: 'wc1', title: '🌍 测试', updatedAt: 5 }, { id: 'nc1', title: '普通', updatedAt: 4 }]), 'conv_wc1.json': JSON.stringify(W), 'conv_nc1.json': JSON.stringify(N) };
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--allow-file-access-from-files'] });
   const { page, errors } = await scenario(browser, 'dark');
-  await page.evaluate(() => { const it = document.querySelector('[data-id="wc1"], .conv-item'); it && it.click(); });
-  await sleep(500);
-  const info = await page.evaluate(() => [...document.querySelectorAll('.msg')].map(e => e.className + ' | ' + [...e.querySelectorAll('.actions button')].map(b => b.getAttribute('aria-label') || b.title || b.textContent).join(',')));
-  console.log(info);
-  const clicked = await page.evaluate(() => { const u = document.querySelector('.msg.user'); const b = u && [...u.querySelectorAll('.actions button')].find(b => /编辑/.test(b.title + b.getAttribute('aria-label') + b.textContent)); if (b) b.click(); return !!b; });
-  console.log('clicked', clicked); await sleep(300);
-  console.log('editor shown', await page.evaluate(() => document.querySelector('#editor').className));
-  await page.evaluate(() => { document.querySelector('#ed-text').value = '改过的话'; document.querySelector('#ed-save').click(); }); await sleep(100); console.log('toast', await page.evaluate(()=>[...document.querySelectorAll('.toast, #toast')].map(e=>e.textContent+'/'+e.className)));
-  await sleep(400);
-  await sleep(1500);
-  console.log(await page.evaluate(() => [document.querySelector('.msg.user .bubble').textContent, document.querySelector('#editor').className, (document.querySelector('.dialog.show, .modal.show, [role=dialog].show')||{}).textContent, window.__mem['conv_wc1.json'] && JSON.parse(window.__mem['conv_wc1.json']).messages.map(m=>m.content).join('|')]), errors);
-  const r = await page.evaluate(() => [document.querySelector('.msg.user .bubble').textContent, JSON.parse(window.__mem['conv_wc1.json']).messages[1].content]);
-  assert.deepStrictEqual(r, ['改过的话', '改过的话']); assert.deepStrictEqual(errors, []);
+  for (const id of ['wc1', 'nc1']) {
+    await openConvItem(page, id); await sleep(400);
+    // 1. 已有消息：直接编辑（不离开）
+    assert.ok(await userEditBtn(page), id + ' 已有用户消息应有编辑按钮');
+    // 2. 新发一条，回复结束后必须出现编辑按钮（v0.21.4 回归点）
+    await sendAndWait(page, id + ' 新发的话');
+    assert.ok(await userEditBtn(page), id + ' 刚发出的用户消息应有编辑按钮');
+    await editLastUser(page, id + ' 改过');
+    assert.strictEqual(await lastUserText(page), id + ' 改过');
+    // 3. 离开再回来，仍是新内容且可再编辑
+    await openConvItem(page, id === 'wc1' ? 'nc1' : 'wc1'); await sleep(300);
+    await openConvItem(page, id); await sleep(400);
+    assert.strictEqual(await lastUserText(page), id + ' 改过');
+    assert.ok(await userEditBtn(page), id + ' 重开后应有编辑按钮');
+    await editLastUser(page, id + ' 再改');
+    await openConvItem(page, id === 'wc1' ? 'nc1' : 'wc1'); await sleep(300);
+    await openConvItem(page, id); await sleep(400);
+    assert.strictEqual(await lastUserText(page), id + ' 再改');
+    assert.strictEqual((await storedUsers(page, id)).pop(), id + ' 再改');
+  }
+  assert.deepStrictEqual(errors, []);
   await browser.close(); console.log('edit-msg e2e OK');
-})();
+})().catch(e => { console.error(e); process.exit(1); });
