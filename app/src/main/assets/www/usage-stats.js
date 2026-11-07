@@ -5,28 +5,26 @@
 (function (root) {
   'use strict';
 
+  const CostCore = root.CostCore || (typeof require === 'function' ? require('./cost-core.js') : null);
+  if (!CostCore) throw new Error('UsageStats requires cost-core.js');
+
   const VERSION = 1;
   const LOG_LIMIT = 5000;
-  /** DeepSeek 官方价（美元 / 百万 Token，高峰）；非高峰为一半。与 rpcache 默认一致。 */
-  const DEFAULT_PRICES = {
-    'deepseek-flash': { hit: 0.006, miss: 0.3, out: 1.2 },
-    'deepseek-v4-pro': { hit: 0.044, miss: 1.32, out: 3.96 },
-    // 通用兜底（无缓存区分时：输入按 miss、输出按 out）
-    'default': { hit: 0, miss: 0.5, out: 1.5 },
-  };
-  // 若 rpcache 的默认价更新了则以那边为准；此处保留与 2026 文档接近的一组可编辑默认值
-  // 实际会优先合并 RP 插件里用户改过的价格
+  /** 可编辑默认价目（与 CostCore 同源；含 default 兜底）。千问等走 CostCore.BUILTIN。 */
+  const DEFAULT_PRICES = Object.assign({}, CostCore.USAGE_DEFAULT_PRICES);
+  // 实际会优先合并 RP 插件里用户改过的价格；未知非 builtin 模型才用 default
 
   const TYPE_CN = { chat: '对话', image: '图片', summary: '摘要' };
 
   function emptyState() {
-    return { version: VERSION, backfilled: false, log: [], prices: Object.assign({}, DEFAULT_PRICES), priceMode: 'auto' };
+    return { version: VERSION, backfilled: false, log: [], prices: Object.assign({}, DEFAULT_PRICES), priceMode: 'auto', calib: CostCore.emptyCalib() };
   }
   function normalize(raw) {
     const s = Object.assign(emptyState(), raw || {});
     s.prices = Object.assign({}, DEFAULT_PRICES, s.prices || {});
     if (!Array.isArray(s.log)) s.log = [];
     if (!['auto', 'peak', 'offpeak'].includes(s.priceMode)) s.priceMode = 'auto';
+    if (!s.calib || typeof s.calib !== 'object') s.calib = CostCore.emptyCalib();
     s.version = VERSION;
     return s;
   }
@@ -41,11 +39,14 @@
     const type = o.type || 'chat';
     const msgId = o.msgId || '';
     const key = o.key || ('l:' + at + ':' + msgId + ':' + prompt + ':' + completion + ':' + type);
+    const actualCost = (typeof u.cost === 'number' && isFinite(u.cost)) ? u.cost
+      : (typeof o.actualCost === 'number' && isFinite(o.actualCost) ? o.actualCost : null);
     return {
       id: o.id || ('u_' + at.toString(36) + '_' + Math.random().toString(36).slice(2, 8)),
       at, type, prompt, completion, hit, miss, cache,
       model: o.model || '', providerId: o.providerId || '', providerName: o.providerName || '',
       convId: o.convId || '', convTitle: o.convTitle || '', msgId, key,
+      actualCost,
     };
   }
 
@@ -64,33 +65,21 @@
     return Object.assign({}, s, { log: [], backfilled: true });
   }
 
-  /** 高峰：周一至周五 UTC 01–04、06–10（北京 9–12、14–18）—— 与 rpcache 一致 */
-  function isPeak(at) {
-    const d = new Date(at); const day = d.getUTCDay(), h = d.getUTCHours();
-    return day >= 1 && day <= 5 && ((h >= 1 && h < 4) || (h >= 6 && h < 10));
+  /** 高峰判定与 rpcache / CostCore 同源（可配 peak 窗口） */
+  function isPeak(at, peak) { return CostCore.isPeak(at, peak); }
+  function priceFor(model, prices) { return CostCore.priceForUsage(model, prices || DEFAULT_PRICES); }
+  /** 单条估算花费（美元）。与 rpcache.costOf 共用 CostCore 价目。 */
+  function costOf(e, prices, mode, peak, calib) {
+    return CostCore.costOfEntry(e, prices || DEFAULT_PRICES, mode, peak, calib);
   }
-  function priceFor(model, prices) {
-    prices = prices || DEFAULT_PRICES;
-    const m = String(model || '').toLowerCase();
-    if (m.includes('deepseek')) {
-      if (prices['deepseek-v4-pro'] && m.includes('pro')) return prices['deepseek-v4-pro'];
-      if (prices['deepseek-flash']) return prices['deepseek-flash'];
-    }
-    if (prices[model]) return prices[model];
-    return prices.default || DEFAULT_PRICES.default;
-  }
-  /** 单条估算花费（美元）。无价格时返回 null。 */
-  function costOf(e, prices, mode) {
-    if (!e) return null;
-    const p = priceFor(e.model, prices);
-    if (!p) return null;
-    const f = mode === 'peak' ? 1 : mode === 'offpeak' ? 0.5 : (isPeak(e.at) ? 1 : 0.5);
-    // DeepSeek：命中/未命中分计价；无缓存字段时整段输入按 miss
-    const inCost = e.cache
-      ? (e.hit * (p.hit || 0) + e.miss * (p.miss || 0))
-      : (e.prompt * (p.miss != null ? p.miss : (p.in || 0)));
-    const outCost = e.completion * (p.out || 0);
-    return (inCost + outCost) / 1e6 * f;
+  /** D2：用真实 actualCost 对账，写回 state.calib */
+  function reconcileEntry(state, entry, mode, peak) {
+    const s = normalize(state);
+    if (!entry || entry.actualCost == null || !(entry.actualCost > 0)) return s;
+    const est = costOf(entry, s.prices, mode || s.priceMode, peak, null); // 未校准价估算，避免反馈环
+    if (!(est > 0)) return s;
+    const calib = CostCore.reconcile(s.calib, entry.model, est, entry.actualCost, { now: entry.at });
+    return Object.assign({}, s, { calib });
   }
 
   function dayKey(at, tzOffsetMin) {
@@ -159,13 +148,14 @@
     return out;
   }
 
-  function estimateCost(list, prices, mode) {
-    let cost = 0, priced = 0;
+  function estimateCost(list, prices, mode, peak, calib) {
+    let cost = 0, priced = 0, actualSum = 0, actualN = 0;
     (list || []).forEach(e => {
-      const c = costOf(e, prices, mode);
+      const c = costOf(e, prices, mode, peak, calib);
       if (c != null) { cost += c; priced++; }
+      if (e && typeof e.actualCost === 'number' && e.actualCost > 0) { actualSum += e.actualCost; actualN++; }
     });
-    return { cost, priced, total: (list || []).length };
+    return { cost, priced, total: (list || []).length, actualSum, actualN };
   }
 
   /** 从对话消息（含版本分支）收集带 usage 的条目；keysSeen 用于去重。 */
@@ -252,9 +242,11 @@
   const api = {
     VERSION, LOG_LIMIT, DEFAULT_PRICES, TYPE_CN,
     emptyState, normalize, makeEntry, record, clear,
-    isPeak, priceFor, costOf, dayKey, monthKey, rangeOf, filterLog,
+    isPeak, priceFor, costOf, reconcileEntry, dayKey, monthKey, rangeOf, filterLog,
     sumList, groupBy, byDay, estimateCost, collectFromMessages, backfill, buckets,
     toCSV, toJSON,
+    distortedModels: (calib) => CostCore.distortedModels(calib),
+    calibView: CostCore.calibView,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.UsageStats = api;

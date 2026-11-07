@@ -1,3 +1,15 @@
+**v0.24.0：第七轮 P0 · 统一成本引擎 / 账单对账 / 路由后验校准**
+
+- **D1 统一成本引擎**：新增 `cost-core.js`，`usage-stats` / `rpcache` / 指标页共用同一份价目（含千问等 BUILTIN），修指标页对千问等高估。
+- **D2 真实 usage.cost 入账 + EWMA 对账**：解析并保存 OpenRouter 实付；估算 vs 实付偏差 EWMA（α=0.3）校准价目；连续 |bias|>15% 标记失真，用量页「价格」可见对账。
+- **D3 路由命中率后验**：`router.observe` 改为每请求 1 份证据（α+=h, β+=1−h，与 rpcache `hitPosterior` 同构），禁止把 token 数当样本数；可选有界信息量权重。
+- 评测：routing.totalEffCost 基线按 D3 重标定；`scripts/verify/r7-functional.mjs` 覆盖 D1/D2/D3。
+- Android `0.24.0`（versionCode **76**）
+
+> 未找到《第七轮评审》全文，按用户消息 D1/D2/D3 规格实现；EWMA α/bias 阈值参考第五轮 F2。D4–D10 本轮未做。
+
+---
+
 **v0.23.0：第五轮 H 评测扩展 / A 路由×缓存亲和 / G 流式增量 / B 知识库阶段 2 注入**
 
 - **H 评测扩展**：新增 `tests/golden/{routing,knowledge,affect}.jsonl`；`eval-core` / `eval-gate` 增加 routing（有效成本/切换次数）、knowledge（P@5/MRR）、affect（方向一致率/振荡率）三维门禁。affect 为**合成成对基线**（待人工 MAE），CHANGELOG 注明。

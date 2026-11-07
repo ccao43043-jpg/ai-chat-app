@@ -61,21 +61,33 @@
   }
 
   /**
-   * 观测一轮缓存命中：hitTokens / promptTokens。
+   * D3：每请求 1 份证据（勿把 token 数当样本数）。
+   * hitTokens/promptTokens → h=hit/prompt，α += w·h，β += w·(1−h)；与 rpcache.hitPosterior 同构。
+   * w 默认 1；opts.infoWeight 时按 prompt 规模有界加权（0.5..2）。
    * 也可传 { hit: bool } 简化（整轮命中/未命中）。
    */
-  function observe(state, model, slug, obs, now) {
+  function evidenceWeight(promptTokens, opts) {
+    opts = opts || {};
+    if (!opts.infoWeight) return 1;
+    const pt = Math.max(0, Number(promptTokens) || 0);
+    const ref = opts.refTokens > 0 ? opts.refTokens : 8000;
+    const w = Math.log2(1 + pt) / Math.log2(1 + ref);
+    return Math.max(0.5, Math.min(2, w));
+  }
+  function observe(state, model, slug, obs, now, opts) {
     const ms = ensureModel(state, model);
     const u = ensureUpstream(ms, slug);
     const at = now || Date.now();
     if (obs && typeof obs.hitTokens === 'number' && typeof obs.promptTokens === 'number' && obs.promptTokens > 0) {
       const hit = Math.max(0, Math.min(obs.promptTokens, obs.hitTokens));
-      const miss = obs.promptTokens - hit;
-      u.a += hit;
-      u.b += miss;
+      const h = hit / obs.promptTokens;
+      const w = evidenceWeight(obs.promptTokens, opts || (obs && obs.weightOpts) || null);
+      u.a += w * h;
+      u.b += w * (1 - h);
       u.obs += 1;
     } else if (obs && typeof obs.hit === 'boolean') {
-      if (obs.hit) u.a += 1; else u.b += 1;
+      const w = evidenceWeight(1, opts || null);
+      if (obs.hit) u.a += w; else u.b += w;
       u.obs += 1;
     }
     u.lastAt = at;
@@ -233,7 +245,7 @@
 
   const api = {
     DEFAULTS, settingsOf, hitQuantile, effectivePrice, emptyUpstream, ensureModel, ensureUpstream,
-    observe, markFail, switchCost, chooseUpstream, buildProviderField, panelView, recordSwitch, replay,
+    observe, evidenceWeight, markFail, switchCost, chooseUpstream, buildProviderField, panelView, recordSwitch, replay,
   };
   root.Router = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

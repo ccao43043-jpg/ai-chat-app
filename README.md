@@ -48,6 +48,15 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.24.0：第七轮 P0 · 统一成本引擎 / 账单对账 / 路由后验校准**
+
+- D1：`cost-core.js` 统一价目，usage-stats / rpcache / 指标页共用（修千问等高估）
+- D2：真实 `usage.cost` 入账 + EWMA（α=0.3）对账；连续 |bias|>15% 标记失真
+- D3：路由命中率后验改为每请求 1 份证据（与 rpcache hitPosterior 同构）
+- Android `0.24.0`（versionCode 76）/ 桌面 / npm `0.24.0`
+
+---
+
 **v0.23.0：第五轮 H 评测 / A 缓存亲和路由 / G 流式增量 / B 资料库注入**
 
 - H：routing / knowledge / affect 三维 golden 门禁（affect 合成基线待人工 MAE）
