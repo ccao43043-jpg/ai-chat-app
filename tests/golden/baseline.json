@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "gitBase": "537e856",
+  "version": 2,
+  "gitBase": "c9d8873",
   "memory": {
     "pAt5": 1,
     "mrr": 1,
@@ -25,5 +25,24 @@
     "skipped": true,
     "note": "渲染性能本 PR 未跑"
   },
-  "gate": "记忆 pAt5/mrr/ndcgAt5、summary.factCoverage 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens 不得高于本值（EPS=1e-9）"
+  "routing": {
+    "n": 20,
+    "passRate": 1,
+    "avgSwitches": 0,
+    "totalEffCost": 0.4535,
+    "note": "routing：chooseUpstream 单步 + replay 回放；有效成本为估算累加"
+  },
+  "knowledge": {
+    "pAt5": 1,
+    "mrr": 0.6,
+    "ndcgAt5": 0.7099,
+    "n": 30
+  },
+  "affect": {
+    "directionAgree": 1,
+    "oscillationRate": 0.5,
+    "n": 40,
+    "note": "合成成对基线，待人工 MAE；directionAgree=KF â 变化方向与标注一致率"
+  },
+  "gate": "记忆/知识 pAt5/mrr/ndcgAt5、summary.factCoverage、routing.passRate、affect.directionAgree 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens、routing.avgSwitches/totalEffCost、affect.oscillationRate 不得高于本值；affect 为合成基线待人工 MAE"
 }

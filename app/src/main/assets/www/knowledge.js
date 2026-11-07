@@ -1,5 +1,5 @@
 /* 本地资料库（按世界隔离）：纯 CRUD + 关键词检索，可在 Node 单测里 require。
- * 存储键：knowledge_world_<worldId>.json；阶段 1 不注入请求。 */
+ * 存储键：knowledge_world_<worldId>.json；阶段 2：BM25F 检索 + 可选注入。 */
 (function (root) {
   'use strict';
 
@@ -263,10 +263,11 @@
   }
 
   /**
-   * 简单关键词检索：所有 token 都要命中（AND）；优先关键词字段 / 标题。
-   * 返回 [{ categoryId, categoryName, entry, score }]，置顶优先。
+   * 检索：默认 BM25F（title/keywords/tags/content 加权）+ 置顶加权；
+   * opt.mode==='legacy' 时回退子串 AND。
+   * 返回 [{ categoryId, categoryName, entry, score }]
    */
-  function search(doc, query, opt) {
+  function searchLegacy(doc, query, opt) {
     const d = normalizeDoc(doc, doc && doc.worldId);
     const tokens = tokenize(query);
     const limit = (opt && opt.limit) || 50;
@@ -295,6 +296,191 @@
     });
     out.sort((a, b) => b.score - a.score || (b.entry.updatedAt || 0) - (a.entry.updatedAt || 0));
     return out.slice(0, limit);
+  }
+
+  const KB_WEIGHTS = { title: 4.0, keywords: 3.0, tags: 2.0, content: 1.0 };
+  const KB_FIELDS = ['title', 'keywords', 'tags', 'content'];
+
+  function core() {
+    return (typeof root !== 'undefined' && root.RetrievalCore) || (typeof globalThis !== 'undefined' && globalThis.RetrievalCore) || null;
+  }
+
+  function flattenEntries(doc) {
+    const d = normalizeDoc(doc, doc && doc.worldId);
+    const out = [];
+    d.categories.forEach(cat => {
+      (cat.entries || []).forEach(entry => {
+        out.push({
+          id: entry.id,
+          title: entry.title || '',
+          keywords: entry.keywords || [],
+          tags: entry.tags || [],
+          content: entry.content || '',
+          pinned: !!entry.pinned,
+          updatedAt: entry.updatedAt || 0,
+          categoryId: cat.id,
+          categoryName: cat.name,
+          categoryOrder: cat.order | 0,
+          entry,
+        });
+      });
+    });
+    return out;
+  }
+
+  function searchBM25(doc, query, opt) {
+    const RC = core();
+    if (!RC) return searchLegacy(doc, query, opt);
+    const limit = (opt && opt.limit) || 50;
+    const docs = flattenEntries(doc);
+    if (!docs.length) return [];
+    const idx = RC.buildIndex(docs, KB_FIELDS, opt && opt.index);
+    if (opt && opt.onIndex) opt.onIndex(idx);
+    const Q = RC.buildQuery(query || '');
+    if (opt && opt.expand) {
+      if (opt.expand.context) RC.addQuery(Q, opt.expand.context, 0.3);
+      if (opt.expand.scene) RC.addQuery(Q, opt.expand.scene, 0.3);
+      if (opt.expand.l1) RC.addQuery(Q, opt.expand.l1, 0.2);
+    }
+    // 重加权：主查询 0.5 已在 buildQuery(1) 里，这里把主查询再乘 0.5 等价于报告的 0.5/0.3/0.2
+    // 简化：主 query 权重保持 1，expand 已按比例加
+    const scored = docs.map(d => {
+      let s = RC.bm25f(idx, Q, d, KB_WEIGHTS);
+      if (d.pinned) s += 1e6; // 置顶无条件优先（仍受后续预算约束）
+      return { categoryId: d.categoryId, categoryName: d.categoryName, entry: d.entry, score: s, _doc: d };
+    }).filter(x => x.score > 0 || (x.entry && x.entry.pinned));
+    scored.sort((a, b) => b.score - a.score || (a._doc.categoryOrder - b._doc.categoryOrder) || ((b.entry.updatedAt || 0) - (a.entry.updatedAt || 0)));
+    return scored.slice(0, limit).map(({ categoryId, categoryName, entry, score }) => ({ categoryId, categoryName, entry, score }));
+  }
+
+  function search(doc, query, opt) {
+    const mode = (opt && opt.mode) || 'bm25';
+    if (mode === 'legacy') return searchLegacy(doc, query, opt);
+    return searchBM25(doc, query, opt);
+  }
+
+  /**
+   * 阶段 2 注入选型：BM25 top20 → pinned 入列 → 3-gram 去重 → MMR → token 预算。
+   * opt: { budget=400, maxBudget=1200, alreadyTexts=[], expand, lambda }
+   * 返回 { hits:[{entry,categoryId,categoryName,score,tokens}], trace }
+   */
+  function selectForInject(doc, query, opt) {
+    const o = opt || {};
+    let budget = o.budget != null ? o.budget | 0 : 400;
+    const maxB = o.maxBudget != null ? o.maxBudget | 0 : 1200;
+    if (budget > maxB) budget = maxB;
+    if (budget < 0) budget = 0;
+    const RC = core();
+    const raw = search(doc, query, Object.assign({}, o, { limit: 20, mode: 'bm25' }));
+    const dropped = [];
+    const already = (o.alreadyTexts || []).map(String);
+    const cands = [];
+    // pinned 无条件入列（仍受预算）
+    const d = normalizeDoc(doc, doc && doc.worldId);
+    const pinned = [];
+    d.categories.forEach(cat => {
+      (cat.entries || []).forEach(e => {
+        if (e.pinned) pinned.push({ categoryId: cat.id, categoryName: cat.name, entry: e, score: 1e6 });
+      });
+    });
+    const seen = new Set();
+    function consider(h, reasonIfDup) {
+      if (!h || !h.entry || seen.has(h.entry.id)) return;
+      const text = (h.entry.title || '') + '\n' + (h.entry.content || '');
+      if (RC) {
+        for (const a of already) {
+          if (RC.jaccard3(text, a) > 0.6) {
+            dropped.push({ id: h.entry.id, reason: 'dup' });
+            return;
+          }
+        }
+        for (const c of cands) {
+          const ct = (c.entry.title || '') + '\n' + (c.entry.content || '');
+          if (RC.jaccard3(text, ct) > 0.6) {
+            dropped.push({ id: h.entry.id, reason: 'dup' });
+            return;
+          }
+        }
+      }
+      seen.add(h.entry.id);
+      cands.push({
+        id: h.entry.id,
+        score: h.score || 0,
+        text,
+        categoryId: h.categoryId,
+        categoryName: h.categoryName,
+        entry: h.entry,
+      });
+    }
+    pinned.forEach(p => consider(p));
+    raw.forEach(h => {
+      if (h.score <= 0 && !(h.entry && h.entry.pinned)) {
+        dropped.push({ id: h.entry.id, reason: 'lowscore' });
+        return;
+      }
+      consider(h);
+    });
+    // 归一化分数供 MMR
+    const maxS = Math.max(1e-9, ...cands.map(c => c.score));
+    cands.forEach(c => { c.score = c.score / maxS; });
+    let ranked = cands;
+    if (RC && cands.length) ranked = RC.mmr(cands, o.lambda != null ? o.lambda : 0.7, null, cands.length);
+    const tokenOf = c => Math.ceil(String(c.entry.content || '').length * 0.7) + Math.ceil(String(c.entry.title || '').length * 0.5) + 8;
+    const picked = RC ? RC.pickByBudget(ranked, tokenOf, budget) : ranked.slice(0, 5);
+    // 被预算丢掉的
+    const pickIds = new Set(picked.map(x => x.id || (x.entry && x.entry.id)));
+    ranked.forEach(c => {
+      if (!pickIds.has(c.id)) dropped.push({ id: c.id, reason: 'budget' });
+    });
+    // 按 category order 稳定排序
+    picked.sort((a, b) => {
+      const ao = (a.entry && a.categoryId) || a.categoryId;
+      const bo = (b.entry && b.categoryId) || b.categoryId;
+      const ca = d.categories.find(c => c.id === (a.categoryId));
+      const cb = d.categories.find(c => c.id === (b.categoryId));
+      return ((ca && ca.order) || 0) - ((cb && cb.order) || 0) || String(a.entry.title||'').localeCompare(String(b.entry.title||''));
+    });
+    const hits = picked.map(c => ({
+      entry: c.entry,
+      categoryId: c.categoryId,
+      categoryName: c.categoryName,
+      score: c.score,
+      tokens: c.tokens != null ? c.tokens : tokenOf(c),
+    }));
+    const tokens = hits.reduce((s, h) => s + (h.tokens || 0), 0);
+    return {
+      hits,
+      trace: { hitIds: hits.map(h => h.entry.id), tokens, dropped, budget },
+    };
+  }
+
+  function renderInjection(hits) {
+    if (!hits || !hits.length) return '';
+    const lines = hits.map(h => {
+      const tag = h.categoryName || h.categoryId || '资料';
+      const title = (h.entry && h.entry.title) || '';
+      const body = (h.entry && h.entry.content) || '';
+      return '- [' + tag + '] ' + title + (body ? '：' + body : '');
+    });
+    return '[LOCAL_KNOWLEDGE]（本地资料库 · 仅供参考，不要逐字复述）\n' + lines.join('\n');
+  }
+
+  /** 把 LOCAL_KNOWLEDGE 插到 MEMORY_UPDATE 与 CURRENT_STATE 之间；若无锚点则追加到末尾 */
+  function spliceIntoUserContent(content, inj) {
+    if (!inj) return content;
+    const s = String(content || '');
+    const stateAt = s.indexOf('[CURRENT_STATE]');
+    if (stateAt >= 0) {
+      return s.slice(0, stateAt).replace(/\s*$/, '') + '\n\n' + inj + '\n\n' + s.slice(stateAt);
+    }
+    const memAt = s.indexOf('[MEMORY_UPDATE]');
+    if (memAt >= 0) {
+      // 找到 MEMORY_UPDATE 块末尾（下一 [ 或结尾）
+      const after = s.indexOf('\n[', memAt + 1);
+      if (after < 0) return s.replace(/\s*$/, '') + '\n\n' + inj;
+      return s.slice(0, after).replace(/\s*$/, '') + '\n\n' + inj + s.slice(after);
+    }
+    return (s ? s + '\n\n' : '') + inj;
   }
 
   function listEntries(doc, categoryId) {
@@ -797,6 +983,12 @@
     removeEntry,
     setPinned,
     search,
+    searchLegacy,
+    searchBM25,
+    selectForInject,
+    renderInjection,
+    spliceIntoUserContent,
+    KB_WEIGHTS,
     listEntries,
     sortEntries,
     findCategory,

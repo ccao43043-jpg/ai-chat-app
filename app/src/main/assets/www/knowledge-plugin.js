@@ -1,5 +1,5 @@
 /* 内置插件：本地资料库管理（阶段 1）。依赖 plugins.js、knowledge.js。
- * 阶段 1：按世界 CRUD / 检索 / 开关字段；不实现 onBeforeRequest 注入。 */
+ * 阶段 2：CRUD + BM25F 检索 + onBeforeRequest [LOCAL_KNOWLEDGE] 注入（默认关）。 */
 (function (root) {
   'use strict';
   const K = root.Knowledge;
@@ -177,6 +177,22 @@
     };
   }
 
+
+  function traceHtml(host) {
+    const conv = host.conv && host.conv();
+    const tr = conv && conv._knowledgeTrace;
+    if (!tr) return '';
+    const n = (tr.hitIds && tr.hitIds.length) || 0;
+    const drop = (tr.dropped && tr.dropped.length) || 0;
+    let reason = '';
+    if (drop) {
+      const by = {};
+      (tr.dropped || []).forEach(d => { by[d.reason] = (by[d.reason] || 0) + 1; });
+      reason = '（' + Object.keys(by).map(k => (k === 'dup' ? '重复' : k === 'budget' ? '预算' : '低分') + ' ' + by[k]).join('、') + '）';
+    }
+    return '<div class="hint soft kn-trace">本轮资料 ' + n + ' 条 / ' + (tr.tokens | 0) + ' tok' + (drop ? ' / 丢弃 ' + drop + ' 条' + reason : '') + '</div>';
+  }
+
   function renderList(box, host, worldId) {
     const worlds = worldsOf(host);
     const globalOn = reg.isGloballyEnabled(ID, host.settings());
@@ -187,8 +203,8 @@
     if (!worlds.length) {
       box.innerHTML =
         '<div class="hint">还没有世界。请先在「世界」页新建一个世界，资料库按世界隔离存储。</div>' +
-        '<div class="hint soft">阶段 1 仅管理与本地存储；阶段 2 才会按关键词注入到请求（不写 L1 / system）。</div>' +
-        switchBlock(host, globalOn, gcfg, ccfg, conv);
+        '<div class="hint soft">开启「注入总闸」后会按 BM25F 检索注入到 user 消息（不写 L1 / system）。</div>' +
+        switchBlock(host, globalOn, gcfg, ccfg, conv) + traceHtml(host);
       bindSwitches(box, host, worldId, globalOn, conv);
       return;
     }
@@ -249,7 +265,7 @@
       '</div>' +
       '<div class="kn-entries">' + entryHtml + '</div>' +
       '<div class="hint soft" style="margin-top:14px">存储键：' + esc(host, K.storeKey(worldId)) +
-      ' · 阶段 1 不注入请求；阶段 2 将用 [LOCAL_KNOWLEDGE] 追加到 user 消息末尾。</div>';
+      ' · 开启注入总闸后按 BM25F 注入 [LOCAL_KNOWLEDGE]。</div>';
 
     bindSwitches(box, host, worldId, globalOn, conv);
 
@@ -522,7 +538,7 @@
     if (ic && conv) ic.onchange = e => {
       convCfg(conv).injectEnabled = !!e.target.checked;
       host.saveConv(conv);
-      host.toast(e.target.checked ? '本对话注入已开（阶段 2）' : '本对话注入已关');
+      host.toast(e.target.checked ? '本对话注入已开' : '本对话注入已关');
     };
     const co = box.querySelector('.kn-conv-on');
     if (co && conv) co.onchange = e => {
@@ -538,26 +554,101 @@
     id: ID,
     icon: '📚',
     name: '本地资料库',
-    version: '1.1.0',
+    version: '1.2.0',
     perConversation: false,
     defaultEnabled: false,
-    desc: '按世界隔离的本地设定资料（住宅 / 物品 / 地点等）。阶段 1：管理、存储、导入/导出（JSON / NDJSON / Markdown）；阶段 2 再按关键词注入到 user 消息（不写 L1）。',
+    desc: '按世界隔离的本地设定资料（住宅 / 物品 / 地点等）。管理 / 导入导出；开启注入总闸后按 BM25F 检索把 [LOCAL_KNOWLEDGE] 追加到最后一条 user 消息（MEMORY 与 CURRENT_STATE 之间，不写 L1）。',
     hooks: {
-      // 阶段 1：故意不实现 onBeforeRequest / [LOCAL_KNOWLEDGE] 注入
+      onBeforeRequest(ctx, host) {
+        const g = cfg(host);
+        if (!g.injectEnabled) return ctx;
+        const conv = ctx.conv || {};
+        const cc = convCfg(conv);
+        // 单对话注入开关：显式 false 则跳过（默认跟随总闸）
+        if (cc.injectEnabled === false) return ctx;
+        const worldId = conv.worldId || selectedWorldId;
+        if (!worldId) return ctx;
+
+        const msgs = ctx.messages || [];
+        let idx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { idx = i; break; }
+        if (idx < 0) return ctx;
+
+        const doc = loadDoc(host, worldId);
+        const recent = msgs.slice(Math.max(0, idx - 2), idx + 1).map(m => {
+          const c = m.content;
+          return Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : String(c || '');
+        }).join('\n');
+        const lastA = msgs.slice(0, idx).reverse().find(m => m.role === 'assistant');
+        const scene = lastA ? String(Array.isArray(lastA.content) ? '' : (lastA.content || '')).slice(-200) : '';
+        let budget = g.kbTokens != null ? (g.kbTokens | 0) : 400;
+        if (budget > 1200) budget = 1200;
+        if (budget < 0) budget = 0;
+
+        // 已注入的 L1 / memory 文本用于去重
+        const already = [];
+        const sys = String(ctx.systemPrompt || '');
+        if (sys) already.push(sys.slice(0, 2000));
+        const user0 = String(Array.isArray(msgs[idx].content) ? '' : (msgs[idx].content || ''));
+        if (user0.indexOf('[MEMORY_UPDATE]') >= 0) already.push(user0);
+        if (user0.indexOf('[MEMORY_RECALL]') >= 0) already.push(user0);
+
+        const sel = K.selectForInject(doc, recent, {
+          budget,
+          maxBudget: 1200,
+          alreadyTexts: already,
+          expand: { scene, context: scene },
+        });
+        const inj = K.renderInjection(sel.hits);
+        if (!inj) {
+          ctx.meta = ctx.meta || {};
+          ctx.meta.knowledge = sel.trace;
+          return ctx;
+        }
+        const content = msgs[idx].content;
+        let next;
+        if (Array.isArray(content)) {
+          const a = content.map(x => Object.assign({}, x));
+          // 尝试拼到文本：转成 splice 字符串再不行就 append
+          const asText = a.filter(b => b && b.type === 'text').map(b => b.text).join('\n');
+          const spliced = K.spliceIntoUserContent(asText || user0, inj);
+          next = [{ type: 'text', text: spliced }].concat(a.filter(b => b && b.type !== 'text'));
+        } else {
+          next = K.spliceIntoUserContent(String(content || ''), inj);
+        }
+        msgs[idx] = Object.assign({}, msgs[idx], { content: next });
+        ctx.messages = msgs;
+        ctx.meta = ctx.meta || {};
+        ctx.meta.knowledge = sel.trace;
+        // 挂到对话上供面板展示
+        try {
+          conv._knowledgeTrace = sel.trace;
+        } catch (e) { /* ignore */ }
+        return ctx;
+      },
     },
     renderSettings(box, host) {
       const globalOn = reg.isGloballyEnabled(ID, host.settings());
       const gcfg = cfg(host);
       box.innerHTML =
         '<div class="hint">资料按世界存放在本地键 knowledge_world_&lt;worldId&gt;.json。入口：世界页 / 世界编辑 / 本插件面板。</div>' +
-        '<label class="field inline"><span>注入总闸（阶段 2）</span><input type="checkbox" class="switch kn-set-inj"' +
+        '<label class="field inline"><span>注入总闸</span><input type="checkbox" class="switch kn-set-inj"' +
         (gcfg.injectEnabled ? ' checked' : '') + '></label>' +
-        '<div class="hint soft">当前全局：' + (globalOn ? '已启用' : '未启用') + '。阶段 1 不会改写请求。</div>' +
+        '<div class="hint soft">当前全局：' + (globalOn ? '已启用' : '未启用') + '。开启注入总闸后，请求会按关键词注入资料（不写 L1）。</div>' +
         '<button type="button" class="chip-btn accent kn-open-panel" style="margin-top:8px">打开资料库 ›</button>';
+      if (typeof gcfg.kbTokens !== 'number') gcfg.kbTokens = 400;
+      const budgetHtml = '<label class="hint">注入预算 Token（默认 400，上限 1200） <input type="number" class="kn-set-budget" min="0" max="1200" value="' + (gcfg.kbTokens | 0) + '"></label>';
+      box.insertAdjacentHTML('beforeend', budgetHtml);
       box.querySelector('.kn-set-inj').onchange = e => {
         cfg(host).injectEnabled = !!e.target.checked;
         host.saveSettings();
         host.toast('已保存注入总闸');
+      };
+      const bud = box.querySelector('.kn-set-budget');
+      if (bud) bud.onchange = e => {
+        let n = +e.target.value; if (!isFinite(n)) n = 400;
+        cfg(host).kbTokens = Math.max(0, Math.min(1200, n | 0));
+        host.saveSettings();
       };
       box.querySelector('.kn-open-panel').onclick = () => host.openPanel(ID);
     },

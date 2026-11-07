@@ -9,8 +9,8 @@ const res = core.runAll();
 const out = args.includes('--verbose') ? res : core.strip(res);
 if (args.includes('--write-baseline')) {
   const s = core.strip(res);
-  const base = { version: 1, gitBase: '537e856', memory: s.memory, summary: s.summary, cost: s.cost, render: s.render,
-    gate: '记忆 pAt5/mrr/ndcgAt5、summary.factCoverage 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens 不得高于本值（EPS=1e-9）' };
+  const base = { version: 2, gitBase: 'c9d8873', memory: s.memory, summary: s.summary, cost: s.cost, render: s.render, routing: s.routing, knowledge: s.knowledge, affect: s.affect,
+    gate: '记忆/知识 pAt5/mrr/ndcgAt5、summary.factCoverage、routing.passRate、affect.directionAgree 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens、routing.avgSwitches/totalEffCost、affect.oscillationRate 不得高于本值；affect 为合成基线待人工 MAE' };
   fs.writeFileSync(new URL('../tests/golden/baseline.json', import.meta.url), JSON.stringify(base, null, 2) + '\n');
   console.error('baseline 已写入 tests/golden/baseline.json');
 }

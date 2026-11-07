@@ -1,3 +1,14 @@
+**v0.23.0：第五轮 H 评测扩展 / A 路由×缓存亲和 / G 流式增量 / B 知识库阶段 2 注入**
+
+- **H 评测扩展**：新增 `tests/golden/{routing,knowledge,affect}.jsonl`；`eval-core` / `eval-gate` 增加 routing（有效成本/切换次数）、knowledge（P@5/MRR）、affect（方向一致率/振荡率）三维门禁。affect 为**合成成对基线**（待人工 MAE），CHANGELOG 注明。
+- **A 路由×缓存亲和**：`router.js` 按 (model, upstream) Beta 后验算有效价 `p_eff`；悲观分位 + 滞回 + 熔断；OpenRouter 用 `provider.order` + `allow_fallbacks`，不再强制全局 `sort:'price'`（可关回退）。消息缓存行显示本轮上游 / 有效价 / 命中率；状态存 `router-affinity.json`。
+- **G 流式渲染增量**：`fillMsgEl` 增量路径（`skeletonSig` 骨架保留，只更新 md 槽）；测量批处理先读后写 `offsetHeight`，避免 layout thrash。
+- **B 知识库阶段 2**：抽出 `retrieval-core.js`（grams/BM25F/MMR/budget）；`knowledge.js` BM25F 检索 + `selectForInject`；`knowledge-plugin` `onBeforeRequest` 将 `[LOCAL_KNOWLEDGE]` 插入 MEMORY 与 CURRENT_STATE 之间（默认关；全局总闸 + 单对话开关；预算默认 400 / 上限 1200；trace 面板可见；3-gram 去重）。
+- 功能验证：`node scripts/verify/r5-functional.mjs`（A 30 轮模拟节省约 33%、切换≤2；B 注入/预算/去重/顺序；G 增量与批测；H 门禁）。
+- Android `0.23.0`（versionCode **75**）
+
+---
+
 **v0.22.6：OpenRouter 最低价修正 · 消息缓存显示 · MiniMax 缓存插件**
 
 - OpenRouter Flex 最低价不再二次乘 discount（API 价已含折）
