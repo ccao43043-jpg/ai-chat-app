@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.23.0';
+  const APP_VERSION = '0.24.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -239,7 +239,7 @@
     if (items.length > Math.max(UsageStats.LOG_LIMIT, log.length) * 1.2 || items.length - log.length > 200) Store.writeJsonl(USAGE_LOG, st.log); // 压缩
     return st;
   }
-  function usageMetaOf(st) { return { version: st.version, backfilled: st.backfilled, prices: st.prices, priceMode: st.priceMode }; }
+  function usageMetaOf(st) { return { version: st.version, backfilled: st.backfilled, prices: st.prices, priceMode: st.priceMode, calib: st.calib || {} }; }
   // 若 RP 插件里改过价格，合并过来（用户只改一处）
   (function syncPricesFromRp() {
     const rp = settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.prices;
@@ -351,7 +351,15 @@
     const before = usageState.log.length, last = usageState.log[before - 1];
     usageState = UsageStats.record(usageState, entry);
     const added = usageState.log[usageState.log.length - 1];
-    if (added && added !== last && added.key === entry.key) { if (!Store.exists(USAGE_META)) saveUsageMeta(); Store.append(USAGE_LOG, added); }
+    if (added && added !== last && added.key === entry.key) {
+      if (!Store.exists(USAGE_META)) saveUsageMeta();
+      Store.append(USAGE_LOG, added);
+      // D2：真实 usage.cost 入账 + EWMA 对账
+      if (added.actualCost != null && added.actualCost > 0) {
+        usageState = UsageStats.reconcileEntry(usageState, added);
+        saveUsageMeta();
+      }
+    }
     updateUsageSubtitle();
   }
   function updateUsageSubtitle() {
@@ -3942,7 +3950,7 @@
     const box = $('#us-body'); if (!box) return;
     const list = usageList();
     const tot = UsageStats.sumList(list);
-    const est = UsageStats.estimateCost(list, usageState.prices, usageState.priceMode);
+    const est = UsageStats.estimateCost(list, usageState.prices, usageState.priceMode, null, usageState.calib);
     const ranges = [['today', '今天'], ['7d', '近7天'], ['30d', '近30天'], ['all', '全部'], ['custom', '自定义']];
     let html = '<div class="us-range">' + ranges.map(([k, t]) =>
       '<button type="button" class="chip' + (usRange === k ? ' active' : '') + '" data-ur="' + k + '">' + t + '</button>').join('') + '</div>';
@@ -3953,8 +3961,12 @@
       '<div class="us-card"><div class="us-k">缓存命中 / 未命中</div><div class="us-v" style="font-size:15px">' + usFmtN(tot.hit) + ' / ' + usFmtN(tot.miss) + '</div>' +
         '<div class="us-s">' + (tot.hit + tot.miss ? ('命中率 ' + Math.round(tot.hit / (tot.hit + tot.miss) * 1000) / 10 + '%') : '无缓存数据') + '</div></div>' +
       '<div class="us-card wide"><div class="us-k">估算花费</div><div class="us-v">' + usFmtUsd(est.cost) + '</div>' +
-        '<div class="us-s">按当前价格表估算，仅供参考（DeepSeek 等）；非标价模型用「default」单价</div></div></div>';
-    html += '<div class="us-price-note">价格：美元 / 百万 Token（高峰价）。可在下方「价格」里修改；若已在 RP 缓存插件里改过 DeepSeek 价格，启动时会自动同步。</div>';
+        '<div class="us-s">按统一价目（含千问等内置）估算' +
+        (est.actualN ? ('；实付累计 ' + usFmtUsd(est.actualSum) + '（' + est.actualN + ' 笔有账单）') : '') + '</div></div></div>';
+    const dist = UsageStats.distortedModels(usageState.calib);
+    html += '<div class="us-price-note">价格：美元 / 百万 Token。与 RP 缓存共用 CostCore 价目；有 OpenRouter 实付时会 EWMA 对账校准。' +
+      (dist.length ? (' <span style="color:var(--danger,#c44)">价目失真：' + dist.map(d => esc(d.model) + ' bias≈' + d.biasPct + '%').join('；') + '</span>') : '') +
+      '</div>';
 
     const tabs = [['day', '按天'], ['model', '按模型'], ['provider', '按服务商'], ['conv', '按对话'], ['recent', '最近请求'], ['prices', '价格']];
     html += '<div class="us-tabs">' + tabs.map(([k, t]) =>
@@ -4011,7 +4023,15 @@
         '<label class="field" style="margin-top:10px"><span>时段</span><select id="us-price-mode">' +
         '<option value="auto">自动（按请求时间判断高峰/非高峰）</option><option value="peak">按高峰价</option><option value="offpeak">按非高峰价（半价）</option></select></label>' +
         '<button class="chip-btn" id="us-price-reset" type="button" style="margin-top:8px">恢复默认价格</button>' +
-        '<div class="hint" style="margin-top:10px">DeepSeek 非高峰为半价；「其他模型」的「未命中/输入」用作整段输入单价。估算仅供参考，以服务商账单为准。</div>';
+        '<div class="hint" style="margin-top:10px">DeepSeek 非高峰为半价；千问等走内置价目（不再误用 default）。有 usage.cost 时自动 EWMA 对账（α=0.3）；连续 |bias|>15% 会标记失真。估算仅供参考，以服务商账单为准。</div>';
+      const calibList = UsageStats.distortedModels(usageState.calib);
+      if (calibList.length || (usageState.calib && Object.keys(usageState.calib).length)) {
+        const all = Object.keys(usageState.calib || {}).map(m => UsageStats.calibView(usageState.calib, m)).filter(Boolean);
+        html += '<div class="group-title" style="margin-top:12px">账单对账</div><div class="group">' +
+          all.map(d => '<div class="us-row"><div style="flex:1"><div class="us-name">' + esc(d.model) + (d.distorted ? ' · 失真' : '') +
+          '</div><div class="us-meta">scale×' + (Math.round(d.scale * 1000) / 1000) + ' · bias EWMA ' + d.biasPct + '% · n=' + d.n +
+          (d.lastActual != null ? ' · 近次实付 $' + Number(d.lastActual).toFixed(4) : '') + '</div></div></div>').join('') + '</div>';
+      }
     }
     box.innerHTML = html;
 

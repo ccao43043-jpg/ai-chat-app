@@ -9,6 +9,8 @@
  */
 (function (root) {
   'use strict';
+  const CostCore = root.CostCore || (typeof require === 'function' ? require('./cost-core.js') : null);
+  if (!CostCore) throw new Error('RPCache requires cost-core.js');
 
   // L1 永久锚点（固定顺序）
   const STATIC_DEFS = [
@@ -64,42 +66,10 @@
       rebuildOnEdit: false,   // 修改世界书后立即重建上下文（清空冻结并冷路径重排）
     },
   };
-  const DEFAULT_PEAK = { windows: '09:00-12:00,14:00-18:00', tz: 8, weekdays: true, off_factor: 0.5 };
-  // DeepSeek 官方价格（美元 / 百万 tokens，高峰时段；非高峰为一半）—— 2026-10 核对 api-docs.deepseek.com/quick_start/pricing
-  // match：模型名包含其中任意一个关键词即使用该价格（逗号分隔，越长越优先）；可在插件设置里修改 / 新增
-  const DEFAULT_PRICES = {
-    'deepseek-flash': { hit: 0.006, miss: 0.3, out: 1.2, match: 'deepseek' },
-    'deepseek-v4-pro': { hit: 0.044, miss: 1.32, out: 3.96, match: 'deepseek-v4-pro,deepseek-pro' },
-  };
-  // V3：内置价格表（用户规则没有匹配时自动使用，「新模型自动匹配价格」）。千问为阿里云百炼中国站第一档价格（元 / 百万 Token），
-  // 按 1 美元 ≈ 7.2 元换算成美元；隐式缓存命中 = 输入 20%，显式缓存命中 = 10%，显式缓存创建 = 125%；千问无高峰时段（peak:false）。
-  // 来源：help.aliyun.com/zh/model-studio/model-pricing（2026-10-15 更新）、/context-cache、/explicit-cache-guide
-  const CNY_PER_USD = 7.2;
-  const qp = (miss, out, match) => {
-    const m = miss / CNY_PER_USD, r = v => Math.round(v * 1e5) / 1e5;
-    return { hit: r(m * 0.2), hit_explicit: r(m * 0.1), write: r(m * 1.25), miss: r(m), out: r(out / CNY_PER_USD), match, peak: false, builtin: true };
-  };
-  const BUILTIN_PRICES = {
-    'deepseek-flash': Object.assign({}, DEFAULT_PRICES['deepseek-flash'], { builtin: true }),
-    'deepseek-v4-pro': Object.assign({}, DEFAULT_PRICES['deepseek-v4-pro'], { builtin: true }),
-    'qwen3.8-max': qp(12, 36, 'qwen3.8-max,qwen3.7-max'),
-    'qwen3.7-plus': qp(2, 8, 'qwen3.7-plus'),
-    'qwen3.6-plus': qp(2, 12, 'qwen3.6-plus'),
-    'qwen3.5-plus': qp(0.8, 4.8, 'qwen3.5-plus'),
-    'qwen-plus': qp(0.8, 2, 'qwen-plus,qwen'),            // 兜底：未知千问模型按 qwen-plus 估算
-    'qwen3.8-flash': qp(0.8, 2.7, 'qwen3.8-flash'),
-    'qwen3.7-flash': qp(0.2, 0.8, 'qwen3.7-flash'),
-    'qwen3.6-flash': qp(1.2, 7.2, 'qwen3.6-flash'),
-    'qwen3.5-flash': qp(0.2, 2, 'qwen3.5-flash'),
-    'qwen-flash': qp(0.15, 1.5, 'qwen-flash,qwen-turbo'),
-    'qwen-max': qp(2.4, 9.6, 'qwen-max'),
-    'qwen3-coder-flash': qp(1, 4, 'qwen3-coder-flash,qwen3-coder'),
-    'qwen3-vl-plus': qp(1, 10, 'qwen3-vl-plus,qwen-vl'),
-    'qwen-plus-character': qp(0.8, 2, 'qwen-plus-character,character'),
-    'qwen-long': qp(0.5, 2, 'qwen-long'),
-    // Gemini 2.5 Flash-Lite（美元 / 百万 Token）：输入 miss $0.10、输出 $0.40、缓存读 0.25× → hit $0.025；隐式写入按 miss（省略 write）
-    'gemini-2.5-flash-lite': { hit: 0.025, miss: 0.10, out: 0.40, match: 'gemini-2.5-flash-lite,flash-lite', peak: false, builtin: true },
-  };
+  const DEFAULT_PEAK = CostCore.DEFAULT_PEAK;
+  const DEFAULT_PRICES = CostCore.DEFAULT_PRICES;
+  const CNY_PER_USD = CostCore.CNY_PER_USD;
+  const BUILTIN_PRICES = CostCore.BUILTIN_PRICES;
   const HISTORY_LIMIT = 30;
   const LOG_LIMIT = 500;
   const pad3 = n => String(n).padStart(3, '0');
@@ -1740,51 +1710,16 @@
     }
     return out;
   }
-  function priceFor(model, prices) {
-    return priceForRules(model, prices) || (model ? priceForRules(model, BUILTIN_PRICES, true) : null);
-  }
-  function priceForRules(model, prices, builtinOnly) {
-    prices = prices || DEFAULT_PRICES; const m = String(model || '').toLowerCase();
-    if (builtinOnly) { let b = null, bl = -1; Object.keys(prices).forEach(n => String(prices[n].match).split(',').forEach(k => { if (k && m.includes(k) && k.length > bl) { b = prices[n]; bl = k.length; } })); return b; }
-    let best = null, bestLen = -1;
-    Object.keys(prices).forEach(name => {
-      const p = prices[name]; if (!p) return;
-      const keys = String(p.match != null ? p.match : name).toLowerCase().split(/[,，\s]+/).filter(Boolean);
-      keys.forEach(k => { if (m.includes(k) && k.length > bestLen) { best = p; bestLen = k.length; } });
-    });
-    if (best) return best;
-    // 旧配置（没有 match 字段）：沿用 V1 规则
-    if (!m.includes('deepseek')) return null;
-    return m.includes('pro') ? prices['deepseek-v4-pro'] || null : prices['deepseek-flash'] || null;
-  }
-  function parseWindows(str) {
-    return String(str || '').split(/[,，;\s]+/).map(x => x.match(/^(\d{1,2}):?(\d{2})?-(\d{1,2}):?(\d{2})?$/)).filter(Boolean)
-      .map(r => [(+r[1]) * 60 + (+(r[2] || 0)), (+r[3]) * 60 + (+(r[4] || 0))]).filter(w => w[0] >= 0 && w[1] <= 1440 && w[0] < w[1]);
-  }
-  /** 高峰：默认周一至周五北京时间 9:00–12:00、14:00–18:00（可配置：时段、时区偏移、是否仅工作日） */
-  function isPeak(at, peak) {
-    const pk = Object.assign({}, DEFAULT_PEAK, peak || {});
-    const d = new Date(at + (Number(pk.tz) || 0) * 3600e3);
-    const day = d.getUTCDay(); const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
-    if (pk.weekdays && (day === 0 || day === 6)) return false;
-    return parseWindows(pk.windows).some(w => mins >= w[0] && mins < w[1]);
-  }
-  function peakFactor(at, mode, peak) {
-    const off = Object.assign({}, DEFAULT_PEAK, peak || {}).off_factor;
-    const f = Number(off); const offF = isNaN(f) ? 0.5 : f;
-    return mode === 'peak' ? 1 : mode === 'offpeak' ? offF : (isPeak(at, peak) ? 1 : offF);
-  }
-  /** 价格规则 peak:false（如千问）不分高峰 / 非高峰 */
-  const factorFor = (p, at, mode, peak) => (p && p.peak === false ? 1 : peakFactor(at, mode, peak));
-  function costOf(e, prices, mode, peak) {
-    const p = priceFor(e.model, prices);
-    if (!p || !e.supported) return null;
-    const f = factorFor(p, e.timestamp, mode, peak);
-    const hitP = e.cache_mode === 'explicit' && p.hit_explicit != null ? p.hit_explicit : p.hit;
-    const write = (e.cache_write_tokens || 0) * Math.max(0, (p.write != null ? p.write : p.miss) - p.miss); // 显式缓存创建的溢价
-    const actual = (e.cache_hit_tokens * hitP + e.cache_miss_tokens * p.miss + write + (e.completion_tokens || 0) * p.out) / 1e6 * f;
-    const noCache = (e.prompt_tokens * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
-    return { actual, noCache, saved: noCache - actual };
+  // D1：价目 / costOf 统一走 CostCore（与 usage-stats / 指标页共用）
+  const priceFor = CostCore.priceFor;
+  const priceForRules = CostCore.priceForRules;
+  const parseWindows = CostCore.parseWindows;
+  const isPeak = CostCore.isPeak;
+  const peakFactor = CostCore.peakFactor;
+  const factorFor = CostCore.factorFor;
+  function costOf(e, prices, mode, peak, calib) {
+    if (!e || !e.supported) return null;
+    return CostCore.costOf(e, prices, mode, peak, calib);
   }
   /**
    * V2：估算一次自动摘要 / 合并的额外开销（本地估算）。
