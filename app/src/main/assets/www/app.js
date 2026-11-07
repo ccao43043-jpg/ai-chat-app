@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.22.6';
+  const APP_VERSION = '0.23.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -219,6 +219,9 @@
   // v0.9.0：用量明细改为追加式 usage-stats.jsonl（每条一行），价格等元数据放 usage-stats-meta.json
   const USAGE_LOG = 'usage-stats.jsonl', USAGE_META = 'usage-stats-meta.json';
   let usageState = loadUsageStats();
+  const ROUTER_FILE = 'router-affinity.json';
+  let routerState = Store.get(ROUTER_FILE, null) || {};
+  function saveRouterState() { try { Store.set(ROUTER_FILE, routerState); } catch (e) { /* ignore */ } }
   function loadUsageStats() {
     const meta = Store.get(USAGE_META, null);
     if (!meta) {
@@ -1021,7 +1024,16 @@
     for (let i = start; i < end; i++) frag.appendChild(reuse.get(list[i].id) || buildMsgEl(list[i]));
     win.replaceChildren(frag);
     // 实测窗口内高度；spacer 只依赖窗口外高度，实测不应改变它（旧版在此「重算」导致向上滑时 spacer 突变）
-    win.querySelectorAll(':scope > .msg').forEach((el, j) => vsMeasure(el, list[start + j]));
+    (function batchMeasure() {
+      const nodes = win.querySelectorAll(':scope > .msg');
+      const heights = [];
+      nodes.forEach(el => { heights.push(el.offsetHeight); }); // 先读
+      nodes.forEach((el, j) => { // 再写
+        const m = list[start + j]; if (!el || !m || !m.id) return;
+        const h = heights[j]; if (!(h > 0)) return;
+        vsHeight.set(m, h);
+      });
+    })();
     topSp.style.height = topH + 'px';
     botSp.style.height = bottomH + 'px';
     vsLastRange = { start, end, empty: false, list };
@@ -1041,10 +1053,35 @@
     fillMsgEl(el, m);
     return el;
   }
-  function fillMsgEl(el, m) {
+  function skeletonSig(m) {
+    return [m.role, m.personaName || '', m.personaEmoji || '', m.model || '', m.error ? 1 : 0, m.stopped ? 1 : 0,
+      (m.files && m.files.length) || 0, (m.images && m.images.length) || 0, Versions.count(m),
+      m.searching ? 1 : 0, m.pluginStatus ? 1 : 0, m.searchError ? 1 : 0, m.imageGen ? 1 : 0, m.pending ? 1 : 0].join('|');
+  }
+  function fillMsgEl(el, m, opts) {
+    const inc = opts && opts.incremental;
     el.className = 'msg ' + m.role + (m.error ? ' error' : '');
     // 入场动画只给首次出现的消息；虚拟滚动回收/重建的节点不能再从 opacity:0 淡入
     if (m.id) { if (vsSeen.has(m.id)) el.classList.add('no-anim'); else vsSeen.add(m.id); }
+    if (inc && el._skeleton) {
+      const sig = skeletonSig(m);
+      if (el._skeletonSig !== sig) {
+        el.innerHTML = '';
+        el._skeleton = false;
+        // fall through to full rebuild below
+      } else {
+        // 骨架保留：只更新 md / reasoning / meta
+        if (!patchMsgMarkdown(el, m)) {
+          // 无 md 槽时退回全量
+          el.innerHTML = '';
+          el._skeleton = false;
+        } else {
+          // 缓存徽标 / 路由行
+          updateMsgMeta(el, m);
+          return;
+        }
+      }
+    }
     el.innerHTML = '';
     const pst = !m.pending ? Plugins.registry.messageState(m, settings, conv, pluginHost) : null;
     if (pst && pst.dim) el.classList.add(pst.light ? 'dim-light' : 'dim');
@@ -1125,7 +1162,18 @@
         const pv = getProvider(conv.providerId);
         const meta = pv && pv.modelMeta && pv.modelMeta[m.model];
         const ct = Providers.cacheViewText(Providers.cacheView(m.usage, meta && meta.price));
-        if (ct) { const cl = document.createElement('div'); cl.className = 'msg-cache'; cl.textContent = '⚡ ' + ct.text; cl.title = ct.title; (botCol || el).appendChild(cl); }
+        if (ct || (m.routeView && m.routeView.upstream) || (m.knowledgeTrace && m.knowledgeTrace.hitIds)) {
+          const cl = document.createElement('div'); cl.className = 'msg-cache';
+          let line = ct ? ('⚡ ' + ct.text) : '⚡';
+          if (m.routeView && m.routeView.upstream) {
+            line += (ct ? ' · ' : ' ') + '上游 ' + m.routeView.upstream;
+            if (m.routeView.effectivePrice != null) line += ' · 有效价 $' + Number(m.routeView.effectivePrice).toFixed(3);
+            if (m.routeView.hitRate != null) line += ' · 命中 ' + Math.round(m.routeView.hitRate * 1000) / 10 + '%';
+            if (m.routeView.lastSwitchAt) line += ' · 切换于 ' + new Date(m.routeView.lastSwitchAt).toLocaleString();
+          }
+          if (m.knowledgeTrace && m.knowledgeTrace.hitIds) line += ' · 资料 ' + m.knowledgeTrace.hitIds.length + '/' + (m.knowledgeTrace.tokens | 0) + 'tok';
+          cl.textContent = line; if (ct) cl.title = ct.title; (botCol || el).appendChild(cl);
+        }
       }
     }
     if (!m.pending) {
@@ -1142,6 +1190,33 @@
       if (m.role === 'assistant' && !running && !m.imageGen && m.content) act.appendChild(mkAct(ICON.edit, '编辑', () => editMsg(m)));
       if (!running) act.appendChild(mkAct(ICON.trash, '删除', () => deleteMsg(m)));
       (botCol || el).appendChild(act);
+    }
+    el._skeleton = true;
+    el._skeletonSig = skeletonSig(m);
+  }
+  function updateMsgMeta(el, m) {
+    if (!el || !m || m.pending || m.imageGen) return;
+    const pv = getProvider(conv && conv.providerId);
+    const meta = pv && pv.modelMeta && pv.modelMeta[m.model];
+    const ct = Providers.cacheViewText(Providers.cacheView(m.usage, meta && meta.price));
+    let cl = el.querySelector('.msg-cache');
+    if (ct) {
+      if (!cl) {
+        cl = document.createElement('div'); cl.className = 'msg-cache';
+        const col = el.querySelector('.bot-col') || el;
+        col.appendChild(cl);
+      }
+      let line = '⚡ ' + ct.text;
+      if (m.routeView && m.routeView.upstream) {
+        line += ' · 上游 ' + m.routeView.upstream;
+        if (m.routeView.effectivePrice != null) line += ' · 有效价 $' + Number(m.routeView.effectivePrice).toFixed(3);
+        if (m.routeView.hitRate != null) line += ' · 命中 ' + Math.round(m.routeView.hitRate * 1000) / 10 + '%';
+      }
+      if (m.knowledgeTrace && m.knowledgeTrace.hitIds) {
+        line += ' · 资料 ' + m.knowledgeTrace.hitIds.length + ' 条';
+      }
+      cl.textContent = line;
+      cl.title = ct.title || '';
     }
   }
   const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', text: '文本', unknown: '文本' };
@@ -1221,7 +1296,12 @@
     const el = document.querySelector('.msg[data-id="' + String(m.id).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
     const stick = nearBottom();
     if (el) {
-      if (!(m.pending && patchMsgMarkdown(el, m))) fillMsgEl(el, m);
+      if (m.pending) {
+        if (!patchMsgMarkdown(el, m)) fillMsgEl(el, m, { incremental: true });
+        else if (!el._skeleton) { el._skeleton = true; el._skeletonSig = skeletonSig(m); }
+      } else {
+        fillMsgEl(el, m);
+      }
       vsMeasure(el, m, !stick);
       if (stick) $('#messages').scrollTop = $('#messages').scrollHeight;
       return;
@@ -1673,6 +1753,30 @@
     if (bot.stopped) { finish(); return; }
     if (rctx.plugins.length) bot.plugins = rctx.plugins;
     rctx.messages = injectNowLine(rctx.messages, rctx.systemPrompt || thisConv.systemPrompt);
+    // A：OpenRouter 缓存亲和路由
+    let routePlan = null;
+    try {
+      if (window.Router && Providers.isOpenRouterProvider && Providers.isOpenRouterProvider(p)) {
+        const meta = p.modelMeta && p.modelMeta[rctx.model];
+        const endpoints = (meta && meta._endpoints) || (meta && meta.endpoints) || [];
+        const prefixEst = Math.max(0, (rctx.messages || []).reduce((s, m) => s + String(m.content || '').length, 0) * 0.5 | 0);
+        routePlan = Providers.planOpenRouterRoute(p, rctx.model, endpoints, routerState, { prefixTokens: prefixEst });
+        if (routePlan && routePlan.slug) {
+          rctx.opts = Object.assign({}, rctx.opts, { routeSlug: routePlan.slug, providerOrder: [routePlan.slug] });
+          const prev = routerState[rctx.model] && routerState[rctx.model].current;
+          if (prev && prev !== routePlan.slug) Router.recordSwitch(routerState, rctx.model, prev, routePlan.slug);
+          else Router.ensureModel(routerState, rctx.model).current = routePlan.slug;
+          bot.routeView = routePlan.view || Router.panelView(Router.ensureModel(routerState, rctx.model), null);
+          bot.routeSlug = routePlan.slug;
+        } else if (routePlan && !routePlan.affinity) {
+          rctx.opts = Object.assign({}, rctx.opts, { cacheAffinity: false });
+        }
+      }
+    } catch (e) { console.warn('[router]', e); }
+    if (rctx.meta && rctx.meta.knowledge) {
+      bot.knowledgeTrace = rctx.meta.knowledge;
+      thisConv._knowledgeTrace = rctx.meta.knowledge;
+    }
     let req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
     const gcp = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache'); // v0.8.2：OpenRouter Gemini 提示缓存
     if (gcp) { try { req = gcp.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
@@ -1730,6 +1834,15 @@
     const okResp = !bot.error && !bot.stopped && status >= 200 && status < 300;
     Plugins.registry.runAfterResponse(rctx, { ok: okResp, usage: bot.usage || null, bot, status }, pluginHost);
     if (okResp && bot.usage) recordUsage({ usage: bot.usage, type: 'chat', conv: thisConv, provider: p, model: rctx.model || thisConv.model, msgId: bot.id, at: bot.createdAt || Date.now() });
+    if (okResp && bot.routeSlug && bot.usage) {
+      try {
+        routerState = Providers.observeRoute(routerState, rctx.model || thisConv.model, bot.routeSlug, bot.usage, Date.now());
+        saveRouterState();
+        bot.routeView = window.Router ? Router.panelView(Router.ensureModel(routerState, rctx.model || thisConv.model), null) : bot.routeView;
+      } catch (e) { console.warn('[router.observe]', e); }
+    } else if (!okResp && bot.routeSlug) {
+      try { if (window.Router) Router.markFail(routerState, rctx.model || thisConv.model, bot.routeSlug); saveRouterState(); } catch (e) {}
+    }
     finish();
   }
 
@@ -2811,11 +2924,12 @@
       _authId: useStored && editing ? editing.id : ''
     };
   }
-  function applyFloorToMeta(modelId, floor) {
+  function applyFloorToMeta(modelId, floor, endpoints) {
     if (!floor || !modelId) return false;
     if (!editMeta[modelId]) editMeta[modelId] = {};
     editMeta[modelId].price = floor;
     editMeta[modelId].priceIsFloor = true;
+    if (Array.isArray(endpoints) && endpoints.length) editMeta[modelId]._endpoints = endpoints;
     return true;
   }
   function refreshFloorUi() {
@@ -2829,18 +2943,21 @@
     try {
       const r = await httpSimple(authed(Providers.buildEndpointsRequest(prov, modelId), prov._authId));
       if (r.status >= 400 || !r.status) return null;
-      return Providers.floorPricingFromEndpoints(Providers.parseEndpointsResponse(r.text));
+      const eps = Providers.parseEndpointsResponse(r.text);
+      const floor = Providers.floorPricingFromEndpoints(eps);
+      return floor ? { floor, endpoints: eps } : null;
     } catch (e) { return null; }
   }
   function pumpFloorQueue() {
     while (floorActive < FLOOR_CONCURRENCY && floorQueue.length) {
       const job = floorQueue.shift();
       floorActive++;
-      doFetchOpenRouterFloor(job.modelId).then(floor => {
+      doFetchOpenRouterFloor(job.modelId).then(res => {
         let changed = false;
-        if (floor) changed = applyFloorToMeta(job.modelId, floor);
+        const floor = res && res.floor;
+        if (floor) changed = applyFloorToMeta(job.modelId, floor, res.endpoints);
         if (changed) refreshFloorUi();
-        job.resolve(floor);
+        job.resolve(floor || null);
       }).finally(() => {
         floorActive--;
         delete floorInflight[job.modelId];

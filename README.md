@@ -48,6 +48,16 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.23.0：第五轮 H 评测 / A 缓存亲和路由 / G 流式增量 / B 资料库注入**
+
+- H：routing / knowledge / affect 三维 golden 门禁（affect 合成基线待人工 MAE）
+- A：OpenRouter 有效成本路由（order + 滞回 + 熔断），可关回退 sort:price
+- G：`fillMsgEl` 增量 + 测量批处理
+- B：BM25F 资料库阶段 2 注入 `[LOCAL_KNOWLEDGE]`（默认关）
+- Android `0.23.0`（versionCode 75）/ 桌面 / npm `0.23.0`
+
+---
+
 **v0.22.6：OpenRouter 最低价修正 · 消息缓存显示 · MiniMax 缓存插件**
 - OpenRouter Flex 最低价不再二次打折；消息级缓存命中/节省显示；MiniMax mmcache + 缓存插件迁到 `www/plugins/cache/`
 - Android `0.22.6`（versionCode 74）/ 桌面 / npm `0.22.6`

@@ -422,10 +422,29 @@
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
     if (opts.jsonMode && jsonModeSupported(provider)) body.response_format = { type: 'json_object' }; // v0.7.5：设定提取等结构化调用
-    // OpenRouter：优先选择最低价格的供应商（provider.sort = "price"，等价于模型名 :floor）
-    // 这样实际路由会尽量使用当前最便宜的端点，而不是默认的负载均衡/吞吐量优先。
+    // OpenRouter：缓存亲和路由（有效成本）或回退 sort:'price'
     if (provider.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) {
-      body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+      const affinity = opts.cacheAffinity !== false && (provider.cacheAffinity !== false);
+      const Router = root.Router;
+      if (affinity && Router && opts.providerOrder && opts.providerOrder.length) {
+        body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(opts.providerOrder[0], { enabled: true }));
+      } else if (affinity && Router && opts.routeSlug) {
+        body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(opts.routeSlug, { enabled: true }));
+      } else if (affinity && Router && Array.isArray(opts.routePrices) && opts.routePrices.length) {
+        const st = (opts.routerState && opts.routerModel)
+          ? Router.ensureModel(opts.routerState, opts.routerModel)
+          : (opts.routerModelState || {});
+        const chosen = Router.chooseUpstream(opts.routePrices, st, opts.routeCurrent || (st && st.current) || null, opts.prefixTokens || 0, opts.routerOpts);
+        if (chosen) {
+          body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(chosen, { enabled: true }));
+          if (opts.onRouteChosen) opts.onRouteChosen(chosen);
+        } else {
+          body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+        }
+      } else {
+        // 旧行为 / 开关关闭
+        body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+      }
     }
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
     if (stream) headers['Accept'] = 'text/event-stream';
@@ -778,11 +797,67 @@
     }).filter(Boolean);
   }
 
+
+  /** 从 endpoints 数组提取路由候选 [{slug,pMiss,pHit,ok}] */
+  function endpointRoutePrices(endpoints) {
+    if (!Array.isArray(endpoints)) return [];
+    const out = [];
+    endpoints.forEach(ep => {
+      if (!ep) return;
+      const slug = ep.tag || ep.provider_name || ep.name || (ep.provider && (ep.provider.slug || ep.provider.name)) || null;
+      if (!slug) return;
+      const eff = effectiveTokenPricing(ep.pricing);
+      if (!eff || !(eff.prompt > 0)) return;
+      out.push({
+        slug: String(slug),
+        pMiss: eff.prompt,
+        pHit: eff.cacheRead != null ? eff.cacheRead : eff.prompt,
+        ok: true,
+        completion: eff.completion || 0,
+      });
+    });
+    return out;
+  }
+
+  /** 规划本轮上游：返回 { slug, providerField, view } */
+  function planOpenRouterRoute(provider, model, endpoints, routerState, opts) {
+    opts = opts || {};
+    const Router = root.Router;
+    const affinity = opts.cacheAffinity !== false && provider && provider.cacheAffinity !== false;
+    if (!affinity || !Router) {
+      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: false };
+    }
+    const prices = endpointRoutePrices(endpoints);
+    if (!prices.length) {
+      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: true, reason: 'no-prices' };
+    }
+    const state = routerState || {};
+    const ms = Router.ensureModel(state, model || '');
+    const chosen = Router.chooseUpstream(prices, ms, ms.current, opts.prefixTokens || 0, opts.routerOpts);
+    const field = Router.buildProviderField(chosen, { enabled: true });
+    const priceMap = {};
+    prices.forEach(p => { priceMap[p.slug] = p; });
+    return { slug: chosen, providerField: field, view: Router.panelView(ms, priceMap), affinity: true, prices, state };
+  }
+
+  /** 用 usage 更新命中后验 */
+  function observeRoute(routerState, model, slug, usage, now) {
+    const Router = root.Router;
+    if (!Router || !slug || !model) return routerState || {};
+    const state = routerState || {};
+    const u = usage || {};
+    const prompt = typeof u.prompt === 'number' ? u.prompt : 0;
+    const hit = typeof u.hit === 'number' ? u.hit : 0;
+    if (prompt > 0) Router.observe(state, model, slug, { hitTokens: hit, promptTokens: prompt, ok: true }, now);
+    else Router.observe(state, model, slug, { hit: !!(hit > 0), ok: true }, now);
+    return state;
+  }
+
   const api = { claudeCacheAnchors, PRESETS, OLD_DEFAULTS, RETIRED, SETTINGS_VERSION, migrateSettings, migrateConversation, migrateModelName,
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
-    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS };
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

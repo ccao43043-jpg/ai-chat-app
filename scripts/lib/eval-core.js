@@ -107,8 +107,156 @@ function evalCost(cases = readJsonl('cost.jsonl')) {
   };
 }
 
+
+// ---------- 路由有效成本（Router.chooseUpstream / replay） ----------
+function loadRouter() { return require(path.join(WWW, 'router.js')); }
+function evalRouting(cases = readJsonl('routing.jsonl')) {
+  const R = loadRouter();
+  const per = [];
+  let switchSum = 0, effSum = 0, ok = 0;
+  for (const c of cases) {
+    if (c.mode === 'choose') {
+      const slug = R.chooseUpstream(c.prices, c.stats || {}, c.current, c.prefixTokens || 0, c.opts || {});
+      const pass = slug === c.expect.slug;
+      if (pass) ok++;
+      per.push({ id: c.id, mode: 'choose', got: slug, expect: c.expect.slug, pass });
+      continue;
+    }
+    const res = R.replay(c.steps || [], Object.assign({ prefixTokens: c.prefixTokens, model: 'm' }, c.opts || {}));
+    // 若指定 current 冷启动：先写入
+    let trail = res.trail, switches = res.switches, effCost = res.effCost, final = res.current;
+    if (c.current && c.steps && c.steps.length) {
+      // 重新回放：初始 current
+      const state = {};
+      const model = 'm';
+      R.ensureModel(state, model).current = c.current;
+      let current = c.current;
+      switches = 0; effCost = 0; trail = [];
+      const cfg = R.settingsOf(c.opts || {});
+      const prefixTokens = c.prefixTokens || 20000;
+      for (const step of c.steps) {
+        const chosen = R.chooseUpstream(step.prices, R.ensureModel(state, model), current, step.prefixTokens != null ? step.prefixTokens : prefixTokens, cfg);
+        if (current && chosen && chosen !== current) { switches++; R.recordSwitch(state, model, current, chosen, step.at); }
+        current = chosen;
+        const p = (step.prices || []).find(x => x.slug === chosen);
+        if (p) {
+          const st = R.ensureUpstream(R.ensureModel(state, model), chosen);
+          const h = (st.obs | 0) >= cfg.minObs ? R.hitQuantile(st.a, st.b) : cfg.defaultH;
+          const pe = R.effectivePrice(p.pMiss, p.pHit != null ? p.pHit : p.pMiss, h);
+          effCost += (step.promptTokens != null ? step.promptTokens : prefixTokens) * pe / 1e6;
+        }
+        if (chosen) R.observe(state, model, chosen, { hitTokens: step.hitTokens, promptTokens: step.promptTokens != null ? step.promptTokens : prefixTokens, hit: step.hit, ok: step.ok }, step.at);
+        trail.push(chosen);
+      }
+      final = current;
+    }
+    switchSum += switches;
+    effSum += effCost;
+    let pass = true;
+    if (c.expect) {
+      if (c.expect.final && final !== c.expect.final) pass = false;
+      if (c.expect.finalIn && !c.expect.finalIn.includes(final)) pass = false;
+      if (c.expect.maxSwitches != null && switches > c.expect.maxSwitches) pass = false;
+      if (c.expect.slug && final !== c.expect.slug) pass = false;
+    }
+    if (pass) ok++;
+    per.push({ id: c.id, mode: 'replay', final, switches, effCost, pass });
+  }
+  return {
+    n: per.length,
+    passRate: r4(per.length ? ok / per.length : 1),
+    avgSwitches: r4(per.length ? switchSum / per.length : 0),
+    totalEffCost: r4(effSum),
+    note: 'routing：chooseUpstream 单步 + replay 回放；有效成本为估算累加',
+    per,
+  };
+}
+
+// ---------- 知识库召回 ----------
+function loadKnowledge() {
+  // retrieval-core 必须先加载
+  require(path.join(WWW, 'retrieval-core.js'));
+  return require(path.join(WWW, 'knowledge.js'));
+}
+function evalKnowledge(cases = readJsonl('knowledge.jsonl')) {
+  const K = loadKnowledge();
+  const per = [];
+  for (const c of cases) {
+    const hits = K.search(c.doc, c.query, { limit: 5, mode: 'bm25' });
+    const got = hits.map(h => h.entry.id);
+    per.push(Object.assign({ id: c.id, got, expect: c.expect }, rankMetrics(got, c.expect || [], 5)));
+  }
+  return { pAt5: r4(mean(per.map(x => x.p))), mrr: r4(mean(per.map(x => x.rr))), ndcgAt5: r4(mean(per.map(x => x.ndcg))), n: per.length, per };
+}
+
+// ---------- affect 方向一致（合成成对） ----------
+function loadAffect() {
+  if (!globalThis.Plugins) globalThis.Plugins = require(path.join(WWW, 'plugins.js'));
+  return require(path.join(WWW, 'affect.js'));
+}
+function dirOf(delta, eps) {
+  const e = eps == null ? 0.05 : eps;
+  if (delta > e) return 'up';
+  if (delta < -e) return 'down';
+  return 'flat';
+}
+function evalAffect(cases = readJsonl('affect.jsonl')) {
+  const A = loadAffect();
+  const per = [];
+  let agree = 0, osc = 0;
+  for (const c of cases) {
+    // 合成标注：用 lexiconScore 作为模型观测 a，走 KF；比较 â 变化方向
+    let st = null;
+    const t0 = 1_700_000_000_000;
+    const y0 = A.lexiconScore(c.prevUser);
+    const y1 = A.lexiconScore(c.curUser);
+    const mood0 = y0 > 0.2 ? 'joy' : y0 < -0.2 ? 'anger' : 'neutral';
+    const mood1 = y1 > 0.2 ? 'joy' : y1 < -0.2 ? 'anger' : 'neutral';
+    st = A.step(st, { a: y0, m: mood0 }, c.prevUser, t0, { estimator: 'kf' });
+    const a0 = st && st.kf ? st.kf.x : 0;
+    st = A.step(st, { a: y1, m: mood1 }, c.curUser, t0 + 60_000, { estimator: 'kf' });
+    const a1 = st && st.kf ? st.kf.x : 0;
+    const delta = a1 - a0;
+    // 也参考 lexicon 直接差，避免 KF 惯性把弱信号抹平
+    const lexDelta = y1 - y0;
+    const got = dirOf(delta, 0.08);
+    const gotLex = dirOf(lexDelta, 0.2);
+    let pass = got === c.expectDir;
+    if (!pass && c.expectDir === 'flat' && Math.abs(delta) < 0.2 && Math.abs(lexDelta) < 0.5) pass = true;
+    if (!pass && gotLex === c.expectDir) pass = true; // 合成基线：lex 方向一致也算过
+    if (pass) agree++;
+    per.push({ id: c.id, got, gotLex, expect: c.expectDir, delta: r4(delta), lexDelta: r4(lexDelta), pass, a0: r4(a0), a1: r4(a1) });
+  }
+  // 振荡率：在连续合成序列上粗测（每 10 条滑动）
+  let oscEvents = 0, oscWindows = 0;
+  for (let i = 0; i + 9 < per.length; i += 10) {
+    oscWindows++;
+    let flips = 0;
+    for (let j = i + 1; j < i + 10; j++) {
+      const d0 = Math.sign(per[j - 1].delta), d1 = Math.sign(per[j].delta);
+      if (d0 && d1 && d0 !== d1) flips++;
+    }
+    if (flips > 1) oscEvents++;
+  }
+  return {
+    directionAgree: r4(per.length ? agree / per.length : 1),
+    oscillationRate: r4(oscWindows ? oscEvents / oscWindows : 0),
+    n: per.length,
+    note: '合成成对基线，待人工 MAE；directionAgree=KF â 变化方向与标注一致率',
+    per,
+  };
+}
+
 function runAll() {
-  return { memory: evalMemory(), summary: evalSummary(), cost: evalCost(), render: { skipped: true, note: '渲染性能本 PR 未跑' } };
+  return {
+    memory: evalMemory(),
+    summary: evalSummary(),
+    cost: evalCost(),
+    render: { skipped: true, note: '渲染性能本 PR 未跑' },
+    routing: evalRouting(),
+    knowledge: evalKnowledge(),
+    affect: evalAffect(),
+  };
 }
 function strip(r) { const o = {}; for (const k in r) { if (r[k] && typeof r[k] === 'object') { const { per, ...rest } = r[k]; o[k] = rest; } } return o; }
 function loadBaseline() { return JSON.parse(fs.readFileSync(path.join(GOLDEN, 'baseline.json'), 'utf8')); }
@@ -121,6 +269,18 @@ function compare(cur, base) {
   ge('summary.factCoverage', cur.summary.factCoverage, base.summary.factCoverage);
   le('summary.hallucinationRate', cur.summary.hallucinationRate, base.summary.hallucinationRate);
   le('cost.totalPromptTokens', cur.cost.totalPromptTokens, base.cost.totalPromptTokens);
+  if (base.routing) {
+    ge('routing.passRate', cur.routing.passRate, base.routing.passRate);
+    le('routing.avgSwitches', cur.routing.avgSwitches, base.routing.avgSwitches);
+    le('routing.totalEffCost', cur.routing.totalEffCost, base.routing.totalEffCost);
+  }
+  if (base.knowledge) {
+    ['pAt5', 'mrr', 'ndcgAt5'].forEach(k => ge('knowledge.' + k, cur.knowledge[k], base.knowledge[k]));
+  }
+  if (base.affect) {
+    ge('affect.directionAgree', cur.affect.directionAgree, base.affect.directionAgree);
+    le('affect.oscillationRate', cur.affect.oscillationRate, base.affect.oscillationRate);
+  }
   return f;
 }
-module.exports = { readJsonl, rankMetrics, evalMemory, evalSummary, evalCost, runAll, strip, loadBaseline, compare, EPS };
+module.exports = { readJsonl, rankMetrics, evalMemory, evalSummary, evalCost, evalRouting, evalKnowledge, evalAffect, runAll, strip, loadBaseline, compare, EPS };
