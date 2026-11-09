@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.24.0';
+  const APP_VERSION = '0.24.1';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -23,6 +23,7 @@
     chat: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 01-11.6 7.1L4 20l1-4.1A8 8 0 1120 12z"/></svg>',
     warn: '<svg viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.2v.1"/></svg>',
     image: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3.5 15.5l4.5-4 3.5 3.2 3-2.7 6 5.5"/></svg>',
+    cont: '<svg viewBox="0 0 24 24"><path d="M5 5v14l11-7z"/><path d="M19 5v14"/></svg>',
   };
   const PROVIDER_COLORS = { openai: '#10a37f', deepseek: '#4d6bfe', qwen: '#615ced', 'qwen-intl': '#615ced', moonshot: '#16191e', zhipu: '#2f5bff',
     siliconflow: '#7c3aed', xiaomi: '#ff6900', openrouter: '#6467f2', anthropic: '#d97757', gemini: '#4285f4', custom: '#64748b' };
@@ -1062,7 +1063,7 @@
     return el;
   }
   function skeletonSig(m) {
-    return [m.role, m.personaName || '', m.personaEmoji || '', m.model || '', m.error ? 1 : 0, m.stopped ? 1 : 0,
+    return [m.role, m.personaName || '', m.personaEmoji || '', m.model || '', m.error ? 1 : 0, m.stopped ? 1 : 0, m.truncated ? 1 : 0,
       (m.files && m.files.length) || 0, (m.images && m.images.length) || 0, Versions.count(m),
       m.searching ? 1 : 0, m.pluginStatus ? 1 : 0, m.searchError ? 1 : 0, m.imageGen ? 1 : 0, m.pending ? 1 : 0].join('|');
   }
@@ -1104,7 +1105,7 @@
       avWrap.innerHTML = pe ? '<span class="bot-avatar emoji">' + esc(pe) + '</span>' : '<img class="bot-avatar" src="logo.svg" alt="">';
       botCol = document.createElement('div'); botCol.className = 'bot-col';
       const head = document.createElement('div'); head.className = 'bot-head';
-      head.innerHTML = '<span class="bot-name">' + (pn ? '<b>' + esc(pn) + '</b> · ' : '') + esc(m.model || 'AI') + (m.stopped ? ' · 已停止' : '') + '</span>';
+      head.innerHTML = '<span class="bot-name">' + (pn ? '<b>' + esc(pn) + '</b> · ' : '') + esc(m.model || 'AI') + (m.stopped ? ' · 已停止' : '') + (m.truncated ? ' · 已截断' : '') + '</span>';
       if (!m.pending) Plugins.registry.messageBadges(m, settings, conv, pluginHost).forEach(b => {
         const bd = document.createElement('button'); bd.className = 'mbadge tone-' + (b.tone || 'info'); bd.textContent = b.text; if (b.title) bd.title = b.title;
         if (b.action) bd.onclick = e => { e.stopPropagation(); b.action(); };
@@ -1189,6 +1190,9 @@
       const nv = Versions.count(m);
       if (nv > 1) act.appendChild(buildVerSwitch(m, nv, pst && pst.dim));
       if (m.content) act.appendChild(mkAct(ICON.copy, '复制', () => copyText(m.content)));
+      if (m.role === 'assistant' && !running && !m.imageGen && m.content && canContinueMsg(m) && !(pst && pst.dim) && (isLast || !rpFrozen(m))) {
+        act.appendChild(mkAct(ICON.cont, '继续生成', () => continueGen(m)));
+      }
       if (m.role === 'assistant' && !running && !m.imageGen && !(pst && pst.dim) && (isLast || !rpFrozen(m))) act.appendChild(mkAct(ICON.redo, isLast ? '重新生成' : '从这里重新生成', () => regenerate(m)));
       else if (m.role === 'assistant' && isLast && !running && m.imageGen) act.appendChild(mkAct(ICON.redo, '重新生成', () => regenerate(m)));
       if (!running && !m.imageGen && (m.role === 'user' || m.role === 'assistant') && (m.content || (m.images && m.images.length))) {
@@ -1580,7 +1584,23 @@
     }
     runChat(p);
   }
-  /** 重新生成：保留旧回复为一个版本（‹ 1/2 ›）。较早的回复也可以重新生成，后面的对话保留在旧版本的分支里 */
+  function canContinueMsg(m) {
+    if (!m || m.role !== 'assistant' || m.imageGen || !m.content) return false;
+    if (m.truncated || m.finishReason === 'length') return true;
+    // 网络中断 / 用户停止但已有正文：可续写
+    if ((m.error || m.stopped) && m.content) return true;
+    return false;
+  }
+  /** 从截断 / 中断处继续生成（追加到同一条消息，不新开版本） */
+  async function continueGen(target) {
+    if (running) return;
+    const m = target && target.role === 'assistant' ? target : null;
+    if (!m || !canContinueMsg(m)) return;
+    const p = ensureProvider(); if (!p) return;
+    delete m.error; delete m.stopped; delete m.truncated; delete m.finishReason;
+    return runChat(p, { bot: m, continueGen: true });
+  }
+    /** 重新生成：保留旧回复为一个版本（‹ 1/2 ›）。较早的回复也可以重新生成，后面的对话保留在旧版本的分支里 */
   async function regenerate(target) {
     if (running) return;
     const last = conv.messages[conv.messages.length - 1];
@@ -1704,13 +1724,22 @@
   async function runChat(p, opts) {
     const thisConv = conv;
     const reuse = opts && opts.bot; // 重新生成：在同一个消息位置写入新版本
+    const continuing = !!(opts && opts.continueGen && reuse);
     const lastUser = conv.messages.slice().reverse().find(m => m.role === 'user' && !m.imageGen && m !== reuse);
-    const wantSearch = !!(settings.searchOn && searchReady() && lastUser && (lastUser.content || '').trim());
+    const wantSearch = !continuing && !!(settings.searchOn && searchReady() && lastUser && (lastUser.content || '').trim());
     const bot = reuse || { id: uid(), role: 'assistant' };
-    Object.assign(bot, { content: '', reasoning: '', pending: true, model: conv.model, createdAt: Date.now() });
+    const priorContent = continuing ? (bot.content || '') : '';
+    const priorReasoning = continuing ? (bot.reasoning || '') : '';
+    Object.assign(bot, {
+      content: continuing ? priorContent : '',
+      reasoning: continuing ? priorReasoning : '',
+      pending: true, model: conv.model,
+      createdAt: continuing ? (bot.createdAt || Date.now()) : Date.now(),
+    });
+    delete bot.error; delete bot.stopped; delete bot.truncated; delete bot.finishReason;
     if (conv.personaName) { bot.personaName = conv.personaName; bot.personaEmoji = conv.personaEmoji; }
     if (wantSearch) bot.searching = true;
-    if (lastUser) delete lastUser.search;
+    if (lastUser && !continuing) delete lastUser.search;
     if (!reuse) conv.messages.push(bot);
     renderMessages();
     settings.lastProviderId = p.id; settings.lastModel = conv.model; saveSettings();
@@ -1752,7 +1781,7 @@
     let rctx = {
       conv: thisConv, provider: p, model: thisConv.model, systemPrompt: thisConv.systemPrompt, settings, lastUser, meta: {},
       messages: thisConv.messages.filter(m => m !== bot && !m.error && !m.imageGen && !m.pending).map(m => Object.assign(toRequestMsg(m, m === lastUser), { _src: m })),
-      opts: { stream, temperature: temp, maxTokens: numOrUndef(settings.maxTokens) },
+      opts: { stream, temperature: temp, maxTokens: Providers.resolveMaxTokens(p, thisConv.model, settings.maxTokens) },
       setStatus: t => { if (t) bot.pluginStatus = t; else delete bot.pluginStatus; refresh(); },
       setCancel: c => { cur = c; },
     };
@@ -1761,6 +1790,13 @@
     if (bot.stopped) { finish(); return; }
     if (rctx.plugins.length) bot.plugins = rctx.plugins;
     rctx.messages = injectNowLine(rctx.messages, rctx.systemPrompt || thisConv.systemPrompt);
+    if (continuing && priorContent) {
+      rctx.messages = rctx.messages.concat([
+        { role: 'assistant', content: priorContent },
+        { role: 'user', content: '请从上次中断处继续，不要重复已生成的内容。' },
+      ]);
+      rctx.systemPrompt = (rctx.systemPrompt ? rctx.systemPrompt + '\n\n' : '') + '【续写】请从上次中断处继续，不要重复。';
+    }
     // A：OpenRouter 缓存亲和路由
     let routePlan = null;
     try {
@@ -1795,6 +1831,11 @@
     let status = 0, raw = '', gotDelta = false;
     const apply = deltas => deltas.forEach(d => {
       if (d.kind === 'usage') { bot.usage = Providers.mergeUsage(bot.usage, d.usage); return; }
+      if (d.kind === 'finish') {
+        bot.finishReason = d.reason;
+        if (d.reason === 'length') bot.truncated = true;
+        return;
+      }
       gotDelta = true;
       if (d.kind === 'text') bot.content += d.text;
       else if (d.kind === 'reasoning') bot.reasoning += d.text;
@@ -1826,9 +1867,12 @@
         }
         if (attempt) bot.retries = attempt;
       }
-      if (netErr) bot.error = '网络错误：' + netErr.message + '\n请检查网络连接和 Base URL。' + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
-      else if (status >= 400 || (status === 0 && !bot.stopped)) {
+      if (netErr) {
+        bot.error = '网络错误：' + netErr.message + '\n请检查网络连接和 Base URL。' + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
+        if (bot.content) bot.truncated = true; // 已有正文：可「继续生成」
+      } else if (status >= 400 || (status === 0 && !bot.stopped)) {
         bot.error = (status ? Providers.parseError(status, raw) : '请求失败：没有收到响应') + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
+        if (bot.content) bot.truncated = true;
       } else if (stream) {
         try {
           apply(parser.end());
@@ -1839,6 +1883,7 @@
       }
       break;
     }
+    if (bot.stopped && bot.content && !bot.truncated) bot.truncated = true; // 用户停止但已有正文 → 可续写
     const okResp = !bot.error && !bot.stopped && status >= 200 && status < 300;
     Plugins.registry.runAfterResponse(rctx, { ok: okResp, usage: bot.usage || null, bot, status }, pluginHost);
     if (okResp && bot.usage) recordUsage({ usage: bot.usage, type: 'chat', conv: thisConv, provider: p, model: rctx.model || thisConv.model, msgId: bot.id, at: bot.createdAt || Date.now() });
@@ -2800,6 +2845,7 @@
     $('#pe-type').value = editing.type;
     $('#pe-base').value = editing.baseUrl;
     $('#pe-cache-adapter').value = editing.cacheAdapter || '';
+    $('#pe-orsort').value = Providers.normalizeOrSort(editing.orSort);
     $('#pe-key').value = hasKey(editing) ? KEY_MASK : ''; $('#pe-key').type = 'password'; $('#pe-key-toggle').textContent = '显示';
     Providers.normalizeModelFields(editing);
     Object.keys(PE_FIELDS).forEach(f => { $(PE_FIELDS[f]).value = editing[f] || ''; });
@@ -2813,6 +2859,7 @@
     $('#pe-delete').style.display = fresh ? 'none' : '';
     renderModelChips(); renderFieldPrices();
     syncPriceRefreshBtn();
+    syncOrSortRow();
     $('#page-provider').classList.add('show');
     refreshOpenRouterFloorPrices(editModels.concat(Object.keys(PE_FIELDS).map(f => editing[f])).filter(Boolean));
   }
@@ -2868,7 +2915,7 @@
     const def = { anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' }[t];
     if (def && (!$('#pe-base').value || $('#pe-base').value === 'https://')) $('#pe-base').value = def;
   };
-  $('#pe-base').addEventListener('input', () => { $('#pe-think-row').style.display = Providers.isQwenEndpoint({ presetId: editing && editing.presetId, baseUrl: $('#pe-base').value }) ? '' : 'none'; });
+  $('#pe-base').addEventListener('input', () => { $('#pe-think-row').style.display = Providers.isQwenEndpoint({ presetId: editing && editing.presetId, baseUrl: $('#pe-base').value }) ? '' : 'none'; syncOrSortRow(); });
   $('#pe-key-toggle').onclick = () => {
     const k = $('#pe-key'); const show = k.type === 'password';
     k.type = show ? 'text' : 'password'; $('#pe-key-toggle').textContent = show ? '隐藏' : '显示';
@@ -2883,6 +2930,10 @@
       baseUrl: base, models: editModels.slice() };
     const ca = $('#pe-cache-adapter').value;
     if (ca === 'openrouter' || ca === 'openai-compat' || ca === 'none') p.cacheAdapter = ca;
+    if (Providers.isOpenRouterProvider(p)) {
+      const os = Providers.normalizeOrSort($('#pe-orsort').value);
+      if (os !== 'balanced') p.orSort = os; // 默认平衡不落盘，避免噪音
+    }
     const keyVal = $('#pe-key').value.trim();
     Object.keys(PE_FIELDS).forEach(f => { p[f] = $(PE_FIELDS[f]).value.trim(); });
     const th = $('#pe-thinking').value;
@@ -2913,13 +2964,17 @@
   };
 
 
-  // OpenRouter：用 /models/{id}/endpoints 拉各供应商价，显示最低有效价（与 provider.sort=price 一致）
+  // OpenRouter：用 /models/{id}/endpoints 拉各供应商价，显示最低有效价（展示用；实际路由由 orSort / 缓存亲和决定）
   const floorInflight = Object.create(null);
   let floorActive = 0, floorQueue = [];
   const FLOOR_CONCURRENCY = 6;
   function isEditingOpenRouter() {
     if (!editing) return false;
     return Providers.isOpenRouterProvider({ presetId: editing.presetId, baseUrl: ($('#pe-base') && $('#pe-base').value) || editing.baseUrl });
+  }
+  function syncOrSortRow() {
+    const row = $('#pe-orsort-row');
+    if (row) row.style.display = isEditingOpenRouter() ? '' : 'none';
   }
   function peProviderForFloor() {
     const typed = $('#pe-key').value.trim();

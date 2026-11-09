@@ -254,23 +254,42 @@ test('isFluxTierModel / pixelSizeToTier 辅助', () => {
   assert.strictEqual(P.closestAspectRatio(1792, 1024), '16:9');
 });
 
-test('OpenRouter 无缓存亲和时不强制 provider.sort=price（默认平衡路由）', () => {
+test('OpenRouter orSort：balanced 默认不设 provider；price / throughput 可配置', () => {
   const b1 = JSON.parse(P.buildChatRequest(preset('openrouter'), 'openai/gpt-4o-mini', msgs, '').body);
   assert.strictEqual(b1.provider, undefined);
+  const bPrice = JSON.parse(P.buildChatRequest(Object.assign({}, preset('openrouter'), { orSort: 'price' }), 'openai/gpt-4o-mini', msgs, '').body);
+  assert.deepStrictEqual(bPrice.provider, { sort: 'price' });
+  const bThru = JSON.parse(P.buildChatRequest(Object.assign({}, preset('openrouter'), { orSort: 'throughput' }), 'm', msgs, '').body);
+  assert.deepStrictEqual(bThru.provider, { sort: 'throughput' });
+  const bOpt = JSON.parse(P.buildChatRequest(preset('openrouter'), 'm', msgs, '', { orSort: 'price' }).body);
+  assert.deepStrictEqual(bOpt.provider, { sort: 'price' });
   const b2 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k' }, 'm', msgs, '').body);
   assert.strictEqual(b2.provider, undefined);
   const b3 = JSON.parse(P.buildChatRequest(preset('deepseek'), 'deepseek-flash', msgs, '').body);
   assert.strictEqual(b3.provider, undefined);
-  const b4 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://x.com/v1', apiKey: 'k' }, 'm', msgs, '').body);
-  assert.strictEqual(b4.provider, undefined);
+  assert.strictEqual(P.normalizeOrSort(''), 'balanced');
+  assert.strictEqual(P.normalizeOrSort('PRICE'), 'price');
+  assert.strictEqual(P.openRouterSortField({ orSort: 'balanced' }), null);
+  assert.deepStrictEqual(P.openRouterSortField({ orSort: 'price' }), { sort: 'price' });
   const plan = P.planOpenRouterRoute(preset('openrouter'), 'm', null, {}, { cacheAffinity: false });
   assert.strictEqual(plan.providerField, null);
+  const planP = P.planOpenRouterRoute(Object.assign({}, preset('openrouter'), { orSort: 'price' }), 'm', null, {}, { cacheAffinity: false });
+  assert.deepStrictEqual(planP.providerField, { sort: 'price' });
 });
 
-test('extractDeltas openai：解析 finish_reason', () => {
+test('extractDeltas openai：解析 finish_reason（length 表示截断）', () => {
   const d = P.extractDeltas('openai', { choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }] });
   assert.deepStrictEqual(d.filter(x => x.kind === 'text'), [{ kind: 'text', text: 'hi' }]);
   assert.deepStrictEqual(d.filter(x => x.kind === 'finish'), [{ kind: 'finish', reason: 'stop' }]);
   const d2 = P.extractDeltas('openai', { choices: [{ delta: { content: 'x' }, finish_reason: null }] });
   assert.ok(!d2.some(x => x.kind === 'finish'));
+  const d3 = P.extractDeltas('openai', { choices: [{ delta: {}, finish_reason: 'length' }] });
+  assert.deepStrictEqual(d3, [{ kind: 'finish', reason: 'length' }]);
+});
+
+test('resolveMaxTokens：用户值优先，否则模型 maxOutput，再否则 8192', () => {
+  assert.strictEqual(P.resolveMaxTokens({}, 'm', 2048), 2048);
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 4096 } } }, 'm', ''), 4096);
+  assert.strictEqual(P.resolveMaxTokens({}, 'm', ''), 8192);
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 65536 } } }, 'm', undefined), 65536);
 });

@@ -48,6 +48,15 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.24.1：OpenRouter 可配置路由 · 截断续写 · 默认 max_tokens**
+
+- orSort：平衡（默认）/ 最低价 / 吞吐优先；无亲和时按此项，不再默认强制 `sort:price`
+- 截断续写：`finish_reason=length` / 网络中断可「继续生成」
+- 默认 max_tokens：模型 maxOutput 或 8192
+- Android `0.24.1`（versionCode 77）/ 桌面 / npm `0.24.1`
+
+---
+
 **v0.24.0：第七轮 P0 · 统一成本引擎 / 账单对账 / 路由后验校准**
 
 - D1：`cost-core.js` 统一价目，usage-stats / rpcache / 指标页共用（修千问等高估）
