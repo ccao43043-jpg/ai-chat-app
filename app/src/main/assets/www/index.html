@@ -218,7 +218,7 @@
         <select id="set-autochar"><option value="auto">直接生成（默认）</option><option value="ask">先询问</option><option value="off">关闭</option></select></label>
       <div class="field-row">
         <label class="field"><span>温度</span><input id="set-temp" type="number" inputmode="decimal" step="0.1" min="0" max="2" placeholder="默认"></label>
-        <label class="field"><span>最大输出 tokens</span><input id="set-maxtokens" type="number" inputmode="numeric" step="1" min="1" placeholder="4096"></label>
+        <label class="field"><span>最大输出 tokens<small>默认 8192；过大易触发 OpenRouter 402</small></span><input id="set-maxtokens" type="number" inputmode="numeric" step="1" min="1" placeholder="8192"></label>
       </div>
       <label class="field"><span>生成图片尺寸</span><input id="set-imgsize" placeholder="1024x1024"></label>
     </div>
@@ -232,7 +232,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.24.1 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.24.2 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 

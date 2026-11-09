@@ -1,3 +1,12 @@
+**v0.24.2：默认 max_tokens 封顶 · OpenRouter 402 自动降级重试**
+
+- **默认 max_tokens 封顶 8192**：用户未设时不再直通模型超大 `maxOutput`（如 Gemini ~94 万），避免 OpenRouter 按 max_tokens 预扣额度触发 HTTP 402
+- **402 自动降级重试一次**：解析 `can only afford N`，将 max_tokens 降至 `floor(N*0.8)`（≥256）后重试；仍失败则提示在设置中调小「最大输出 tokens」
+- **设置**：对话设置「最大输出 tokens」默认占位改为 8192，并注明过大易 402
+- Android `0.24.2`（versionCode **78**）
+
+---
+
 **v0.24.1：OpenRouter 可配置路由 · 截断续写 · 默认 max_tokens**
 
 - **orSort 可配置**：服务商编辑页「路由偏好」— 平衡（默认，不设 `provider.sort`）/ 最低价 / 吞吐优先；无缓存亲和时按此项路由

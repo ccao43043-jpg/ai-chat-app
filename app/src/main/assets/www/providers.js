@@ -685,7 +685,8 @@
     } catch (e) { /* 非 JSON */ }
     if (!msg) msg = String(text || '').slice(0, 500);
     const hint = { 401: 'API Key 无效或未填写', 403: '无权限访问（检查 Key/地区/账户）', 404: '地址或模型名不存在',
-      429: '请求过于频繁或额度不足', 400: '请求参数有误' }[status];
+      429: '请求过于频繁或额度不足', 400: '请求参数有误',
+      402: '额度不足或 max_tokens 过大（请在设置里调小「最大输出 tokens」）' }[status];
     return 'HTTP ' + status + (hint ? '（' + hint + '）' : '') + (msg ? '：' + msg : '');
   }
 
@@ -835,13 +836,37 @@
     if (sort === 'balanced') return null;
     return { sort: sort };
   }
-  /** 用户未设 maxTokens 时：模型 maxOutput，否则 8192 */
+  /** 默认/安全上限：勿把模型报的近百万 maxOutput 直接当 max_tokens（OpenRouter 会按此预扣额度 → 402） */
+  const SAFE_DEFAULT_MAX_TOKENS = 8192;
+  const MIN_DOWNGRADE_MAX_TOKENS = 256;
+  /**
+   * 解析最终发给 API 的 max_tokens。
+   * - 用户显式设置：尊重用户；若模型有 maxOutput 则不超过它
+   * - 未设置：min(模型 maxOutput（若有）, 8192)；无 meta 则 8192
+   */
   function resolveMaxTokens(provider, model, userMax) {
     const n = typeof userMax === 'number' ? userMax : parseFloat(userMax);
-    if (typeof n === 'number' && !isNaN(n) && n > 0) return n;
     const meta = provider && model && provider.modelMeta && provider.modelMeta[model];
-    if (meta && meta.maxOutput > 0) return meta.maxOutput;
-    return 8192;
+    const modelCap = meta && meta.maxOutput > 0 ? Number(meta.maxOutput) : 0;
+    if (typeof n === 'number' && !isNaN(n) && n > 0) {
+      return modelCap > 0 ? Math.min(n, modelCap) : n;
+    }
+    if (modelCap > 0) return Math.min(modelCap, SAFE_DEFAULT_MAX_TOKENS);
+    return SAFE_DEFAULT_MAX_TOKENS;
+  }
+  /** 从 OpenRouter 402 文案解析 can only afford N */
+  function parseAffordTokens(text) {
+    const m = String(text || '').match(/can only afford\s+(\d+)/i);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return n > 0 ? n : null;
+  }
+  /** 402 降级：floor(afford * 0.8)，至少 MIN_DOWNGRADE_MAX_TOKENS */
+  function downgradeMaxTokens(afford, opts) {
+    const min = (opts && opts.min > 0) ? (opts.min | 0) : MIN_DOWNGRADE_MAX_TOKENS;
+    const a = Number(afford);
+    if (!(a > 0)) return min;
+    return Math.max(min, Math.floor(a * 0.8));
   }
 
   /** 规划本轮上游：返回 { slug, providerField, view } */
@@ -885,7 +910,7 @@
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
-    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens };
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens, SAFE_DEFAULT_MAX_TOKENS, MIN_DOWNGRADE_MAX_TOKENS, parseAffordTokens, downgradeMaxTokens };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

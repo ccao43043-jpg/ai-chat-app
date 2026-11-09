@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.24.1';
+  const APP_VERSION = '0.24.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -1828,7 +1828,7 @@
     if (mmp) { try { req = mmp.transformRequest(req, rctx); } catch (e) { console.warn('[mmcache]', e); } }
     authed(req, p.id);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
-    let status = 0, raw = '', gotDelta = false;
+    let status = 0, raw = '', gotDelta = false, maxTokDowngraded = false;
     const apply = deltas => deltas.forEach(d => {
       if (d.kind === 'usage') { bot.usage = Providers.mergeUsage(bot.usage, d.usage); return; }
       if (d.kind === 'finish') {
@@ -1855,6 +1855,25 @@
       cur = h.cancel;
       try { await h.promise; } catch (e) { netErr = e; }
       const failed = !!netErr || status >= 400 || (status === 0 && !bot.stopped);
+      // OpenRouter 402：max_tokens 预扣超额 → 按 can only afford N 降到 80% 重试一次
+      if (failed && !gotDelta && !bot.stopped && status === 402 && !maxTokDowngraded && Providers.parseAffordTokens) {
+        const afford = Providers.parseAffordTokens(raw);
+        if (afford != null) {
+          const next = Providers.downgradeMaxTokens(afford);
+          maxTokDowngraded = true;
+          rctx.opts = Object.assign({}, rctx.opts, { maxTokens: next });
+          req = Providers.buildChatRequest(p, rctx.model, rctx.messages, rctx.systemPrompt, rctx.opts);
+          const gcp2 = rctx.opts && rctx.opts.orGemini && Plugins.registry.get('gcache');
+          if (gcp2) { try { req = gcp2.transformRequest(req, rctx); } catch (e) { console.warn('[gcache]', e); } }
+          const mmp2 = rctx.opts && rctx.opts.orMiniMax && Plugins.registry.get('mmcache');
+          if (mmp2) { try { req = mmp2.transformRequest(req, rctx); } catch (e) { console.warn('[mmcache]', e); } }
+          authed(req, p.id);
+          lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
+          bot.pluginStatus = '额度不足，已将最大输出降至 ' + next + ' 并重试…'; refresh();
+          delete bot.pluginStatus;
+          continue;
+        }
+      }
       if (failed && window.NetRetry) {
         const c = NetRetry.classify(status, raw, netErr);
         if (NetRetry.shouldRetry(c, attempt, gotDelta, bot.stopped)) {
@@ -1872,6 +1891,8 @@
         if (bot.content) bot.truncated = true; // 已有正文：可「继续生成」
       } else if (status >= 400 || (status === 0 && !bot.stopped)) {
         bot.error = (status ? Providers.parseError(status, raw) : '请求失败：没有收到响应') + (attempt ? '（已重试 ' + attempt + ' 次）' : '');
+        if (status === 402 && maxTokDowngraded) bot.error += '\n请在设置里调小「最大输出 tokens」后再试。';
+        else if (status === 402 && /can only afford|max_tokens/i.test(raw || '')) bot.error += '\n请在设置里调小「最大输出 tokens」。';
         if (bot.content) bot.truncated = true;
       } else if (stream) {
         try {

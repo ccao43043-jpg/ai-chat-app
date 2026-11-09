@@ -287,9 +287,26 @@ test('extractDeltas openai：解析 finish_reason（length 表示截断）', () 
   assert.deepStrictEqual(d3, [{ kind: 'finish', reason: 'length' }]);
 });
 
-test('resolveMaxTokens：用户值优先，否则模型 maxOutput，再否则 8192', () => {
+test('resolveMaxTokens：用户值优先；未设时封顶 8192（勿直通超大 maxOutput）', () => {
   assert.strictEqual(P.resolveMaxTokens({}, 'm', 2048), 2048);
   assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 4096 } } }, 'm', ''), 4096);
   assert.strictEqual(P.resolveMaxTokens({}, 'm', ''), 8192);
-  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 65536 } } }, 'm', undefined), 65536);
+  // 模型报近百万 maxOutput（Gemini 等）→ 默认封顶 8192，避免 OpenRouter 402 预扣
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 942022 } } }, 'm', undefined), 8192);
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 65536 } } }, 'm', ''), 8192);
+  assert.strictEqual(P.SAFE_DEFAULT_MAX_TOKENS, 8192);
+  // 用户显式值尊重；若模型有 maxOutput 则不超过它
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 4096 } } }, 'm', 8192), 4096);
+  assert.strictEqual(P.resolveMaxTokens({ modelMeta: { m: { maxOutput: 942022 } } }, 'm', 16384), 16384);
+});
+
+test('parseAffordTokens / downgradeMaxTokens：402 解析与一次降级', () => {
+  assert.strictEqual(P.parseAffordTokens('can only afford 238793'), 238793);
+  assert.strictEqual(P.parseAffordTokens('HTTP 402: You requested up to 942022 tokens, but can only afford 238793.'), 238793);
+  assert.strictEqual(P.parseAffordTokens('{"error":{"message":"can only afford 1000"}}'), 1000);
+  assert.strictEqual(P.parseAffordTokens('no match'), null);
+  assert.strictEqual(P.downgradeMaxTokens(238793), Math.floor(238793 * 0.8));
+  assert.strictEqual(P.downgradeMaxTokens(100), 256); // 至少 256
+  assert.strictEqual(P.downgradeMaxTokens(0), 256);
+  assert.strictEqual(P.downgradeMaxTokens(1000, { min: 100 }), 800);
 });

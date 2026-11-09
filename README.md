@@ -48,6 +48,11 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.24.2：默认 max_tokens 封顶 · OpenRouter 402 自动降级重试**
+
+- 默认 max_tokens 封顶 8192（勿直通超大 maxOutput）；402 `can only afford` 降级重试一次
+- Android `0.24.2`（versionCode 78）/ 桌面 / npm `0.24.2`
+
 **v0.24.1：OpenRouter 可配置路由 · 截断续写 · 默认 max_tokens**
 
 - orSort：平衡（默认）/ 最低价 / 吞吐优先；无亲和时按此项，不再默认强制 `sort:price`
