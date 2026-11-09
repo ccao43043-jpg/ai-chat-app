@@ -422,14 +422,17 @@
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
     if (opts.jsonMode && jsonModeSupported(provider)) body.response_format = { type: 'json_object' }; // v0.7.5：设定提取等结构化调用
-    // OpenRouter：缓存亲和路由（有效成本）或回退 sort:'price'
+    // OpenRouter：缓存亲和钉供应商；否则按 orSort（balanced 默认不设 / price / throughput）
     if (provider.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) {
       const affinity = opts.cacheAffinity !== false && (provider.cacheAffinity !== false);
       const Router = root.Router;
+      let pinned = false;
       if (affinity && Router && opts.providerOrder && opts.providerOrder.length) {
         body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(opts.providerOrder[0], { enabled: true }));
+        pinned = true;
       } else if (affinity && Router && opts.routeSlug) {
         body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(opts.routeSlug, { enabled: true }));
+        pinned = true;
       } else if (affinity && Router && Array.isArray(opts.routePrices) && opts.routePrices.length) {
         const st = (opts.routerState && opts.routerModel)
           ? Router.ensureModel(opts.routerState, opts.routerModel)
@@ -438,12 +441,12 @@
         if (chosen) {
           body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(chosen, { enabled: true }));
           if (opts.onRouteChosen) opts.onRouteChosen(chosen);
-        } else {
-          body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+          pinned = true;
         }
-      } else {
-        // 旧行为 / 开关关闭
-        body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+      }
+      if (!pinned) {
+        const sf = openRouterSortField(provider, opts);
+        if (sf) body.provider = Object.assign({}, body.provider || {}, sf);
       }
     }
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
@@ -614,6 +617,7 @@
       const r = d.reasoning_content || d.reasoning;
       if (typeof r === 'string' && r) out.push({ kind: 'reasoning', text: r });
       if (typeof d.content === 'string' && d.content) out.push({ kind: 'text', text: d.content });
+      if (ch.finish_reason) out.push({ kind: 'finish', reason: ch.finish_reason });
     }
     const ou = normalizeUsage('openai', obj.usage); // 流式最后一块（DeepSeek 附在最后的内容块上；OpenAI 为 choices 为空的单独一块）
     if (ou) out.push({ kind: 'usage', usage: ou });
@@ -819,21 +823,45 @@
     return out;
   }
 
+  const OR_SORTS = { balanced: 1, price: 1, throughput: 1 };
+  /** OpenRouter 路由偏好：balanced（默认）/ price / throughput */
+  function normalizeOrSort(v) {
+    const s = String(v || '').toLowerCase();
+    return OR_SORTS[s] ? s : 'balanced';
+  }
+  /** 无缓存亲和钉定时的 provider 字段；balanced 返回 null（不设 sort） */
+  function openRouterSortField(provider, opts) {
+    const sort = normalizeOrSort((opts && opts.orSort) != null ? opts.orSort : (provider && provider.orSort));
+    if (sort === 'balanced') return null;
+    return { sort: sort };
+  }
+  /** 用户未设 maxTokens 时：模型 maxOutput，否则 8192 */
+  function resolveMaxTokens(provider, model, userMax) {
+    const n = typeof userMax === 'number' ? userMax : parseFloat(userMax);
+    if (typeof n === 'number' && !isNaN(n) && n > 0) return n;
+    const meta = provider && model && provider.modelMeta && provider.modelMeta[model];
+    if (meta && meta.maxOutput > 0) return meta.maxOutput;
+    return 8192;
+  }
+
   /** 规划本轮上游：返回 { slug, providerField, view } */
   function planOpenRouterRoute(provider, model, endpoints, routerState, opts) {
     opts = opts || {};
     const Router = root.Router;
     const affinity = opts.cacheAffinity !== false && provider && provider.cacheAffinity !== false;
     if (!affinity || !Router) {
-      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: false };
+      return { slug: null, providerField: openRouterSortField(provider, opts), view: null, affinity: false };
     }
     const prices = endpointRoutePrices(endpoints);
     if (!prices.length) {
-      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: true, reason: 'no-prices' };
+      return { slug: null, providerField: openRouterSortField(provider, opts), view: null, affinity: true, reason: 'no-prices' };
     }
     const state = routerState || {};
     const ms = Router.ensureModel(state, model || '');
     const chosen = Router.chooseUpstream(prices, ms, ms.current, opts.prefixTokens || 0, opts.routerOpts);
+    if (!chosen) {
+      return { slug: null, providerField: openRouterSortField(provider, opts), view: Router.panelView(ms, null), affinity: true, prices, state, reason: 'no-choice' };
+    }
     const field = Router.buildProviderField(chosen, { enabled: true });
     const priceMap = {};
     prices.forEach(p => { priceMap[p.slug] = p; });
@@ -857,7 +885,7 @@
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
-    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute };
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);
