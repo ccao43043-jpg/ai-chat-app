@@ -167,7 +167,7 @@ test('Hybrid-5：动态层移到本轮 user 尾部、固定层 hash 不变、剧
   const last = b1.messages[b1.messages.length - 1];
   // 纯 HH:MM 无秒/无时区 → 不得抹掉（状态栏时分随动态层移到 user）
   assert.ok(last.content.startsWith('【当前状态】\n2026-11-02 13:45 雨') && last.content.endsWith('继续'));
-  assert.strictEqual(b1.session_id, 'sid1'); assert.deepStrictEqual(b1.provider, { sort: 'price' }); // v0.21.5：仅价格排序，gcache 不额外钉供应商
+  assert.strictEqual(b1.session_id, 'sid1'); assert.strictEqual(b1.provider, undefined); // 默认平衡路由；gcache 不额外钉供应商
   const msgs2 = msgs.concat([{ role: 'assistant', content: '好' }, { role: 'user', content: '再来' }]);
   const r2 = G.applyToRequest(P.buildChatRequest(OR, 'google/gemini-2.5-flash', msgs2, sys('2026-11-03 08:00 晴'), {}), {}, { hybrid: st, prevStaticHash: r1.layers.static_hash });
   assert.strictEqual(r1.layers.static_hash, r2.layers.static_hash);

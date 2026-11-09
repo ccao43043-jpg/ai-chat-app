@@ -422,7 +422,7 @@
     if (temp !== undefined) body.temperature = temp;
     if (opts.maxTokens) body.max_tokens = opts.maxTokens;
     if (opts.jsonMode && jsonModeSupported(provider)) body.response_format = { type: 'json_object' }; // v0.7.5：设定提取等结构化调用
-    // OpenRouter：缓存亲和路由（有效成本）或回退 sort:'price'
+    // OpenRouter：有缓存亲和路由时钉供应商；否则不设 provider，走默认平衡路由（价格+可靠性）
     if (provider.presetId === 'openrouter' || /openrouter\.ai/i.test(base)) {
       const affinity = opts.cacheAffinity !== false && (provider.cacheAffinity !== false);
       const Router = root.Router;
@@ -438,13 +438,10 @@
         if (chosen) {
           body.provider = Object.assign({}, body.provider || {}, Router.buildProviderField(chosen, { enabled: true }));
           if (opts.onRouteChosen) opts.onRouteChosen(chosen);
-        } else {
-          body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
         }
-      } else {
-        // 旧行为 / 开关关闭
-        body.provider = Object.assign({}, body.provider || {}, { sort: 'price' });
+        // 未选到上游时不设 provider.sort，交给 OpenRouter 默认平衡路由
       }
+      // 无缓存亲和 / 开关关闭：不强制 sort:'price'
     }
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
     if (stream) headers['Accept'] = 'text/event-stream';
@@ -614,6 +611,7 @@
       const r = d.reasoning_content || d.reasoning;
       if (typeof r === 'string' && r) out.push({ kind: 'reasoning', text: r });
       if (typeof d.content === 'string' && d.content) out.push({ kind: 'text', text: d.content });
+      if (ch.finish_reason) out.push({ kind: 'finish', reason: ch.finish_reason });
     }
     const ou = normalizeUsage('openai', obj.usage); // 流式最后一块（DeepSeek 附在最后的内容块上；OpenAI 为 choices 为空的单独一块）
     if (ou) out.push({ kind: 'usage', usage: ou });
@@ -825,11 +823,11 @@
     const Router = root.Router;
     const affinity = opts.cacheAffinity !== false && provider && provider.cacheAffinity !== false;
     if (!affinity || !Router) {
-      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: false };
+      return { slug: null, providerField: null, view: null, affinity: false };
     }
     const prices = endpointRoutePrices(endpoints);
     if (!prices.length) {
-      return { slug: null, providerField: { sort: 'price' }, view: null, affinity: true, reason: 'no-prices' };
+      return { slug: null, providerField: null, view: null, affinity: true, reason: 'no-prices' };
     }
     const state = routerState || {};
     const ms = Router.ensureModel(state, model || '');

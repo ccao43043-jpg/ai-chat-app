@@ -254,13 +254,23 @@ test('isFluxTierModel / pixelSizeToTier 辅助', () => {
   assert.strictEqual(P.closestAspectRatio(1792, 1024), '16:9');
 });
 
-test('OpenRouter 优先最低价供应商（provider.sort=price）', () => {
+test('OpenRouter 无缓存亲和时不强制 provider.sort=price（默认平衡路由）', () => {
   const b1 = JSON.parse(P.buildChatRequest(preset('openrouter'), 'openai/gpt-4o-mini', msgs, '').body);
-  assert.deepStrictEqual(b1.provider, { sort: 'price' });
+  assert.strictEqual(b1.provider, undefined);
   const b2 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k' }, 'm', msgs, '').body);
-  assert.deepStrictEqual(b2.provider, { sort: 'price' });
+  assert.strictEqual(b2.provider, undefined);
   const b3 = JSON.parse(P.buildChatRequest(preset('deepseek'), 'deepseek-flash', msgs, '').body);
   assert.strictEqual(b3.provider, undefined);
   const b4 = JSON.parse(P.buildChatRequest({ type: 'openai', baseUrl: 'https://x.com/v1', apiKey: 'k' }, 'm', msgs, '').body);
   assert.strictEqual(b4.provider, undefined);
+  const plan = P.planOpenRouterRoute(preset('openrouter'), 'm', null, {}, { cacheAffinity: false });
+  assert.strictEqual(plan.providerField, null);
+});
+
+test('extractDeltas openai：解析 finish_reason', () => {
+  const d = P.extractDeltas('openai', { choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }] });
+  assert.deepStrictEqual(d.filter(x => x.kind === 'text'), [{ kind: 'text', text: 'hi' }]);
+  assert.deepStrictEqual(d.filter(x => x.kind === 'finish'), [{ kind: 'finish', reason: 'stop' }]);
+  const d2 = P.extractDeltas('openai', { choices: [{ delta: { content: 'x' }, finish_reason: null }] });
+  assert.ok(!d2.some(x => x.kind === 'finish'));
 });
