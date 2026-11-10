@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.26.0';
+  const APP_VERSION = '0.27.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -183,6 +183,7 @@
     search: defaultSearch(), searchOn: false, removedPersonas: [],
     recentTemplates: [], recentWorlds: [], recentPersonas: [],
     drawerCollapsed: { recent: false, more: false },
+    showTopCost: true, deferHighlight: true, settingsTab: 'providers',
   });
   function defaultSearch() { return { provider: 'tavily', hasKeys: {}, urls: {}, count: 5, rewrite: false }; }
   const stored = Store.get('settings.json', null);
@@ -222,6 +223,7 @@
   // v0.9.0：用量明细改为追加式 usage-stats.jsonl（每条一行），价格等元数据放 usage-stats-meta.json
   const USAGE_LOG = 'usage-stats.jsonl', USAGE_META = 'usage-stats-meta.json';
   let usageState = loadUsageStats();
+  let lastDiag = null;
   const ROUTER_FILE = 'router-affinity.json';
   let routerState = Store.get(ROUTER_FILE, null) || {};
   function saveRouterState() { try { Store.set(ROUTER_FILE, routerState); } catch (e) { /* ignore */ } }
@@ -637,7 +639,12 @@
         const stable = cacheable;
         const hk = stable && raw.length <= MD_CACHE_TEXT_MAX ? (lang || '') + '\u0000' + raw : null;
         let hl = hk ? lruGet(hlCache, hk) : undefined;
-        if (hl === undefined) {
+        // 高亮延迟：流式或设置开启时先出纯文本，空闲再高亮，避免主线程卡顿
+        const deferHl = streaming || (settings && settings.deferHighlight !== false && !hk);
+        if (deferHl) {
+          code.setAttribute('data-hl-pending', lang || '');
+          hl = null;
+        } else if (hl === undefined) {
           if (known) hl = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
           else if (!streaming && raw.length < 20000) hl = hljs.highlightAuto(raw).value;
           else hl = null;
@@ -672,6 +679,29 @@
       a.onclick = e => { const h = a.getAttribute('href') || ''; if (/^https?:/i.test(h)) { e.preventDefault(); openUrl(h); } };
     });
     return root;
+  }
+  /** 空闲时补齐延迟的代码高亮（事件不阻塞首屏） */
+  function flushHighlight(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const nodes = Array.from(scope.querySelectorAll('code[data-hl-pending]'));
+    if (!nodes.length) return;
+    const run = () => {
+      nodes.forEach(code => {
+        if (!code.isConnected || !code.hasAttribute('data-hl-pending')) return;
+        const lang = code.getAttribute('data-hl-pending') || '';
+        const raw = code.textContent;
+        try {
+          const known = !!(lang && hljs.getLanguage(lang));
+          let hl = null;
+          if (known) hl = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
+          else if (raw.length < 20000) hl = hljs.highlightAuto(raw).value;
+          if (hl !== null) { code.innerHTML = hl; code.classList.add('hljs'); }
+        } catch (e) { /* ignore */ }
+        code.removeAttribute('data-hl-pending');
+      });
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 800 });
+    else setTimeout(run, 0);
   }
   /** 把 markdown 差分写入已有 .md 节点（流式定点 patch） */
   function renderMarkdownInto(div, text, sources, opts) {
@@ -747,32 +777,38 @@
     const mood = raw.find(b => b.plugin === 'affect' && b.kind === 'mood');
     const segs = [hit, mood].filter(Boolean);
     bar.innerHTML = '';
-    bar.classList.toggle('show', segs.length > 0);
-    if (!segs.length) return;
-    const strip = document.createElement('div');
-    strip.className = 'status-strip';
-    strip.setAttribute('role', 'group');
-    strip.setAttribute('aria-label', '对话状态');
-    segs.forEach((b, i) => {
-      if (i) { const d = document.createElement('span'); d.className = 'ss-div'; d.setAttribute('aria-hidden', 'true'); strip.appendChild(d); }
-      const el = document.createElement('button');
-      el.type = 'button';
-      el.className = 'ss-seg hbadge tone-' + (b.tone || 'info') + (b.kind ? ' kind-' + b.kind : '');
-      el.textContent = (b.kind === 'mood' ? '💓 ' : b.kind === 'hit' ? '⚡ ' : '') + b.text;
-      if (b.title) el.title = b.title;
-      if (b.action) el.onclick = b.action;
-      strip.appendChild(el);
-    });
-    bar.appendChild(strip);
-    // E1：预算细线（2px，>80% 警示，>100% 超预算）
-    const bud = hit && hit.budget;
-    if (bud) {
-      const r = bud.used / bud.cap, ln = document.createElement('div');
-      ln.className = 'budget-line' + (r > 1 ? ' over' : r > 0.8 ? ' warn' : '');
-      ln.title = '上下文预算：' + bud.used + ' / ' + bud.cap + ' Token（' + Math.round(r * 100) + '%）';
-      ln.innerHTML = '<i style="width:' + Math.min(100, Math.round(r * 1000) / 10) + '%"></i>';
-      bar.appendChild(ln);
+    bar.classList.add('show');
+    if (segs.length) {
+      const strip = document.createElement('div');
+      strip.className = 'status-strip';
+      strip.setAttribute('role', 'group');
+      strip.setAttribute('aria-label', '对话状态');
+      segs.forEach((b, i) => {
+        if (i) { const d = document.createElement('span'); d.className = 'ss-div'; d.setAttribute('aria-hidden', 'true'); strip.appendChild(d); }
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'ss-seg hbadge tone-' + (b.tone || 'info') + (b.kind ? ' kind-' + b.kind : '');
+        el.textContent = (b.kind === 'mood' ? '💓 ' : b.kind === 'hit' ? '⚡ ' : '') + b.text;
+        if (b.title) el.title = b.title;
+        if (b.action) el.onclick = b.action;
+        strip.appendChild(el);
+      });
+      bar.appendChild(strip);
+      // E1：预算细线（2px，>80% 警示，>100% 超预算）
+      const bud = hit && hit.budget;
+      if (bud) {
+        const r = bud.used / bud.cap, ln = document.createElement('div');
+        ln.className = 'budget-line' + (r > 1 ? ' over' : r > 0.8 ? ' warn' : '');
+        ln.title = '上下文预算：' + bud.used + ' / ' + bud.cap + ' Token（' + Math.round(r * 100) + '%）';
+        ln.innerHTML = '<i style="width:' + Math.min(100, Math.round(r * 1000) / 10) + '%"></i>';
+        bar.appendChild(ln);
+      }
     }
+    const q = document.createElement('button');
+    q.type = 'button'; q.className = 'ss-quick'; q.id = 'btn-rp-quick';
+    q.textContent = '快捷'; q.title = '本对话缓存 / Affect / 资料库';
+    q.onclick = () => openRpQuickPanel();
+    bar.appendChild(q);
   }
   function pushRecentSetting(key, id, max) {
     if (!id) return;
@@ -816,7 +852,8 @@
     const costEl = $('#usage-pill-cost'), balEl = $('#usage-pill-bal'), pill = $('#usage-pill');
     if (!costEl || !pill) return;
     const u = todayUsageSummary();
-    costEl.textContent = u.requests ? fmtUsdShort(u.cost) : '用量';
+    const showCost = settings.showTopCost !== false;
+    costEl.textContent = (showCost && u.requests) ? fmtUsdShort(u.cost) : '用量';
     pill.title = u.requests ? ('今日约 ' + fmtUsdShort(u.cost) + ' · ' + u.requests + ' 次 · ' + u.total + ' tokens') : '今日用量与账户余额';
     const bal = firstBalanceText();
     if (balEl) {
@@ -1336,6 +1373,10 @@
       }
     }
     if (!m.pending) {
+      const hostCol = botCol || el;
+      appendMsgStatus(hostCol, m);
+      const canCont0 = m.role === 'assistant' && !running && !m.imageGen && m.content && canContinueMsg(m) && !(pst && pst.dim) && (isLast || !rpFrozen(m));
+      appendContinueHint(hostCol, m, { canContinue: canCont0 });
       const act = document.createElement('div'); act.className = 'actions';
       const nv = Versions.count(m);
       if (nv > 1) act.appendChild(buildVerSwitch(m, nv, pst && pst.dim));
@@ -1355,6 +1396,46 @@
     }
     el._skeleton = true;
     el._skeletonSig = skeletonSig(m);
+    if (!m.pending) flushHighlight(el);
+  }
+  function cacheViewOfMsg(m) {
+    if (!m || !m.usage) return null;
+    const pv = getProvider(conv && conv.providerId);
+    const meta = pv && pv.modelMeta && pv.modelMeta[m.model];
+    return Providers.cacheView(m.usage, meta && meta.price);
+  }
+  /** 助手消息底部轻量状态条：命中率 / 节省 / Affect 档位 */
+  function appendMsgStatus(target, m) {
+    if (!target || !m || m.pending || m.imageGen || m.role !== 'assistant') return;
+    const old = target.querySelector && target.querySelector('.msg-status');
+    if (old) old.remove();
+    const cv = cacheViewOfMsg(m);
+    const rel = (window.Affect && m.affect) ? Affect.relationOf(m.affect) : '';
+    const segs = (window.UiStatus && UiStatus.buildMsgStatus({ cacheView: cv, routeView: m.routeView, affect: m.affect, relation: rel })) || [];
+    if (!segs.length) return;
+    const bar = document.createElement('div');
+    bar.className = 'msg-status';
+    segs.forEach(s => {
+      const sp = document.createElement('span');
+      sp.className = 'ms-seg ' + s.key;
+      sp.textContent = s.text;
+      bar.appendChild(sp);
+    });
+    target.appendChild(bar);
+  }
+  function appendContinueHint(target, m, opts) {
+    if (!target || !m || m.pending || m.imageGen || m.role !== 'assistant') return;
+    const prev = target.querySelector && target.querySelector('.cont-hint');
+    if (prev) prev.remove();
+    if (!(opts && opts.canContinue)) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cont-hint';
+    b.dataset.act = 'continue';
+    b.textContent = m.truncated ? '回复已截断，点此继续生成' : '可以继续生成';
+    b.title = '从中断处续写，不新开版本';
+    b._act = () => continueGen(m);
+    target.appendChild(b);
   }
   function updateMsgMeta(el, m) {
     if (!el || !m || m.pending || m.imageGen) return;
@@ -1380,6 +1461,7 @@
       cl.textContent = line;
       cl.title = ct.title || '';
     }
+    appendMsgStatus(el.querySelector('.bot-col') || el, m);
   }
   const KIND_LABEL = { pdf: 'PDF', docx: 'Word', pptx: 'PPT', xlsx: 'Excel', text: '文本', unknown: '文本' };
   function fileMeta(f) {
@@ -1430,7 +1512,7 @@
     wrap.appendChild(row);
     return wrap;
   }
-  function mkAct(icon, label, fn) { const b = document.createElement('button'); b.className = 'act'; b.innerHTML = icon; b.setAttribute('aria-label', label); b.title = label; b.onclick = fn; return b; }
+  function mkAct(icon, label, fn) { const b = document.createElement('button'); b.className = 'act'; b.innerHTML = icon; b.setAttribute('aria-label', label); b.title = label; b.dataset.act = label; b._act = fn; return b; }
   function nearBottom() { const b = $('#messages'); return b.scrollHeight - b.scrollTop - b.clientHeight < 140; }
   /** 流式定点：只差分更新已有 .md，避免整条消息 innerHTML 重建 */
   function patchMsgMarkdown(el, m) {
@@ -1583,8 +1665,90 @@
     }, { passive: true });
   })();
 
+  // 事件委托：操作栏 / 续写提示 / 代码复制（减少每条消息单独绑定）
+  (function bindMsgDelegate() {
+    const box = $('#messages');
+    if (!box || box._uiDelegated) return;
+    box._uiDelegated = true;
+    box.addEventListener('click', e => {
+      const act = e.target.closest('.act, .cont-hint');
+      if (act && box.contains(act) && typeof act._act === 'function') {
+        e.preventDefault();
+        act._act();
+        return;
+      }
+      const copyBtn = e.target.closest('.code-head button');
+      if (copyBtn && box.contains(copyBtn)) {
+        const pre = copyBtn.closest('.code-block') && copyBtn.closest('.code-block').querySelector('pre code');
+        if (pre) { e.preventDefault(); copyText(pre.textContent); }
+      }
+    });
+    // 长按快捷菜单（避开代码块 / 操作栏 / 滑动切版本）
+    let timer = 0, startX = 0, startY = 0, holdEl = null, opened = false;
+    const clearHold = () => { if (timer) { clearTimeout(timer); timer = 0; } holdEl = null; };
+    const skipSel = 'pre, table, .code-block, .src-row, .msg-images, .ver-sw, .actions, a, button, input, textarea';
+    box.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const el = e.target.closest('.msg');
+      if (!el || e.target.closest(skipSel)) return;
+      opened = false; holdEl = el; startX = e.clientX; startY = e.clientY;
+      timer = setTimeout(() => {
+        const t = holdEl; clearHold();
+        if (t) { opened = true; openMsgQuickMenu(t); }
+      }, 520);
+    });
+    box.addEventListener('pointermove', e => {
+      if (!timer) return;
+      if (Math.abs(e.clientX - startX) > 14 || Math.abs(e.clientY - startY) > 14) clearHold();
+    });
+    box.addEventListener('pointerup', () => { if (!opened) clearHold(); });
+    box.addEventListener('pointercancel', clearHold);
+    box.addEventListener('contextmenu', e => {
+      const el = e.target.closest('.msg');
+      if (!el || e.target.closest('pre, textarea, input, a, .code-block')) return;
+      e.preventDefault();
+      opened = true; clearHold();
+      openMsgQuickMenu(el);
+    });
+  })();
+  function openMsgQuickMenu(el) {
+    if (!el || running) return;
+    const m = conv && conv.messages.find(x => x.id === el.dataset.id);
+    if (!m || m.pending) return;
+    const pst = Plugins.registry.messageState(m, settings, conv, pluginHost);
+    const isLast = conv.messages[conv.messages.length - 1] === m;
+    const items = [];
+    if (m.content) items.push({ label: '复制', icon: ICON.copy, onClick: () => copyText(m.content) });
+    if (m.role === 'assistant' && !m.imageGen && m.content && canContinueMsg(m) && !(pst && pst.dim) && (isLast || !rpFrozen(m))) {
+      items.push({ label: '继续生成', icon: ICON.cont, onClick: () => continueGen(m) });
+    }
+    if (m.role === 'assistant' && !m.imageGen && !(pst && pst.dim) && (isLast || !rpFrozen(m))) {
+      items.push({ label: isLast ? '重新生成' : '从这里重新生成', icon: ICON.redo, onClick: () => regenerate(m) });
+    }
+    if (!m.imageGen && (m.role === 'user' || m.role === 'assistant') && (m.content || (m.images && m.images.length))) {
+      items.push({ label: '据此生图', icon: ICON.image, onClick: () => openImageGenFromChat(m) });
+    }
+    if (!m.imageGen && (m.role === 'user' || (m.role === 'assistant' && m.content))) {
+      items.push({ label: '编辑', icon: ICON.edit, onClick: () => editMsg(m) });
+    }
+    items.push({ label: '删除', icon: ICON.trash, danger: true, onClick: () => deleteMsg(m) });
+    actionSheet((m.role === 'user' ? '消息' : '回复') + '快捷操作', items);
+  }
+  /** 局部更新一条消息并保持它在屏幕上的位置 */
+  function patchMsgKeeping(m) {
+    const box = $('#messages');
+    if (!box || !m) { renderMessages({ force: true }); return; }
+    const el = box.querySelector('.msg[data-id="' + m.id + '"]');
+    if (!el) { rerenderKeeping(m); return; }
+    const top = el.getBoundingClientRect().top;
+    fillMsgEl(el, m);
+    vsMeasure(el, m, true);
+    box.scrollTop = box.scrollTop + (el.getBoundingClientRect().top - top);
+  }
   /** 编辑消息：全屏编辑器。用户消息可「保存」或「保存并重新发送」；AI 回复可「保存」 */
   async function editMsg(m) {
+    const box = $('#messages');
+    const savedScroll = box ? box.scrollTop : 0;
     const user = m.role === 'user';
     const idx = conv.messages.indexOf(m);
     const after = conv.messages.length - idx - 1;
@@ -1596,7 +1760,7 @@
     const r = await openEditor({ title: user ? '编辑消息' : '编辑 AI 回复', value: m.content || '', hint, warn: rp && (after || !user),
       placeholder: user ? '输入消息…' : '回复内容…',
       actions: user ? [{ key: 'save', text: '保存' }, { key: 'resend', text: '保存并重新发送', primary: true }] : [{ key: 'save', text: '保存', primary: true }] });
-    if (!r) return;
+    if (!r) { if (box) box.scrollTop = savedScroll; return; }
     const t = r.text;
     if (r.key === 'resend') {
       if (!t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
@@ -1610,15 +1774,15 @@
       if (m.files && m.files.length) init.files = m.files.slice();
       conv.messages = Versions.addVersion(conv.messages, conv.messages.indexOf(m), init);
       if (affectReset(conv.messages.indexOf(m))) toast('好感/心情状态已从编辑处清除，将重新累计');
-      saveConv(); renderMessages(); runChat(p);
+      saveConv(); rerenderKeeping(m); runChat(p);
       return;
     }
-    if (t === (m.content || '')) return;
+    if (t === (m.content || '')) { if (box) box.scrollTop = savedScroll; return; }
     if (user && !t.trim() && !(m.images && m.images.length) && !(m.files && m.files.length)) { toast('消息不能为空'); return; }
     m.content = t; m.edited = true;
     delete m.rpSent; // RP：冻结的发送原文作废，下一轮按修改后的内容进入历史
     const afN = affectReset(conv.messages.indexOf(m));
-    saveConv(); renderMessages({ force: true }); toast(afN ? '已保存 · 好感/心情状态已从此处清除' : '已保存');
+    saveConv(); patchMsgKeeping(m); toast(afN ? '已保存 · 好感/心情状态已从此处清除' : '已保存');
   }
   const editUserMsg = editMsg;
 
@@ -2068,6 +2232,21 @@
     } else if (!okResp && bot.routeSlug) {
       try { if (window.Router) Router.markFail(routerState, rctx.model || thisConv.model, bot.routeSlug); saveRouterState(); } catch (e) {}
     }
+    try {
+      const cv = cacheViewOfMsg(bot);
+      noteLastDiag({
+        model: rctx.model || thisConv.model,
+        latencyMs: Date.now() - routeStartedAt,
+        prompt: bot.usage && bot.usage.prompt,
+        completion: bot.usage && bot.usage.completion,
+        cost: bot.usage && (bot.usage.cost != null ? bot.usage.cost : (cv && cv.cost)),
+        hitRate: cv && cv.rate,
+        saved: cv && cv.saved,
+        affect: (window.Affect && bot.affect) ? Affect.relationOf(bot.affect) : '',
+        ok: okResp,
+        error: bot.error || '',
+      });
+    } catch (e) { /* ignore */ }
     finish();
   }
 
@@ -2445,7 +2624,22 @@
     menu.classList.add('show'); $('#menu-mask').classList.add('show'); $('#model-pill').classList.add('open');
   }
   function closeModelMenu() { $('#model-menu').classList.remove('show'); $('#menu-mask').classList.remove('show'); $('#model-pill').classList.remove('open'); }
-  $('#model-pill').onclick = () => $('#model-menu').classList.contains('show') ? closeModelMenu() : openModelMenu();
+  (function bindModelPill() {
+    const pill = $('#model-pill');
+    let t = 0, long = false;
+    const clear = () => { if (t) { clearTimeout(t); t = 0; } };
+    pill.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      long = false;
+      t = setTimeout(() => { long = true; t = 0; closeModelMenu(); openSheet(); }, 520);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => pill.addEventListener(ev, clear));
+    pill.addEventListener('contextmenu', e => { e.preventDefault(); long = true; clear(); closeModelMenu(); openSheet(); });
+    pill.onclick = () => {
+      if (long) { long = false; return; }
+      $('#model-menu').classList.contains('show') ? closeModelMenu() : openModelMenu();
+    };
+  })();
   $('#menu-mask').onclick = closeModelMenu;
 
   // ---------------- 模型 / 系统提示词面板 ----------------
@@ -2487,6 +2681,25 @@
     closeSheet();
   };
 
+  function noteLastDiag(info) {
+    lastDiag = Object.assign({ at: Date.now() }, info || {});
+    renderDiag();
+  }
+  function renderDiag() {
+    const el = $('#diag-body'); if (!el) return;
+    if (!lastDiag) { el.textContent = '暂无本轮请求数据。发送一条消息后会出现在这里。'; return; }
+    const d = lastDiag;
+    const usd = (window.UiStatus && UiStatus.fmtUsdSmall) ? UiStatus.fmtUsdSmall : (x => String(x));
+    const lines = [];
+    if (d.model) lines.push('模型：' + d.model);
+    if (d.latencyMs != null) lines.push('耗时：' + d.latencyMs + ' ms');
+    if (d.prompt != null || d.completion != null) lines.push('Token：入 ' + (d.prompt || 0) + ' / 出 ' + (d.completion || 0));
+    if (d.cost != null) lines.push('成本：' + usd(d.cost));
+    if (d.hitRate != null) lines.push('命中率：' + d.hitRate + '%');
+    if (d.saved != null && d.saved > 0) lines.push('节省：' + usd(d.saved));
+    if (d.affect) lines.push('Affect：' + d.affect);
+    if (d.ok === false) lines.push('结果：失败' + (d.error ? '（' + d.error + '）' : ''));
+    el.textContent = lines.join('\n') || '暂无数据';  }
   // ---------------- 设置 ----------------
   function openSettings() {
     $('#set-system').value = settings.systemPrompt || '';
@@ -2497,9 +2710,27 @@
     $('#set-maxtokens').value = settings.maxTokens || '';
     $('#set-imgsize').value = settings.imageSize || '';
     $('#about-ver').textContent = 'v' + APP_VERSION + ' · 数据仅存储在本机';
+    if ($('#set-showtopcost')) $('#set-showtopcost').checked = settings.showTopCost !== false;
+    if ($('#set-deferhl')) $('#set-deferhl').checked = settings.deferHighlight !== false;
     renderProviderList();
     renderSearchSettings();
+    showSettingsTab(settings.settingsTab || 'providers');
+    renderDiag();
     $('#page-settings').classList.add('show');
+  }
+  function showSettingsTab(tab) {
+    const known = { providers: 1, chat: 1, advanced: 1, data: 1 };
+    const id = known[tab] ? tab : 'providers';
+    settings.settingsTab = id;
+    document.querySelectorAll('#settings-tabs .set-tab').forEach(b => {
+      const on = b.getAttribute('data-set-tab') === id;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('#page-settings .settings-pane').forEach(p => {
+      p.hidden = p.getAttribute('data-set-pane') !== id;
+    });
+    if (id === 'advanced') renderDiag();
   }
   function readGeneral() {
     settings.systemPrompt = $('#set-system').value;
@@ -2509,8 +2740,11 @@
     settings.temperature = $('#set-temp').value.trim();
     settings.maxTokens = $('#set-maxtokens').value.trim();
     settings.imageSize = $('#set-imgsize').value.trim() || '1024x1024';
+    if ($('#set-showtopcost')) settings.showTopCost = $('#set-showtopcost').checked;
+    if ($('#set-deferhl')) settings.deferHighlight = $('#set-deferhl').checked;
     readSearchSettings();
     saveSettings();
+    if (typeof renderUsagePill === 'function') renderUsagePill();
   }
   function closeSettings() {
     readGeneral();
@@ -2524,6 +2758,14 @@
   ['#set-system', '#set-temp', '#set-maxtokens', '#set-imgsize'].forEach(s => $(s).addEventListener('change', readGeneral));
   $('#set-stream').onchange = readGeneral;
   if ($('#set-autochar')) $('#set-autochar').onchange = readGeneral;
+  if ($('#set-showtopcost')) $('#set-showtopcost').onchange = readGeneral;
+  if ($('#set-deferhl')) $('#set-deferhl').onchange = readGeneral;
+  const setTabs = $('#settings-tabs');
+  if (setTabs) setTabs.addEventListener('click', e => {
+    const b = e.target.closest('.set-tab'); if (!b) return;
+    showSettingsTab(b.getAttribute('data-set-tab'));
+    saveSettings();
+  });
   function renderProviderList() {
     const box = $('#provider-list'); box.innerHTML = '';
     const sorted = settings.providers.slice().sort((a, b) => (hasKey(b) ? 1 : 0) - (hasKey(a) ? 1 : 0));
@@ -3175,6 +3417,76 @@
     if (!ok) return;
     prompts = prompts.filter(q => q.id !== id); savePrompts(); renderPromptManage(); renderPromptList(); toast('已删除');
   };
+
+  // ---------------- RP 对话级快捷面板 ----------------
+  function closeRpQuickPanel() {
+    const sh = $('#rp-quick'), mask = $('#rpq-mask');
+    if (sh) sh.classList.remove('show');
+    if (mask) mask.classList.remove('show');
+  }
+  function knowledgeConv(c) {
+    c = c || conv;
+    if (!c) return {};
+    c.plugins = c.plugins || {};
+    c.plugins.knowledge = c.plugins.knowledge || {};
+    return c.plugins.knowledge;
+  }
+  function openRpQuickPanel() {
+    if (!conv) return;
+    closeUsageMenu(); closeComposerMore(); closeModelMenu();
+    const sh = $('#rp-quick'), mask = $('#rpq-mask');
+    if (!sh) return;
+    const cacheEl = $('#rpq-cache'), affEl = $('#rpq-affect'), knEl = $('#rpq-knowledge');
+    const bud = $('#rpq-budget'), budVal = $('#rpq-budget-val');
+    const reg = Plugins.registry;
+    if (cacheEl) cacheEl.checked = reg.isActive('rpcache', settings, conv, pluginHost);
+    if (affEl) affEl.checked = reg.isActive('affect', settings, conv, pluginHost);
+    const kc = knowledgeConv(conv);
+    const g = reg.config(settings, 'knowledge');
+    const gOn = !!(g && g.injectEnabled);
+    if (knEl) knEl.checked = gOn && kc.injectEnabled === true;
+    let tokens = kc.kbTokens != null ? (kc.kbTokens | 0) : (g && g.kbTokens != null ? (g.kbTokens | 0) : 400);
+    if (tokens > 1200) tokens = 1200; if (tokens < 0) tokens = 0;
+    if (bud) bud.value = String(tokens);
+    if (budVal) budVal.textContent = String(tokens);
+    sh.classList.add('show'); if (mask) mask.classList.add('show');
+  }
+  function applyRpQuick() {
+    if (!conv) return;
+    const reg = Plugins.registry;
+    const cacheEl = $('#rpq-cache'), affEl = $('#rpq-affect'), knEl = $('#rpq-knowledge');
+    const bud = $('#rpq-budget'), budVal = $('#rpq-budget-val');
+    if (cacheEl) {
+      const on = !!cacheEl.checked;
+      if (!on || !reg.isGloballyEnabled('rpcache', settings)) reg.setForConversation(conv, 'rpcache', on);
+      else reg.setForConversation(conv, 'rpcache', true);
+    }
+    if (affEl) reg.setForConversation(conv, 'affect', !!affEl.checked);
+    const kc = knowledgeConv(conv);
+    if (knEl) {
+      kc.injectEnabled = !!knEl.checked;
+      if (kc.injectEnabled && !reg.config(settings, 'knowledge').injectEnabled) {
+        toast('已打开本对话资料库，但全局注入总闸仍关闭（可在插件里打开）');
+      }
+    }
+    if (bud) {
+      let n = +bud.value; if (!isFinite(n)) n = 400;
+      kc.kbTokens = Math.max(0, Math.min(1200, n | 0));
+      if (budVal) budVal.textContent = String(kc.kbTokens);
+    }
+    saveConv(conv, false);
+    renderConvBar();
+  }
+  const rpqBud = $('#rpq-budget');
+  if (rpqBud) rpqBud.addEventListener('input', () => {
+    const v = $('#rpq-budget-val'); if (v) v.textContent = String($('#rpq-budget').value);
+    applyRpQuick();
+  });
+  ['#rpq-cache', '#rpq-affect', '#rpq-knowledge'].forEach(sel => {
+    const el = $(sel); if (el) el.onchange = applyRpQuick;
+  });
+  if ($('#rpq-close')) $('#rpq-close').onclick = () => { applyRpQuick(); closeRpQuickPanel(); };
+  if ($('#rpq-mask')) $('#rpq-mask').onclick = () => { applyRpQuick(); closeRpQuickPanel(); };
 
   // ---------------- 服务商编辑 ----------------
   let editing = null, editModels = [], editMeta = {};
@@ -3924,6 +4236,7 @@
     if (shown('#dialog-mask')) { closeDialog(null); return true; }
     if (shown('#editor')) { closeEditor(null); return true; }
     if (shown('#pe2-mask')) { closePromptEdit(); return true; }
+    if (shown('#rp-quick')) { applyRpQuick(); closeRpQuickPanel(); return true; }
     if (shown('#action-sheet')) { closeActionSheet(); return true; }
     if (shown('#fetch-sheet')) { closeFetch(); return true; }
     if (shown('#model-menu')) { closeModelMenu(); return true; }

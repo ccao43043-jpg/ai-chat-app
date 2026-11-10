@@ -777,17 +777,51 @@
   }
 
   // ---------------- 序列化（逐字节稳定：同样的内容 → 同样的文本） ----------------
-  function staticText(st, baseSystem) {
-    const parts = [];
-    const b = canonicalize(baseSystem); if (b) parts.push(b);
-    STATIC_DEFS.forEach(d => { const c = getBlock(st, d.id).content; if (c) parts.push('[' + d.tag + ']\n' + c); });
-    const lb = constantLoreText(st); if (lb) parts.push(lb);
-    return parts.join('\n\n');
+  const _layerMemo = { static: null, memory: null, summary: null };
+  let _staticHits = 0;
+  function layerGet(name, key, build) {
+    const c = _layerMemo[name];
+    if (c && c.key === key) { if (name === 'static') _staticHits++; return c; }
+    const slot = { key: key, text: build(), hash: '' };
+    _layerMemo[name] = slot;
+    return slot;
   }
-  function memoryText(st) { const c = getBlock(st, 'memory').content; return c ? '[LONG_TERM_MEMORY]\n' + c : ''; }
+  function staticMemoKey(st, baseSystem) {
+    const b = canonicalize(baseSystem);
+    const lore = constantLoreText(st);
+    const blocks = STATIC_DEFS.map(d => {
+      const bl = getBlock(st, d.id);
+      return d.id + ':' + ((bl && bl.version) | 0) + ':' + (bl && bl.content ? bl.content.length : 0);
+    }).join('|');
+    return ((st && st.staticVersion) | 0) + '\u0001' + (st && st.baseHash || '') + '\u0001' + cyrb53(b) + '\u0001' + cyrb53(lore) + '\u0001' + blocks;
+  }
+  function staticText(st, baseSystem) {
+    return layerGet('static', staticMemoKey(st, baseSystem), function () {
+      const parts = [];
+      const b = canonicalize(baseSystem); if (b) parts.push(b);
+      STATIC_DEFS.forEach(d => { const c = getBlock(st, d.id).content; if (c) parts.push('[' + d.tag + ']\n' + c); });
+      const lb = constantLoreText(st); if (lb) parts.push(lb);
+      return parts.join('\n\n');
+    }).text;
+  }
+  function staticHash(st, baseSystem) {
+    const text = staticText(st, baseSystem);
+    const slot = _layerMemo.static;
+    if (!slot.hash) slot.hash = sha256(text);
+    return slot.hash;
+  }
+  function memoryText(st) {
+    const b = getBlock(st, 'memory');
+    const key = 'm:' + ((b && b.version) | 0) + ':' + (b && b.content ? b.content.length : 0) + ':' + ((b && b.updatedAt) || 0);
+    return layerGet('memory', key, function () { const c = b && b.content; return c ? '[LONG_TERM_MEMORY]\n' + c : ''; }).text;
+  }
   const chapterText = c => '[CHAPTER_SUMMARY ' + slabel(c.no) + ']\n' + c.content;
   /** L3：全部章节按顺序拼接；新章节只在末尾追加，前面的章节逐字不变 */
-  function summaryText(st) { return chaptersOf(st).filter(c => c.content).map(chapterText).join('\n\n'); }
+  function summaryText(st) {
+    const ch = chaptersOf(st).filter(c => c.content);
+    const key = 's:' + ch.map(c => c.no + ':' + (c.hash || '').slice(0, 12) + ':' + (c.content && c.content.length)).join('|');
+    return layerGet('summary', key, function () { return ch.map(chapterText).join('\n\n'); }).text;
+  }
   function stateText(st) { const c = getBlock(st, 'state').content; return c ? '[CURRENT_STATE]\n' + c : ''; }
   function deltaText(st) { const c = getBlock(st, 'delta').content; return c ? '[MEMORY_UPDATE]\n' + c : ''; }
   // C-2：层序按变更频率从低到高：static → summary（按章变）→ memory（每轮可能变），memory 变动不再毒化 summary 缓存
@@ -1553,7 +1587,7 @@
     const pre = historyPrefixes(p.hist), hh = pre[pre.length - 1];
     const act = activeSummary(p.st);
     return {
-      static_hash: sha256(staticText(p.st, baseSystem)), memory_hash: sha256(memoryText(p.st)), summary_hash: sha256(summaryText(p.st)),
+      static_hash: staticHash(p.st, baseSystem), memory_hash: sha256(memoryText(p.st)), summary_hash: sha256(summaryText(p.st)),
       history_hash: hh, delta_hash: sha256(deltaText(p.st)), state_hash: sha256(stateText(p.st)), input_hash: sha256(p.input ? JSON.stringify([p.input.content || '', imgSig(p.input.images)]) : ''),
       full_prefix_hash: 'c:' + cyrb53(cyrb53(p.system) + '\u0000' + hh), history_count: p.hist.length,
       chapters: chaptersOf(p.st).map(c => c.no + ':' + c.hash.slice(0, 12)),
@@ -1930,7 +1964,7 @@
     capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, hitPosterior, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
-    staticText, memoryText, summaryText, deltaText, stateText, buildSystem, buildSystemSegments, systemStablePrefix, finalUserContent, serializeHistory,
+    staticText, staticHash, memoryText, summaryText, deltaText, stateText, buildSystem, buildSystemSegments, systemStablePrefix, finalUserContent, serializeHistory, staticShortCircuitHits: () => _staticHits, resetLayerMemo: () => { _layerMemo.static = _layerMemo.memory = _layerMemo.summary = null; _staticHits = 0; },
     estimateTokens, estimateItems, itemTokens, cyrb53, historyPrefixes, calibrate, calibKey, calibOf, oldestBatch, plan, computeTrimWindow, temporaryTrimPlan, fallbackTrim, assemble, isApplicable, fingerprints, diagnose, reasons,
     TAU_LAYER, extractEntities, recentEntitySet, itemSalience, itemDecay, itemValue, splitMemoryItems, joinMemoryItems, splitSummaryItems, collectLagrangeCandidates, selectLagrangeOptional, applyLagrangeBudget,
     buildSummaryPrompt, buildConsolidatePrompt, parseSummary, resolveRPMemory, priceFor, parseWindows, isPeak, peakFactor, costOf, summaryCost, mergeDeltaCost, mergeDelta,

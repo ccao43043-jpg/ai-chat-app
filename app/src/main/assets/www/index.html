@@ -209,6 +209,13 @@
     <span class="icon-btn ghost"></span>
   </header>
   <div class="page-body">
+    <div class="settings-tabs" id="settings-tabs" role="tablist">
+      <button type="button" class="set-tab on" data-set-tab="providers" role="tab" aria-selected="true">服务商</button>
+      <button type="button" class="set-tab" data-set-tab="chat" role="tab" aria-selected="false">对话</button>
+      <button type="button" class="set-tab" data-set-tab="advanced" role="tab" aria-selected="false">高级</button>
+      <button type="button" class="set-tab" data-set-tab="data" role="tab" aria-selected="false">数据</button>
+    </div>
+    <div class="settings-pane" data-set-pane="providers">
     <div class="group-title">服务商</div>
     <div class="hint">API Key 仅保存在本机，请求由手机直接发往服务商，不经过任何中转服务器。</div>
     <div id="provider-list" class="group"></div>
@@ -231,6 +238,8 @@
       <div class="input-row" style="margin-top:14px"><input id="ss-test-q" placeholder="测试关键词，如：今天的科技新闻"><button class="chip-btn accent" id="ss-test" type="button">测试搜索</button></div>
     </div>
 
+    </div>
+    <div class="settings-pane" data-set-pane="chat" hidden>
     <div class="group-title">对话</div>
     <div class="group form">
       <label class="field"><span>新对话默认模板<small>选择后新对话使用该模板作为系统提示词（含 {{变量}} 的模板不能设为默认）</small></span>
@@ -247,16 +256,29 @@
       <label class="field"><span>生成图片尺寸</span><input id="set-imgsize" placeholder="1024x1024"></label>
     </div>
 
+    </div>
+    <div class="settings-pane" data-set-pane="advanced" hidden>
     <div class="group-title">插件</div>
     <div class="group"><button class="prov-item" id="set-balance"><span class="avatar lg" style="background:var(--grad)">💳</span><div class="pi-main"><div class="pi-name">账户余额</div><div class="pi-sub" id="set-balance-sub">查看各服务商余额与额度</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
     <div class="group"><button class="prov-item" id="set-usage"><span class="avatar lg" style="background:var(--grad)">📈</span><div class="pi-main"><div class="pi-name">用量统计</div><div class="pi-sub" id="set-usage-sub">全部对话的 Token 与估算花费</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
     <div class="group"><button class="prov-item" id="set-plugins"><span class="avatar lg" style="background:var(--grad)">🧩</span><div class="pi-main"><div class="pi-name">插件</div><div class="pi-sub" id="set-plugins-sub">管理内置插件</div></div><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button></div>
 
+    <div class="group-title">关键参数</div>
+    <div class="group form">
+      <label class="field inline"><span>顶栏显示今日成本<small>关闭后顶栏用量胶囊只显示「用量」，点开仍可看花费</small></span><input type="checkbox" id="set-showtopcost" class="switch"></label>
+      <label class="field inline"><span>代码高亮延迟<small>生成中先出纯文本，空闲再高亮，减轻主线程卡顿</small></span><input type="checkbox" id="set-deferhl" class="switch"></label>
+    </div>
+    <div class="group-title">轻量诊断</div>
+    <div class="hint">最近一次对话请求的模型、耗时、Token、成本、命中率与 Affect 档位。不改变请求路径。</div>
+    <div class="group" id="diag-panel"><div id="diag-body" class="diag-body">暂无本轮请求数据。发送一条消息后会出现在这里。</div></div>
+    </div>
+    <div class="settings-pane" data-set-pane="data" hidden>
     <div class="group-title">数据</div>
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.26.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.27.0 · 数据仅存储在本机</small></div></div>
+    </div>
   </div>
 </section>
 
@@ -615,6 +637,24 @@
   </div>
 </div>
 
+<!-- RP 对话级快捷面板 -->
+<div id="rpq-mask" class="mask"></div>
+<div id="rp-quick" class="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">对话快捷</div>
+  <div class="hint">只影响当前对话。资料库入口仍在世界页 / 插件，不占主屏。</div>
+  <div class="group form">
+    <label class="field inline"><span>缓存优化</span><input type="checkbox" id="rpq-cache" class="switch"></label>
+    <label class="field inline"><span>Affect</span><input type="checkbox" id="rpq-affect" class="switch"></label>
+    <label class="field inline"><span>资料库注入</span><input type="checkbox" id="rpq-knowledge" class="switch"></label>
+    <label class="field"><span>资料库预算 <small id="rpq-budget-val">400</small></span>
+      <input type="range" id="rpq-budget" min="0" max="1200" step="50"></label>
+  </div>
+  <div class="btn-row">
+    <button class="pill-btn primary" id="rpq-close" type="button">完成</button>
+  </div>
+</div>
+
 <!-- 操作菜单 -->
 <div id="action-mask" class="mask"></div>
 <div id="action-sheet" class="sheet">
@@ -692,6 +732,7 @@
 <script src="autochar.js"></script>
 <script src="vscroll.js"></script>
 <script src="render-diff.js"></script>
+<script src="ui-status.js"></script>
 <script src="netretry.js"></script>
 <script src="app.js"></script>
 </body>
