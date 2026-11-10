@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.25.0';
+  const APP_VERSION = '0.26.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -181,6 +181,8 @@
     imageGenProviderId: '', imageGenModel: '',
     lastProviderId: '', lastModel: '', settingsVersion: Providers.SETTINGS_VERSION,
     search: defaultSearch(), searchOn: false, removedPersonas: [],
+    recentTemplates: [], recentWorlds: [], recentPersonas: [],
+    drawerCollapsed: { recent: false, more: false },
   });
   function defaultSearch() { return { provider: 'tavily', hasKeys: {}, urls: {}, count: 5, rewrite: false }; }
   const stored = Store.get('settings.json', null);
@@ -247,6 +249,28 @@
     if (rp) usageState.prices = Object.assign({}, usageState.prices, rp);
     if (settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.priceMode)
       usageState.priceMode = settings.plugins.rpcache.priceMode;
+  })();
+  /** 把已刷新的 OpenRouter endpoints 最低价同步进用量/路由共用的 CostCore 价目 */
+  function syncUsagePricesFromEndpoints(modelId, endpoints) {
+    if (!modelId || !endpoints || !Providers.syncFloorPrices) return false;
+    const prev = usageState.prices && usageState.prices[modelId];
+    const next = Providers.syncFloorPrices(usageState.prices, modelId, endpoints);
+    const rec = next && next[modelId];
+    if (!rec) return false;
+    if (prev && prev.miss === rec.miss && prev.hit === rec.hit && prev.out === rec.out) return false;
+    usageState.prices = next;
+    saveUsageMeta();
+    return true;
+  }
+  (function syncPricesFromProviderMeta() {
+    (settings.providers || []).forEach(p => {
+      const meta = p && p.modelMeta;
+      if (!meta) return;
+      Object.keys(meta).forEach(mid => {
+        const eps = (meta[mid] && (meta[mid]._endpoints || meta[mid].endpoints)) || [];
+        if (eps.length) syncUsagePricesFromEndpoints(mid, eps);
+      });
+    });
   })();
   const saveUsageMeta = () => Store.set(USAGE_META, usageMetaOf(usageState));
   /** 整体重写（清空 / 回填时用）；平时新增一条只追加一行 */
@@ -366,6 +390,7 @@
   function updateUsageSubtitle() {
     const today = UsageStats.filterLog(usageState.log, UsageStats.rangeOf('today'));
     const t = UsageStats.sumList(today);
+    if (typeof renderUsagePill === 'function') renderUsagePill();
     const el = $('#usage-count');
     if (!el) return;
     if (!t.requests) { el.textContent = 'Token 统计'; return; }
@@ -710,7 +735,7 @@
   }
 
   // ---------------- 渲染 ----------------
-  function renderAll() { renderHeader(); renderMessages(); renderConvList(); }
+  function renderAll() { renderHeader(); renderMessages(); renderConvList(); renderDrawerChrome(); }
   function renderConvBar() {
     const bar = $('#conv-bar'); if (!bar) return;
     renderTplChip();
@@ -749,6 +774,129 @@
       bar.appendChild(ln);
     }
   }
+  function pushRecentSetting(key, id, max) {
+    if (!id) return;
+    const fn = (window.Templates && Templates.pushRecent) ? Templates.pushRecent.bind(Templates) : function (arr, x, n) {
+      return [x].concat((arr || []).filter(i => i !== x)).slice(0, n || 5);
+    };
+    settings[key] = fn(settings[key], id, max || 5);
+    saveSettings();
+  }
+  function recentOf(list, ids) {
+    return (ids || []).map(id => (list || []).find(x => x && x.id === id)).filter(Boolean);
+  }
+  function fmtUsdShort(n) {
+    if (!(n > 0) && n !== 0) return '用量';
+    if (n < 0.01) return '$' + Number(n).toPrecision(2);
+    if (n < 10) return '$' + n.toFixed(2);
+    return '$' + n.toFixed(1);
+  }
+  function todayUsageSummary() {
+    if (!window.UsageStats) return { cost: 0, total: 0, requests: 0 };
+    const range = UsageStats.rangeOf('today', Date.now());
+    const list = UsageStats.filterLog(usageState.log, range);
+    const sum = UsageStats.sumList(list);
+    const est = UsageStats.estimateCost(list, usageState.prices, usageState.priceMode, null, usageState.calib);
+    return { cost: est.cost || 0, total: sum.total || 0, requests: sum.requests || 0, priced: est.priced || 0 };
+  }
+  function firstBalanceText() {
+    let cache;
+    try { cache = balanceCache; } catch (e) { return ''; }
+    const pid = conv && conv.providerId;
+    const order = [];
+    if (pid && cache && cache[pid]) order.push(pid);
+    Object.keys(cache || {}).forEach(id => { if (order.indexOf(id) < 0) order.push(id); });
+    for (let i = 0; i < order.length; i++) {
+      const r = cache[order[i]] && cache[order[i]].result;
+      if (r && r.ok && r.primary && r.primary.text) return r.primary.text;
+    }
+    return '';
+  }
+  function renderUsagePill() {
+    const costEl = $('#usage-pill-cost'), balEl = $('#usage-pill-bal'), pill = $('#usage-pill');
+    if (!costEl || !pill) return;
+    const u = todayUsageSummary();
+    costEl.textContent = u.requests ? fmtUsdShort(u.cost) : '用量';
+    pill.title = u.requests ? ('今日约 ' + fmtUsdShort(u.cost) + ' · ' + u.requests + ' 次 · ' + u.total + ' tokens') : '今日用量与账户余额';
+    const bal = firstBalanceText();
+    if (balEl) {
+      if (bal) { balEl.textContent = bal; balEl.hidden = true; } // 窄屏只在弹出层展示余额，避免顶栏过挤
+      else { balEl.textContent = ''; balEl.hidden = true; }
+    }
+  }
+  function closeUsageMenu() {
+    const m = $('#usage-menu'); if (!m) return;
+    m.hidden = true; m.classList.remove('show');
+  }
+  function openUsageMenu() {
+    const m = $('#usage-menu'), pill = $('#usage-pill'); if (!m || !pill) return;
+    if (!m.hidden && m.classList.contains('show')) { closeUsageMenu(); return; }
+    closeComposerMore();
+    const u = todayUsageSummary();
+    const bal = firstBalanceText();
+    m.innerHTML = '<div class="um-row"><span class="um-k">今日花费</span><span class="um-v">' + esc(u.requests ? fmtUsdShort(u.cost) : '暂无') + '</span></div>' +
+      '<div class="um-row"><span class="um-k">今日 Token</span><span class="um-v">' + (u.total || 0) + ' · ' + (u.requests || 0) + ' 次</span></div>' +
+      '<div class="um-row"><span class="um-k">余额</span><span class="um-v">' + esc(bal || '未查询') + '</span></div>' +
+      '<div class="um-actions"><button type="button" id="um-open-usage">用量详情</button><button type="button" id="um-open-bal">账户余额</button></div>';
+    const r = pill.getBoundingClientRect();
+    m.style.position = 'fixed';
+    m.style.top = Math.round(r.bottom + 6) + 'px';
+    m.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
+    m.style.left = 'auto';
+    m.hidden = false; m.classList.add('show');
+    const uBtn = m.querySelector('#um-open-usage'); if (uBtn) uBtn.onclick = () => { closeUsageMenu(); openUsage(); };
+    const bBtn = m.querySelector('#um-open-bal'); if (bBtn) bBtn.onclick = () => { closeUsageMenu(); openBalance(); };
+  }
+  function renderDrawerChrome() {
+    const collapsed = settings.drawerCollapsed || {};
+    const recBtn = $('#drawer-sec-recent-btn'), rec = $('#drawer-recent');
+    const moreBtn = $('#drawer-sec-more-btn'), more = $('#drawer-more');
+    if (recBtn && rec) {
+      const open = collapsed.recent !== true;
+      recBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      rec.hidden = !open;
+      rec.innerHTML = '';
+      const worldsR = recentOf(worlds, settings.recentWorlds).slice(0, 3);
+      const personasR = recentOf(personas, settings.recentPersonas).slice(0, 3);
+      const tplsR = (window.Templates && Templates.recentOf)
+        ? Templates.recentOf(templates, settings.recentTemplates).slice(0, 3)
+        : recentOf(templates, settings.recentTemplates).slice(0, 3);
+      if (!worldsR.length && !personasR.length && !tplsR.length) {
+        const e = document.createElement('div'); e.className = 'dr-empty'; e.textContent = '使用世界、助手或模板后会出现在这里'; rec.appendChild(e);
+      } else {
+        personasR.forEach(ps => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'dr-item';
+          b.innerHTML = '<span>' + esc((ps.emoji || '') + ' ' + (ps.name || '')) + '</span><span class="dr-kind">助手</span>';
+          b.onclick = () => { closeDrawer(); startFromPersona(ps); };
+          rec.appendChild(b);
+        });
+        worldsR.forEach(wd => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'dr-item';
+          b.innerHTML = '<span>' + esc((wd.emoji || '') + ' ' + (wd.name || '')) + '</span><span class="dr-kind">世界</span>';
+          b.onclick = () => { closeDrawer(); startFromWorld(wd); };
+          rec.appendChild(b);
+        });
+        tplsR.forEach(t => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'dr-item';
+          b.innerHTML = '<span>' + esc((t.emoji || '📋') + ' ' + (t.name || '')) + '</span><span class="dr-kind">模板</span>';
+          b.onclick = () => { closeDrawer(); applyTemplate(t); };
+          rec.appendChild(b);
+        });
+      }
+    }
+    if (moreBtn && more) {
+      const open = collapsed.more !== true;
+      moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      more.hidden = !open;
+    }
+    renderTplRecentRow();
+  }
+  function toggleDrawerSec(sec) {
+    settings.drawerCollapsed = Object.assign({ recent: false, more: false }, settings.drawerCollapsed || {});
+    settings.drawerCollapsed[sec] = !settings.drawerCollapsed[sec];
+    saveSettings();
+    renderDrawerChrome();
+  }
   function renderHeader() {
     const p = getProvider(conv.providerId);
     const ok = hasKey(p);
@@ -765,6 +913,7 @@
     }
     renderConvBar();
     renderWorldDrift();
+    renderUsagePill();
   }
   function dayGroup(t) {
     const d = new Date(t); const n = new Date();
@@ -1805,7 +1954,7 @@
         const meta = p.modelMeta && p.modelMeta[rctx.model];
         const endpoints = (meta && meta._endpoints) || (meta && meta.endpoints) || [];
         const prefixEst = Math.max(0, (rctx.messages || []).reduce((s, m) => s + String(m.content || '').length, 0) * 0.5 | 0);
-        routePlan = Providers.planOpenRouterRoute(p, rctx.model, endpoints, routerState, { prefixTokens: prefixEst });
+        routePlan = Providers.planOpenRouterRoute(p, rctx.model, endpoints, routerState, { prefixTokens: prefixEst, calib: usageState.calib });
         if (routePlan && routePlan.slug) {
           rctx.opts = Object.assign({}, rctx.opts, { routeSlug: routePlan.slug, providerOrder: [routePlan.slug] });
           const prev = routerState[rctx.model] && routerState[rctx.model].current;
@@ -1829,6 +1978,7 @@
     if (mmp) { try { req = mmp.transformRequest(req, rctx); } catch (e) { console.warn('[mmcache]', e); } }
     authed(req, p.id);
     lastRequest = { convId: thisConv.id, body: req.body, url: req.url };
+    const routeStartedAt = Date.now();
     let status = 0, raw = '', gotDelta = false, maxTokDowngraded = false;
     const apply = deltas => deltas.forEach(d => {
       if (d.kind === 'usage') { bot.usage = Providers.mergeUsage(bot.usage, d.usage); return; }
@@ -1911,7 +2061,7 @@
     if (okResp && bot.usage) recordUsage({ usage: bot.usage, type: 'chat', conv: thisConv, provider: p, model: rctx.model || thisConv.model, msgId: bot.id, at: bot.createdAt || Date.now() });
     if (okResp && bot.routeSlug && bot.usage) {
       try {
-        routerState = Providers.observeRoute(routerState, rctx.model || thisConv.model, bot.routeSlug, bot.usage, Date.now());
+        routerState = Providers.observeRoute(routerState, rctx.model || thisConv.model, bot.routeSlug, bot.usage, Date.now(), { latencyMs: Date.now() - routeStartedAt });
         saveRouterState();
         bot.routeView = window.Router ? Router.panelView(Router.ensureModel(routerState, rctx.model || thisConv.model), null) : bot.routeView;
       } catch (e) { console.warn('[router.observe]', e); }
@@ -2130,9 +2280,54 @@
     $('#composer-card').classList.toggle('imgmode', imageMode);
     input.placeholder = defaultPlaceholder();
     syncComposerTags();
+    closeComposerMore();
     toast(imageMode ? '已切换到图片生成模式' : '已切换回聊天模式');
     if (imageMode && (attachments.length || docs.length)) { attachments = []; docs = []; renderAttachments(); }
   };
+  function closeComposerMore() {
+    const m = $('#composer-more-menu'), b = $('#btn-composer-more');
+    if (m) { m.hidden = true; m.classList.remove('show'); }
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function openComposerMore() {
+    const m = $('#composer-more-menu'), b = $('#btn-composer-more');
+    if (!m || !b) return;
+    if (!m.hidden && m.classList.contains('show')) { closeComposerMore(); return; }
+    closeUsageMenu();
+    const searchItem = m.querySelector('[data-cm="search"]');
+    const imgItem = m.querySelector('[data-cm="imagegen"]');
+    if (searchItem) searchItem.classList.toggle('on', !!settings.searchOn);
+    if (imgItem) imgItem.classList.toggle('on', !!imageMode);
+    const r = b.getBoundingClientRect();
+    m.style.position = 'fixed';
+    m.style.left = Math.max(8, Math.round(r.left)) + 'px';
+    m.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + 6)) + 'px';
+    m.style.top = 'auto';
+    m.hidden = false; m.classList.add('show');
+    b.setAttribute('aria-expanded', 'true');
+  }
+  const moreBtn = $('#btn-composer-more');
+  if (moreBtn) moreBtn.onclick = e => { e.stopPropagation(); openComposerMore(); };
+  const moreMenu = $('#composer-more-menu');
+  if (moreMenu) moreMenu.onclick = e => {
+    const it = e.target.closest('[data-cm]'); if (!it) return;
+    const k = it.getAttribute('data-cm');
+    closeComposerMore();
+    if (k === 'prompts') { const b = $('#btn-prompts'); if (b) b.click(); }
+    else if (k === 'search') { const b = $('#btn-search'); if (b) b.click(); }
+    else if (k === 'imagegen') { const b = $('#btn-imagegen'); if (b) b.click(); }
+  };
+  document.addEventListener('click', e => {
+    const more = $('#composer-more-menu'), um = $('#usage-menu');
+    if (more && !more.hidden && !e.target.closest('#composer-more-menu') && !e.target.closest('#btn-composer-more')) closeComposerMore();
+    if (um && !um.hidden && !e.target.closest('#usage-menu') && !e.target.closest('#usage-pill')) closeUsageMenu();
+  });
+  const usagePill = $('#usage-pill');
+  if (usagePill) usagePill.onclick = e => { e.stopPropagation(); openUsageMenu(); };
+  const recToggle = $('#drawer-sec-recent-btn');
+  if (recToggle) recToggle.onclick = () => toggleDrawerSec('recent');
+  const moreToggle = $('#drawer-sec-more-btn');
+  if (moreToggle) moreToggle.onclick = () => toggleDrawerSec('more');
   function renderSearchChip() {
     $('#btn-search').classList.toggle('active', !!settings.searchOn);
     if (!imageMode) input.placeholder = defaultPlaceholder();
@@ -2529,6 +2724,7 @@
     conv = r.conv;
     saveConv();
     renderAll();
+    if (mode !== 'skip') { pushRecentSetting('recentWorlds', wd.id, 5); renderDrawerChrome(); }
     if (mode === 'skip') toast('已跳过本版同步');
     else if (mode === 'overwrite') toast('已用「' + wd.name + '」覆盖当前对话的 L1 块');
     else {
@@ -2625,6 +2821,8 @@
     saveConv();
     closeWorldEdit(); closeWorlds(); closeDrawer();
     renderAll();
+    pushRecentSetting('recentWorlds', wd.id, 5);
+    renderDrawerChrome();
     toast('已用「' + wd.name + '」开聊（沉浸式 RP + RP 缓存）');
   }
   function syncWorldToCurrent(wd) {
@@ -2839,6 +3037,8 @@
     saveConv();
     closePersonas(); closeDrawer();
     renderAll();
+    pushRecentSetting('recentPersonas', ps.id, 5);
+    renderDrawerChrome();
     toast('已切换到「' + ps.name + '」' + (ps.loreText ? '（已导入世界书）' : ''));
   }
 
@@ -3150,7 +3350,10 @@
     if (!editMeta[modelId]) editMeta[modelId] = {};
     editMeta[modelId].price = floor;
     editMeta[modelId].priceIsFloor = true;
-    if (Array.isArray(endpoints) && endpoints.length) editMeta[modelId]._endpoints = endpoints;
+    if (Array.isArray(endpoints) && endpoints.length) {
+      editMeta[modelId]._endpoints = endpoints;
+      syncUsagePricesFromEndpoints(modelId, endpoints);
+    }
     return true;
   }
   function refreshFloorUi() {
@@ -3418,7 +3621,27 @@
   function renderTplChip() {
     const b = $('#btn-template'); if (!b || !conv) return;
     b.classList.toggle('active', !!conv.templateName);
-    $('#tpl-chip-label').textContent = conv.templateName ? (conv.templateName.length > 5 ? conv.templateName.slice(0, 5) + '…' : conv.templateName) : '模板';
+    const name = conv.templateName || '';
+    const label = name ? (name.length > 8 ? name.slice(0, 8) + '…' : name) : '模板';
+    $('#tpl-chip-label').textContent = label;
+    b.title = name ? ('当前模板：' + name) : '提示词模板（点按打开，最近使用显示在下方）';
+    renderTplRecentRow();
+  }
+  function renderTplRecentRow() {
+    const row = $('#tpl-recent-row'); if (!row) return;
+    const rec = (window.Templates && Templates.recentOf)
+      ? Templates.recentOf(templates, settings.recentTemplates).slice(0, 4)
+      : [];
+    if (!rec.length) { row.hidden = true; row.innerHTML = ''; return; }
+    row.hidden = false;
+    row.innerHTML = '';
+    rec.forEach(t => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'tpl-mini' + (conv && conv.templateId === t.id ? ' on' : '');
+      b.textContent = t.name; b.title = t.name;
+      b.onclick = e => { e.stopPropagation(); applyTemplate(t); };
+      row.appendChild(b);
+    });
   }
   function openTemplateSheet() {
     $('#tq-search').value = '';
@@ -3704,6 +3927,8 @@
     if (shown('#action-sheet')) { closeActionSheet(); return true; }
     if (shown('#fetch-sheet')) { closeFetch(); return true; }
     if (shown('#model-menu')) { closeModelMenu(); return true; }
+    if ($('#composer-more-menu') && !$('#composer-more-menu').hidden) { closeComposerMore(); return true; }
+    if ($('#usage-menu') && !$('#usage-menu').hidden) { closeUsageMenu(); return true; }
     if (shown('#sheet')) { closeSheet(); return true; }
     if (shown('#prompt-sheet')) { closePromptSheet(); return true; }
     if (shown('#tv-mask')) { closeVarDialog(null); return true; }
@@ -3737,6 +3962,7 @@
     el.textContent = n ? (ok ? ok + '/' + n + ' 已查询' : n + ' 个服务商') : '未配置 Key';
     const sub = $('#set-balance-sub');
     if (sub) sub.textContent = n ? ('已配置 ' + n + ' 个服务商' + (ok ? ' · ' + ok + ' 个有余额数据' : '')) : '填写 API Key 后可查询';
+    if (typeof renderUsagePill === 'function') renderUsagePill();
   }
   function openBalance() {
     closeDrawer();

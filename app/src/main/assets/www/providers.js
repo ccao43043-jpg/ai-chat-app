@@ -803,7 +803,18 @@
   }
 
 
-  /** 从 endpoints 数组提取路由候选 [{slug,pMiss,pHit,ok}] */
+  /** OpenRouter latency 多为秒；>20 视为已是毫秒。也可读 stats.latency。 */
+  function endpointLatencyMs(ep) {
+    if (!ep) return 0;
+    const raw = ep.latency != null ? ep.latency
+      : (ep.latency_p50 != null ? ep.latency_p50
+        : (ep.stats && (ep.stats.latency != null ? ep.stats.latency : ep.stats.latency_p50)));
+    const n = Number(raw);
+    if (!(n > 0) || !isFinite(n)) return 0;
+    return n < 20 ? Math.round(n * 1000) : Math.round(n);
+  }
+
+  /** 从 endpoints 数组提取路由候选 [{slug,pMiss,pHit,ok,latencyMs}] */
   function endpointRoutePrices(endpoints) {
     if (!Array.isArray(endpoints)) return [];
     const out = [];
@@ -819,9 +830,33 @@
         pHit: eff.cacheRead != null ? eff.cacheRead : eff.prompt,
         ok: true,
         completion: eff.completion || 0,
+        latencyMs: endpointLatencyMs(ep),
       });
     });
     return out;
+  }
+
+  /** 用已有 EWMA calib 校准路由候选有效价（与用量页同一份 calib）。 */
+  function applyCalibToRoutePrices(prices, calib, model) {
+    const Router = root.Router;
+    if (Router && Router.applyCalibScale) return Router.applyCalibScale(prices, calib, model);
+    const Cost = root.CostCore;
+    const scale = Cost && Cost.calibScale ? Cost.calibScale(calib, model) : 1;
+    if (!(scale > 0) || scale === 1) return prices || [];
+    return (prices || []).map(p => Object.assign({}, p, {
+      pMiss: p.pMiss * scale,
+      pHit: p.pHit != null ? p.pHit * scale : p.pHit,
+      calibScale: scale,
+    }));
+  }
+
+  /** 把刷新到的 endpoints 最低价同步进用量/成本估算价目。 */
+  function syncFloorPrices(usagePrices, model, endpoints, now) {
+    const Cost = root.CostCore;
+    if (!Cost || !Cost.mergeFloorPrice) return usagePrices;
+    const floor = floorPricingFromEndpoints(endpoints);
+    if (!floor) return usagePrices;
+    return Cost.mergeFloorPrice(usagePrices, model, floor, now);
   }
 
   const OR_SORTS = { balanced: 1, price: 1, throughput: 1 };
@@ -877,7 +912,8 @@
     if (!affinity || !Router) {
       return { slug: null, providerField: openRouterSortField(provider, opts), view: null, affinity: false };
     }
-    const prices = endpointRoutePrices(endpoints);
+    let prices = endpointRoutePrices(endpoints);
+    if (opts.calib) prices = applyCalibToRoutePrices(prices, opts.calib, model);
     if (!prices.length) {
       return { slug: null, providerField: openRouterSortField(provider, opts), view: null, affinity: true, reason: 'no-prices' };
     }
@@ -894,15 +930,19 @@
   }
 
   /** 用 usage 更新命中后验 */
-  function observeRoute(routerState, model, slug, usage, now) {
+  function observeRoute(routerState, model, slug, usage, now, extra) {
     const Router = root.Router;
     if (!Router || !slug || !model) return routerState || {};
     const state = routerState || {};
     const u = usage || {};
     const prompt = typeof u.prompt === 'number' ? u.prompt : 0;
     const hit = typeof u.hit === 'number' ? u.hit : 0;
-    if (prompt > 0) Router.observe(state, model, slug, { hitTokens: hit, promptTokens: prompt, ok: true }, now);
-    else Router.observe(state, model, slug, { hit: !!(hit > 0), ok: true }, now);
+    const latencyMs = extra && Number(extra.latencyMs) > 0 ? Number(extra.latencyMs) : (u.latencyMs > 0 ? Number(u.latencyMs) : 0);
+    const ev = { ok: true };
+    if (latencyMs > 0) ev.latencyMs = latencyMs;
+    if (prompt > 0) { ev.hitTokens = hit; ev.promptTokens = prompt; }
+    else ev.hit = !!(hit > 0);
+    Router.observe(state, model, slug, ev, now);
     return state;
   }
 
@@ -910,7 +950,7 @@
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
-    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens, SAFE_DEFAULT_MAX_TOKENS, MIN_DOWNGRADE_MAX_TOKENS, parseAffordTokens, downgradeMaxTokens };
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, endpointLatencyMs, applyCalibToRoutePrices, syncFloorPrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens, SAFE_DEFAULT_MAX_TOKENS, MIN_DOWNGRADE_MAX_TOKENS, parseAffordTokens, downgradeMaxTokens };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

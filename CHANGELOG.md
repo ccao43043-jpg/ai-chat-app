@@ -1,3 +1,14 @@
+**v0.26.0：P0 成本路由接入 + Composer / 侧栏**
+
+- **P0 成本与缓存**：已有 EWMA scale（α=0.3）自动接入 OpenRouter 路由与有效成本估算（用量页对账不另起炉灶）；路由在有效价+滞回基础上增加延迟维（复用 endpoints.latency，并以请求耗时 EWMA 补全）；刷新到的 endpoints 最低价同步进 CostCore 用量价目
+- **缓存门槛自适应**：在官方 Gemini 门槛（1024/2048/4096）之上，命中率偏低时上调门槛、更倾向隐式缓存；绝不低于官方门槛，不改 mmcache / 其它服务商；质量门仍 ≥0.60
+- **UI 4.1 Composer**：低频工具（提示词库、生图，以及也可从菜单开关联网）收进「+」菜单，主行保留附件 / 模板 chip / 联网；模板 chip 展示更长名称，下方增加最近使用一键套用
+- **UI 4.2 侧栏**：用量/余额前置到顶栏模型胶囊旁（点开看今日花费与余额，并进入详情）；侧栏增加可折叠「最近使用」（世界 / 助手 / 模板），「更多」也可折叠；用量/余额移出「更多」网格
+- 专项：`tests/p0-route-cost.test.js` / `tests/p0-cache-adaptive.test.js` / `tests/p0-ui-composer-drawer.test.js` + `scripts/verify/p0-ui-functional.mjs`
+- Android `0.26.0`（versionCode **80**）
+
+---
+
 **v0.25.0：世界模板版本 / 块哈希三路合并 / 同步可回滚**
 
 - **E 模板漂移**：世界模板增加 `version`、`blockHash`、`changelog`；对话写入 `worldRef`，模板升级后 100% 检出漂移

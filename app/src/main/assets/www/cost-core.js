@@ -121,6 +121,28 @@
     return scalePrice(p, c.scale);
   }
 
+  function calibScale(calib, model) {
+    const c = calib && model && calib[model];
+    return (c && c.scale > 0) ? c.scale : 1;
+  }
+
+  /**
+   * 把 OpenRouter endpoints 最低有效价同步进 CostCore/用量价目（miss/hit/out）。
+   * 不另建价目表：只更新该模型条目，保留用户手改的其它字段。
+   */
+  function mergeFloorPrice(prices, model, floor, now) {
+    if (!model || !floor) return prices || {};
+    const bag = Object.assign({}, prices || {});
+    const rec = Object.assign({}, bag[model] || {});
+    if (floor.prompt > 0) rec.miss = floor.prompt;
+    if (floor.cacheRead > 0) rec.hit = floor.cacheRead;
+    if (floor.completion > 0) rec.out = floor.completion;
+    rec.source = rec.source || 'openrouter-floor';
+    rec.syncedAt = now || Date.now();
+    bag[model] = rec;
+    return bag;
+  }
+
   /**
    * rpcache 形态：{ model, supported, timestamp, prompt_tokens, cache_hit_tokens, cache_miss_tokens,
    *   completion_tokens, cache_mode, cache_write_tokens }
@@ -226,11 +248,11 @@
   const api = {
     CNY_PER_USD, DEFAULT_PEAK, DEFAULT_PRICES, BUILTIN_PRICES, USAGE_DEFAULT_PRICES,
     EWMA_ALPHA, BIAS_ABS_THRESHOLD, BIAS_STREAK_MARK,
-    priceForRules, priceFor, priceForUsage, priceForCalibrated, scalePrice,
+    priceForRules, priceFor, priceForUsage, priceForCalibrated, scalePrice, calibScale, mergeFloorPrice,
     parseWindows, isPeak, peakFactor, factorFor,
     costOf, costOfEntry,
     emptyCalib, reconcile, calibView, distortedModels,
   };
+  root.CostCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.CostCore = api;
 })(typeof window !== 'undefined' ? window : globalThis);
