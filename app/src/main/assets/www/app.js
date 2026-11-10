@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.27.0';
+  const APP_VERSION = '0.28.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -195,12 +195,12 @@
   function loadConvIndex() {
     const idx = Store.get('convs.json', null);
     if (Array.isArray(idx)) return idx;
-    const files = Store.list().filter(n => /^conv_[^/]+\.json$/.test(n));
-    if (!files.length) return [];
-    const rebuilt = Secure.rebuildIndex(files.map(n => Store.get(n, null)));
+    const ids = (window.ConvLog && ConvLog.listConvIds(Store)) || Store.list().filter(n => ConvLog ? ConvLog.isConvJsonName(n) : /^conv_[^./]+\.json$/.test(n)).map(n => n.replace(/^conv_/, '').replace(/\.json$/, ''));
+    if (!ids.length) return [];
+    const rebuilt = Secure.rebuildIndex(ids.map(id => (window.ConvLog && ConvLog.loadMeta(Store, id)) || Store.get('conv_' + id + '.json', null)));
     Store.set('convs.json', rebuilt);
     storeIssues.push({ name: 'convs.json', restored: 'rebuild', count: rebuilt.length });
-    console.warn('[store] 已从 ' + files.length + ' 个对话文件重建 convs.json');
+    console.warn('[store] 已从 ' + ids.length + ' 个对话文件重建 convs.json');
     return rebuilt;
   }
   let conv = null;
@@ -279,10 +279,20 @@
   const saveUsageStats = () => { Store.writeJsonl(USAGE_LOG, usageState.log); saveUsageMeta(); };
   const saveSettings = () => Store.set('settings.json', settings);
   const saveIndex = () => Store.set('convs.json', convIndex);
+  function loadStoredConv(id) {
+    if (window.ConvLog) return ConvLog.load(Store, id);
+    return Store.get('conv_' + id + '.json', null);
+  }
+  function removeStoredConv(id) {
+    if (window.ConvLog) ConvLog.removeFiles(Store, id);
+    else Store.del('conv_' + id + '.json');
+    Store.del('rplog_' + id + '.json'); Store.del('rplog_' + id + '.jsonl');
+  }
   function saveConv(c, touch) {
     c = c || conv; if (!c) return;
     if (touch !== false) c.updatedAt = Date.now();
-    Store.set('conv_' + c.id + '.json', c);
+    if (window.ConvLog) ConvLog.commit(Store, c);
+    else Store.set('conv_' + c.id + '.json', c);
     const meta = { id: c.id, title: c.title, providerId: c.providerId, model: c.model, updatedAt: c.updatedAt };
     if (c.personaName) { meta.personaName = c.personaName; meta.personaEmoji = c.personaEmoji; }
     const i = convIndex.findIndex(x => x.id === c.id);
@@ -308,7 +318,7 @@
     settings = r.settings;
     let n = 0;
     convIndex.forEach(meta => {
-      const c = Store.get('conv_' + meta.id + '.json', null);
+      const c = loadStoredConv(meta.id);
       if (c && Providers.migrateConversation(c, settings.providers)) { saveConv(c, false); n++; }
     });
     saveSettings();
@@ -407,7 +417,7 @@
   function backfillUsageStats() {
     if (usageState.backfilled) { updateUsageSubtitle(); return; }
     const convs = convIndex.map(meta => {
-      const c = Store.get('conv_' + meta.id + '.json', null) || meta;
+      const c = loadStoredConv(meta.id) || meta;
       const p = getProvider(c.providerId);
       return {
         id: c.id, title: c.title, providerId: c.providerId,
@@ -740,7 +750,7 @@
     renderAll();
   }
   function openConv(id) {
-    const c = Store.get('conv_' + id + '.json', null);
+    const c = loadStoredConv(id);
     if (!c) { convIndex = convIndex.filter(x => x.id !== id); saveIndex(); renderConvList(); return false; }
     conv = Versions.normalizeConv(c); renderAll(); return true;
   }
@@ -749,19 +759,35 @@
     const ok = await dialog({ title: '删除对话？', body: '「' + (meta ? meta.title : '') + '」将被永久删除。', okText: '删除', danger: true });
     if (!ok) return;
     if (running && conv && conv.id === id) stopGen();
-    pendingSaves.delete(id); Store.del('conv_' + id + '.json'); Store.del('rplog_' + id + '.json'); Store.del('rplog_' + id + '.jsonl');
+    pendingSaves.delete(id); removeStoredConv(id);
     convIndex = convIndex.filter(x => x.id !== id); saveIndex();
     if (conv && conv.id === id) newConv(); else renderConvList();
     toast('已删除');
   }
   async function renameConv(id) {
-    const c = conv && conv.id === id ? conv : Store.get('conv_' + id + '.json', null);
+    const c = conv && conv.id === id ? conv : loadStoredConv(id);
     if (!c) return;
     const t = await dialog({ title: '重命名对话', input: true, value: c.title });
     if (t == null || !t.trim()) return;
     c.title = t.trim(); saveConv(c, false);
     if (conv && conv.id === id) conv.title = c.title;
     renderConvList();
+  }
+  function exportConvLegacy(id) {
+    if (!window.ConvLog) { toast('当前版本不支持导出'); return; }
+    const json = ConvLog.exportLegacyJSON(Store, id);
+    if (!json) { toast('没有可导出的对话'); return; }
+    const c = JSON.parse(json);
+    copyText(json);
+    toast('已复制「' + (c.title || id) + '」的旧格式 JSON');
+  }
+  function exportAllLegacy() {
+    if (!window.ConvLog) { toast('当前版本不支持导出'); return; }
+    const ids = (convIndex || []).map(m => m.id);
+    const list = ids.map(id => ConvLog.exportLegacy(Store, id)).filter(Boolean);
+    if (!list.length) { toast('没有可导出的对话'); return; }
+    copyText(JSON.stringify(list, null, 2));
+    toast('已复制 ' + list.length + ' 个对话的旧格式 JSON');
   }
 
   // ---------------- 渲染 ----------------
@@ -964,7 +990,12 @@
   function renderConvList() {
     const list = $('#conv-list');
     const q = ($('#conv-search').value || '').trim().toLowerCase();
-    const items = convIndex.filter(m => !q || (m.title || '').toLowerCase().includes(q) || (m.model || '').toLowerCase().includes(q));
+    const items = convIndex.filter(m => {
+      if (!q) return true;
+      if ((m.title || '').toLowerCase().includes(q) || (m.model || '').toLowerCase().includes(q) || (m.personaName || '').toLowerCase().includes(q)) return true;
+      if (conv && conv.id === m.id && window.ConvLog) return ConvLog.search(conv, q).hits.length > 0;
+      return false;
+    });
     if (!items.length) { list.innerHTML = '<div class="conv-empty">' + (q ? '没有匹配的对话' : '还没有对话<br>点击上方「新对话」开始') + '</div>'; return; }
     list.innerHTML = '';
     let last = '';
@@ -980,6 +1011,7 @@
         e.stopPropagation();
         actionSheet(m.title, [
           { label: '重命名', icon: ICON.rename, onClick: () => renameConv(m.id) },
+          { label: '导出为旧格式', icon: ICON.copy, onClick: () => exportConvLegacy(m.id) },
           { label: '删除', icon: ICON.trash, danger: true, onClick: () => deleteConv(m.id) },
         ]);
       };
@@ -2782,12 +2814,20 @@
   $('#btn-add-provider').onclick = () => {
     openProviderEdit(null, { id: uid(), presetId: 'custom', name: '自定义服务', type: 'openai', baseUrl: 'https://', models: [], imageModel: '', videoModel: '', embeddingModel: '', speechModel: '', transcriptionModel: '' });
   };
+  if ($('#btn-export-legacy')) $('#btn-export-legacy').onclick = () => {
+    if (!convIndex.length && !(conv && conv.id)) { toast('还没有对话'); return; }
+    actionSheet('导出为旧格式', [
+      { label: '当前对话', icon: ICON.copy, onClick: () => { if (conv && conv.id) { if (conv.messages && conv.messages.length && window.ConvLog) ConvLog.commit(Store, conv); exportConvLegacy(conv.id); } else toast('没有打开的对话'); } },
+      { label: '全部对话', icon: ICON.copy, onClick: () => { if (conv && conv.id && window.ConvLog) ConvLog.commit(Store, conv); exportAllLegacy(); } },
+    ]);
+  };
   $('#btn-clear-all').onclick = async () => {
+
     const ok = await dialog({ title: '删除全部对话？', body: '将删除所有本地对话记录（服务商与 API Key 设置会保留）。', okText: '全部删除', danger: true });
     if (!ok) return;
     if (running) stopGen();
     pendingSaves.clear();
-    convIndex.forEach(m => { Store.del('conv_' + m.id + '.json'); Store.del('rplog_' + m.id + '.json'); Store.del('rplog_' + m.id + '.jsonl'); });
+    convIndex.forEach(m => removeStoredConv(m.id));
     convIndex = []; saveIndex(); newConv(); toast('已删除全部对话');
   };
 

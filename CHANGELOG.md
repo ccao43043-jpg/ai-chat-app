@@ -1,3 +1,15 @@
+**v0.28.0：追加式会话 op log / 周期快照 / 最小同步 / golden 回归扩展**
+
+- **r5 C op log**：会话写入改为 `push(op)` 立即追加（`conv_<id>.log.jsonl`），不再每次全量序列化正文；读取为 snapshot + 尾部 replay；每 200 op 或 1MB 打快照（`fflate` 可压缩老章节）
+- **迁移与逃生口**：首次加载旧版 `conv_*.json` → snapshot(upTo=0) + 全量 op，原文件只读回退一个版本；设置「数据」页与对话菜单提供「导出为旧格式」
+- **最小同步**：消息级 LWW（lamport, dev）；章节/账本 LWW，冲突时保留双方并标 conflict；传输单元为 op 批次
+- **兼容**：不改 `worlds.json` / `knowledge_world_*.json`；对话保留 `worldRef` / `worldLog`
+- **5.4 回归**：新增 `tests/golden/oplog.jsonl`，`eval` 增加 `oplog.passRate` 门禁（=1），不放松既有质量门
+- 专项：`tests/conv-log.test.js` + `scripts/verify/r5c-functional.mjs`
+- Android `0.28.0`（versionCode **82**）
+
+---
+
 **v0.27.0：设置分段 Tab / 对话快捷 / 状态可见 / 长对话编辑 / 第 3 节打磨**
 
 - **UI 4.3**：设置页增加「服务商 / 对话 / 高级 / 数据」分段 Tab；RP 对话级快捷面板（缓存 / Affect / 资料库开关 + 预算滑杆）；模型胶囊长按直达编辑（与用量 pill 点击不冲突）
