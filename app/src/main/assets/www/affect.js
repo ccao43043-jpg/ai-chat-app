@@ -604,6 +604,10 @@
     return out;
   }
 
+  /** 轻量步进：无模型 <state> 时只走衰减 / 护栏强迫路径，不强制跑 KF（step 内已有此分支）。 */
+  function stepLight(prev, userText, now, opts) {
+    return step(prev, null, userText, now, opts);
+  }
   /** why 证据尽量定位到用户原文中的起止下标（字符） */
   function locateWhy(why, userText) {
     const u = String(userText || ''), w = String(why || '').trim();
@@ -754,7 +758,7 @@
   const Affect = { BASE_AFF, AFF_HALF_LIFE, MOOD_HALF_LIFE, AFF_HALF_LIFE_TURN, MOOD_HALF_LIFE_TURN, BASE_VEC, DELTA, NEG_MULT, DAILY_GAIN_CAP, INERTIA, HYS, TIER_TH, TIER_LABELS, MOODS, TARGET,
     MISS_WINDOW, MISS_THRESHOLD, DEMO_K, STRONG_REMIND,
     KF_Q, KF_R, KF_W, KF_W_WHY, KF_W_INCONSISTENT, CUSUM_K_UP, CUSUM_K_DN, CUSUM_H_UP, CUSUM_H_DN, CUSUM_D, CHAR_SELF_W, CHAR_SCENE_W, VEC_KF_ALPHA, VEC_KF_G_MIN, VEC_KF_G_MAX,
-    tier, tierLabel, relationOf, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, clockOf, MODES, WHY_TH, stripState, stripContent, guard, step, stepLegacy, locateWhy, latest, fixedProtocol, renderInjection, applyToMessages, dayKey, textOf,
+    tier, tierLabel, relationOf, classify, decay, parseState, renderTag, tagOf, invalidateFrom, series, sparkline, jaccard, directText, hitLevel, modeOf, clockOf, MODES, WHY_TH, stripState, stripContent, guard, step, stepLight, stepLegacy, locateWhy, latest, fixedProtocol, renderInjection, applyToMessages, dayKey, textOf,
     lexiconScore, kfUpdate, cusumUpdate, checkConsistency, useKfEstimator, estimatorOf, vecStepKf, formatKfHint, formatCusumHint, affToX, deltaFromA,
     getAffectFor, setAffectFor, setSceneMood, blendAffect,
     missingStats, shouldDemoState, rebuildStateTag, guardStats, affectSnapshots };

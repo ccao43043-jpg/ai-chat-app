@@ -581,7 +581,7 @@
         }).join('\n');
         const lastA = msgs.slice(0, idx).reverse().find(m => m.role === 'assistant');
         const scene = lastA ? String(Array.isArray(lastA.content) ? '' : (lastA.content || '')).slice(-200) : '';
-        let budget = g.kbTokens != null ? (g.kbTokens | 0) : 400;
+        let budget = (cc.kbTokens != null ? (cc.kbTokens | 0) : (g.kbTokens != null ? (g.kbTokens | 0) : 400));
         if (budget > 1200) budget = 1200;
         if (budget < 0) budget = 0;
 

@@ -1137,3 +1137,33 @@ html, body { background: var(--bg); }
 .drawer-recent .dr-kind { font-size: 10px; color: #71717a; margin-left: auto; }
 .drawer-recent .dr-empty { font-size: 12px; color: #71717a; padding: 6px 12px; }
 #btn-usage.drawer-account, #btn-balance.drawer-account { opacity: .92; }
+
+/* ===== v0.27.0 UI 4.3–4.5：设置 Tab / 快捷面板 / 状态条 / 续写 ===== */
+.settings-tabs { display: flex; gap: 4px; overflow-x: auto; margin: 8px 0 4px; -webkit-overflow-scrolling: touch; }
+.settings-tabs .set-tab {
+  flex: 1 0 auto; height: 32px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--surface-2); color: var(--fg-2); font-size: 13px; font-weight: 600;
+}
+.settings-tabs .set-tab.on { background: var(--fg); color: var(--bg); }
+.settings-pane[hidden] { display: none !important; }
+.diag-body { padding: 12px 14px; font-size: 12.5px; line-height: 1.55; color: var(--fg-2); white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+.msg-status { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.msg.assistant .msg-status { padding-left: 36px; }
+.msg-status .ms-seg { padding: 1px 7px; border-radius: 999px; background: var(--surface-2); line-height: 1.6; }
+.msg-status .ms-seg.hit { color: var(--accent); }
+.msg-status .ms-seg.saved { color: #86efac; }
+.msg-status .ms-seg.affect { color: #f9a8d4; }
+.cont-hint {
+  display: flex; align-items: center; gap: 6px; margin: 8px 0 0; padding: 8px 12px;
+  border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--fg);
+  font-size: 13px; font-weight: 650; width: 100%; text-align: left;
+}
+.msg.assistant .cont-hint { margin-left: 36px; width: calc(100% - 36px); }
+.cont-hint:active { opacity: .8; }
+.status-strip .ss-seg.kind-cost { font-variant-numeric: tabular-nums; }
+#conv-bar .ss-quick {
+  height: 28px; margin-left: 6px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: var(--surface-2); color: var(--fg-2); font-size: 12px; font-weight: 650;
+}
+#rp-quick .field input[type=range] { width: 100%; }

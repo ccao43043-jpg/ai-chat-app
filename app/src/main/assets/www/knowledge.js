@@ -328,13 +328,16 @@
     return out;
   }
 
+  // 惰性索引：同一文档签名命中时复用 buildIndex 的 prev 短路
+  let _kbIndex = null;
   function searchBM25(doc, query, opt) {
     const RC = core();
     if (!RC) return searchLegacy(doc, query, opt);
     const limit = (opt && opt.limit) || 50;
     const docs = flattenEntries(doc);
     if (!docs.length) return [];
-    const idx = RC.buildIndex(docs, KB_FIELDS, opt && opt.index);
+    const idx = RC.buildIndex(docs, KB_FIELDS, (opt && opt.index) || _kbIndex);
+    _kbIndex = idx;
     if (opt && opt.onIndex) opt.onIndex(idx);
     const Q = RC.buildQuery(query || '');
     if (opt && opt.expand) {
@@ -985,7 +988,7 @@
     search,
     searchLegacy,
     searchBM25,
-    selectForInject,
+    selectForInject, getIndexCache: () => _kbIndex, resetIndexCache: () => { _kbIndex = null; },
     renderInjection,
     spliceIntoUserContent,
     KB_WEIGHTS,

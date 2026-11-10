@@ -46,11 +46,10 @@ test('侧栏：用量/余额前置到模型胶囊旁；世界/助手/模板最�
   assert.ok(j.includes("pushRecentSetting('recentWorlds'") && j.includes("pushRecentSetting('recentPersonas'"));
 });
 
-test('资料库入口不占主屏；未引入设置分段 Tab / 状态条（本桩不做 4.3+）', () => {
+test('资料库入口不占主屏（4.3+ 设置 Tab / 快捷面板已在后续版本落地）', () => {
   const h = www('index.html');
   const j = www('app.js');
-  assert.ok(!h.includes('id="settings-tabs"'));
-  assert.ok(!j.includes('openRpQuickPanel'));
-  // 资料库仍从模型菜单进入，不作为 composer 主按钮
+  // 资料库仍从世界页 / 插件进入，不作为 composer 主按钮
   assert.ok(!h.includes('id="btn-knowledge"'));
+  assert.ok(!h.includes('home-cards') && !j.includes('renderHomeCards'));
 });
