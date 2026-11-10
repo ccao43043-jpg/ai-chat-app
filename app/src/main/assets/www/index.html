@@ -37,6 +37,7 @@
   </header>
 
   <div id="conv-bar" class="conv-bar"></div>
+  <div id="world-drift-bar" class="world-drift-bar" hidden></div>
   <main id="messages"></main>
 
   <footer class="composer">
@@ -232,7 +233,7 @@
     <div class="group">
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.24.2 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.25.0 · 数据仅存储在本机</small></div></div>
   </div>
 </section>
 
@@ -404,7 +405,7 @@
     <button class="icon-btn" id="wl-add" aria-label="新建世界"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   </header>
   <div class="page-body">
-    <div class="hint">先写好世界观与人物等 L1 设定，再「用此世界开聊」。开聊将自动使用「沉浸式 RP（全自动）」并启用 RP 缓存。同一世界可开多个对话；<b>改模板默认不回溯</b>已开对话（编辑页可选手动同步到当前对话）。与首条自动提取、角色卡、助手并存。</div>
+    <div class="hint">先写好世界观与人物等 L1 设定，再「用此世界开聊」。开聊将自动使用「沉浸式 RP（全自动）」并启用 RP 缓存。同一世界可开多个对话；改模板后已开对话会提示按块同步（本地改过的块默认保留，可一键回滚）。与首条自动提取、角色卡、助手并存。</div>
     <div id="world-grid" class="persona-grid"></div>
   </div>
 </section>
@@ -427,6 +428,7 @@
       <label class="field"><span>简介</span><input id="wd-desc" placeholder="一句话说明（可选）"></label>
       <label class="field"><span>开场白<small>开聊时作为对话里第一条助手消息；可空。</small></span><textarea id="wd-greeting" rows="3" placeholder="*雨夜，酒馆门被推开*「……又是新面孔。」"></textarea></label>
     </div>
+    <div class="hint soft" id="wd-version" style="margin:8px 0 0"></div>
     <div class="group-title">L1 设定（写入 RP 缓存块）</div>
     <div class="hint soft">与 RP 缓存「固定设定」块一致。角色卡 / 禁止 / 示例对白里可写必须、禁止与情感对白样例。</div>
     <div class="group form" id="wd-blocks"></div>
@@ -434,7 +436,8 @@
       <button class="pill-btn primary" id="wd-start" type="button" style="width:100%">用此世界开聊</button>
       <button class="ghost-btn" id="wd-sync" type="button" style="width:100%;margin-top:8px">同步到当前对话</button>
       <button class="ghost-btn" id="wd-knowledge" type="button" style="width:100%;margin-top:8px">📚 本地资料库</button>
-      <div class="hint" style="margin-top:8px">开聊自动套用「沉浸式 RP（全自动）」。同步会覆盖当前对话的对应 L1 块并启用 RP 缓存；未打开的对话不受影响。资料库按世界隔离，不写入 L1。</div>
+      <div id="wd-log" class="wd-log" hidden></div>
+      <div class="hint" style="margin-top:8px">开聊自动套用「沉浸式 RP（全自动）」。同步按块三路合并：未改动的块更新为新模板，你本地改过的块默认保留（冲突可选用模板）。未打开的对话不受影响。资料库按世界隔离，不写入 L1。</div>
     </div>
     <button class="ghost-btn danger" id="wd-delete" style="margin-top:16px">删除此世界</button>
   </div>

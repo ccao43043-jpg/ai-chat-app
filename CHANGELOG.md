@@ -1,3 +1,14 @@
+**v0.25.0：世界模板版本 / 块哈希三路合并 / 同步可回滚**
+
+- **E 模板漂移**：世界模板增加 `version`、`blockHash`、`changelog`；对话写入 `worldRef`，模板升级后 100% 检出漂移
+- **三路合并同步**：未改动的块取新模板；本地改过且模板也改的块保留本地，新模板进入 `_pending`（「模板更新可选用」）；零丢失
+- **同步 UI**：对话页提示「模板已更新到 vX…」；[仅同步未改动的块] [全部覆盖] [不同步]；任意一次同步可一键回滚（`worldLog` 反向应用）
+- 兼容旧模板/旧对话（无 version / worldRef 时仍能检出差异）；修正世界编辑页「本地资料库」按钮被误嵌进同步处理函数的问题
+- 专项：`tests/world-merge.test.js` + `scripts/verify/r5e-functional.mjs`
+- Android `0.25.0`（versionCode **79**）
+
+---
+
 **v0.24.2：默认 max_tokens 封顶 · OpenRouter 402 自动降级重试**
 
 - **默认 max_tokens 封顶 8192**：用户未设时不再直通模型超大 `maxOutput`（如 Gemini ~94 万），避免 OpenRouter 按 max_tokens 预扣额度触发 HTTP 402
