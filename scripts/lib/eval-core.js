@@ -247,6 +247,76 @@ function evalAffect(cases = readJsonl('affect.jsonl')) {
   };
 }
 
+
+// ---------- 5.4 op-log / 迁移 / 同步不变量 ----------
+function loadConvLog() { return require(path.join(WWW, 'conv-log.js')); }
+function liveIds(conv) { return (conv && conv.messages || []).map(m => m.id); }
+function evalOplog(cases) {
+  const CL = loadConvLog();
+  const list = cases || readJsonl('oplog.jsonl');
+  const per = [];
+  list.forEach(c => {
+    CL.clearSessions();
+    const fail = [];
+    try {
+      if (c.kind === 'migrate-replay' || c.kind === 'export-legacy') {
+        const st = CL.memStore();
+        st.set(CL.legacyKey(c.legacy.id), c.legacy);
+        const loaded = c.kind === 'export-legacy' ? CL.exportLegacy(st, c.legacy.id) : CL.load(st, c.legacy.id);
+        const ids = liveIds(loaded);
+        (c.expect.messageIds || []).forEach(id => { if (!ids.includes(id)) fail.push('missing ' + id); });
+        if (c.expect.title && loaded.title !== c.expect.title) fail.push('title ' + loaded.title);
+        if (c.expect.worldId && !(loaded.worldRef && loaded.worldRef.id === c.expect.worldId)) fail.push('worldRef');
+        if (c.expect.noFormat && loaded.format) fail.push('format leaked');
+      } else if (c.kind === 'replay-tail') {
+        const st = CL.memStore();
+        const id = 'c3';
+        CL.importBatch(st, id, c.ops);
+        const loaded = CL.load(st, id);
+        const ids = liveIds(loaded);
+        (c.expect.messageIds || []).forEach(mid => { if (!ids.includes(mid)) fail.push('missing ' + mid); });
+        if (c.expect.title && loaded.title !== c.expect.title) fail.push('title');
+        if (c.expect.content) Object.keys(c.expect.content).forEach(mid => {
+          const m = (loaded.messages || []).find(x => x.id === mid);
+          if (!m || m.content !== c.expect.content[mid]) fail.push('content ' + mid);
+        });
+      } else if (c.kind === 'merge-noloss' || c.kind === 'merge-lww-edit') {
+        const a = CL.memStore(); a.set(CL.DEVICE_FILE, { dev: 'a' });
+        const b = CL.memStore(); b.set(CL.DEVICE_FILE, { dev: 'b' });
+        const id = c.id || 'cx';
+        if (c.shared) { CL.importBatch(a, id, c.shared); CL.importBatch(b, id, c.shared); }
+        if (c.a) CL.importBatch(a, id, c.a);
+        if (c.b) CL.importBatch(b, id, c.b);
+        const m = CL.mergeStores(a, b, id);
+        const idsA = liveIds(m.a).slice().sort();
+        const idsB = liveIds(m.b).slice().sort();
+        if (idsA.join() !== idsB.join()) fail.push('ends differ');
+        (c.expect.messageIds || []).forEach(mid => { if (!idsA.includes(mid)) fail.push('missing ' + mid); });
+        if (c.expect.content) Object.keys(c.expect.content).forEach(mid => {
+          const msg = (m.a.messages || []).find(x => x.id === mid);
+          if (!msg || msg.content !== c.expect.content[mid]) fail.push('content ' + mid);
+        });
+      } else if (c.kind === 'compact-replay') {
+        const st = CL.memStore();
+        const id = 'c-comp';
+        const n = c.n || 201;
+        const messages = Array.from({ length: n }, (_, i) => ({ id: 'm' + i, role: i % 2 ? 'assistant' : 'user', content: 't' + i }));
+        CL.commit(st, { id, title: 'compact', providerId: 'p', model: 'm', messages });
+        CL.clearSessions();
+        const loaded = CL.load(st, id);
+        if ((loaded.messages || []).length !== n) fail.push('count ' + (loaded.messages || []).length);
+        const log = st.readJsonl(CL.logKey(id)) || [];
+        const snap = st.get(CL.snapshotKey(id));
+        if (!snap || !(snap.upToLamport > 0)) fail.push('no snapshot');
+        if (log.length >= n) fail.push('log not compacted');
+      } else fail.push('unknown kind ' + c.kind);
+    } catch (e) { fail.push(String(e && e.message || e)); }
+    per.push({ id: c.id, kind: c.kind, pass: fail.length === 0, fail: fail });
+  });
+  const passed = per.filter(x => x.pass).length;
+  return { n: per.length, passed, passRate: r4(per.length ? passed / per.length : 1), per, note: 'op-log 迁移/replay/导出旧格式/合并无丢失；质量门 passRate 不得低于 baseline' };
+}
+
 function runAll() {
   return {
     memory: evalMemory(),
@@ -256,6 +326,7 @@ function runAll() {
     routing: evalRouting(),
     knowledge: evalKnowledge(),
     affect: evalAffect(),
+    oplog: evalOplog(),
   };
 }
 function strip(r) { const o = {}; for (const k in r) { if (r[k] && typeof r[k] === 'object') { const { per, ...rest } = r[k]; o[k] = rest; } } return o; }
@@ -281,6 +352,9 @@ function compare(cur, base) {
     ge('affect.directionAgree', cur.affect.directionAgree, base.affect.directionAgree);
     le('affect.oscillationRate', cur.affect.oscillationRate, base.affect.oscillationRate);
   }
+  if (base.oplog) {
+    ge('oplog.passRate', cur.oplog.passRate, base.oplog.passRate);
+  }
   return f;
 }
-module.exports = { readJsonl, rankMetrics, evalMemory, evalSummary, evalCost, evalRouting, evalKnowledge, evalAffect, runAll, strip, loadBaseline, compare, EPS };
+module.exports = { readJsonl, rankMetrics, evalMemory, evalSummary, evalCost, evalRouting, evalKnowledge, evalAffect, evalOplog, runAll, strip, loadBaseline, compare, EPS };

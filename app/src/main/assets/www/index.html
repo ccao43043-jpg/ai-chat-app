@@ -274,10 +274,12 @@
     </div>
     <div class="settings-pane" data-set-pane="data" hidden>
     <div class="group-title">数据</div>
+    <div class="hint">会话已改为追加式日志 + 周期快照。若需要旧版整份 JSON，可在此或对话菜单「导出为旧格式」。</div>
     <div class="group">
+      <button class="row-btn" id="btn-export-legacy">导出对话为旧格式</button>
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.27.0 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.28.0 · 数据仅存储在本机</small></div></div>
     </div>
   </div>
 </section>
@@ -734,6 +736,7 @@
 <script src="render-diff.js"></script>
 <script src="ui-status.js"></script>
 <script src="netretry.js"></script>
+<script src="conv-log.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

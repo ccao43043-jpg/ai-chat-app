@@ -44,5 +44,10 @@
     "n": 40,
     "note": "合成成对基线，待人工 MAE；directionAgree=KF â 变化方向与标注一致率"
   },
-  "gate": "记忆/知识 pAt5/mrr/ndcgAt5、summary.factCoverage、routing.passRate、affect.directionAgree 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens、routing.avgSwitches/totalEffCost、affect.oscillationRate 不得高于本值；affect 为合成基线待人工 MAE；routing.totalEffCost 于 v0.24 D3 重标定"
+  "gate": "记忆/知识 pAt5/mrr/ndcgAt5、summary.factCoverage、routing.passRate、affect.directionAgree 不得低于本值；summary.hallucinationRate、cost.totalPromptTokens、routing.avgSwitches/totalEffCost、affect.oscillationRate 不得高于本值；affect 为合成基线待人工 MAE；routing.totalEffCost 于 v0.24 D3 重标定；oplog.passRate 不得低于本值（v0.28 新增，不放松既有门禁）",
+  "oplog": {
+    "n": 6,
+    "passRate": 1,
+    "note": "5.4 op-log 迁移/replay/导出/合并不变量；passRate 必须为 1"
+  }
 }
