@@ -166,6 +166,20 @@
     if (/flash[-_]?lite|lite/i.test(m)) return 2048;
     return 1024;
   }
+  /**
+   * 自适应门槛：以官方 minCacheTokens 为下限（绝不放宽到门槛以下、不破坏其它服务商）。
+   * 有足够命中样本且显式命中率偏低时上调门槛（更倾向隐式缓存，避免写入成本收不回）。
+   * 质量门（摘要 ≥0.60）不在此函数，保持不变。
+   */
+  function adaptiveMinTokens(model, stats) {
+    const base = minCacheTokens(model);
+    const n = stats && (stats.hitSamples | 0);
+    const h = stats && stats.hitRate;
+    if (!(n >= 4) || h == null || !isFinite(h)) return base;
+    if (h < 0.40) return Math.round(base * 1.5);
+    if (h < 0.55) return Math.round(base * 1.25);
+    return base;
+  }
   function isFlashLite(model) { return /flash[-_]?lite|lite/i.test(String(model || '')) && !/pro/i.test(String(model || '')); }
   /** Flash-Lite 隐式命中在短前缀下不稳的诊断文案（不编造命中率；以真实 cached_tokens 为准） */
   function flashLitePrefixNote(model, est) {
@@ -182,7 +196,7 @@
     const mode = cfg.mode;
     if (mode === 'off') return { explicit: false, reason: '已关闭显式断点，仅隐式缓存' };
     if (mode === 'prefix' || mode === 'history') return { explicit: true, reason: '手动模式：' + mode };
-    const need = minCacheTokens(info.model), have = estTokens(info.staticText);
+    const need = adaptiveMinTokens(info.model, info.cacheStats), have = estTokens(info.staticText);
     if (have < need) {
       const note = flashLitePrefixNote(info.model, have);
       return { explicit: false, reason: '固定前缀约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存（不填充凑门槛）' + (note ? '；' + note : '') };
@@ -193,7 +207,7 @@
   }
   /** v1.3：auto + Hybrid 时断点放到「本轮 user 之前」（等价 history），门槛按「固定前缀+历史」估算，仍要求固定层稳定 */
   function decideHistory(cfg, info) {
-    const need = minCacheTokens(info.model), have = estTokens(info.cacheText);
+    const need = adaptiveMinTokens(info.model, info.cacheStats), have = estTokens(info.cacheText);
     if (have < need) {
       const note = flashLitePrefixNote(info.model, have);
       return { explicit: false, reason: '固定前缀+历史约 ' + have + ' Token < 门槛 ' + need + '，走隐式缓存' + (note ? '；' + note : '') };
@@ -202,7 +216,7 @@
     if (info.prevStaticHash !== info.static_hash) return { explicit: false, reason: '固定层刚发生变化，本轮不写显式缓存' };
     return { explicit: true, history: true, reason: '固定前缀+历史约 ' + have + ' Token 且固定层稳定，断点放在本轮 user 之前（历史进缓存）' };
   }
-  const CachePolicyEngine = { decide, decideHistory, minCacheTokens, estTokens, isFlashLite, flashLitePrefixNote, DIAG_LOW, DIAG_GOOD };
+  const CachePolicyEngine = { decide, decideHistory, minCacheTokens, adaptiveMinTokens, estTokens, isFlashLite, flashLitePrefixNote, DIAG_LOW, DIAG_GOOD };
 
   // ───────────────────────── ProviderAdapters：OpenRouter ─────────────────────────
   /** 由对话 id 生成稳定 session_id（≤256 字符，UUID 形状）；同一对话恒定，换对话即换 */
@@ -581,8 +595,8 @@
     let lastU = -1; for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { lastU = i; break; }
     const autoHist = cfg.mode === 'auto' && hybrid && cfg.autoTarget !== 'prefix' && lastU > k;
     const decision = autoHist
-      ? decideHistory(cfg, { model: body.model, cacheText: msgs.slice(0, lastU).map(m => partsText(m.content)).join('\n'), static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash })
-      : decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash });
+      ? decideHistory(cfg, { model: body.model, cacheText: msgs.slice(0, lastU).map(m => partsText(m.content)).join('\n'), static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash, cacheStats: extra.cacheStats })
+      : decide(cfg, { model: body.model, staticText: layers.dynamicText ? layers.staticText : prefix, static_hash: layers.static_hash, prevStaticHash: extra.prevStaticHash, cacheStats: extra.cacheStats });
     // 3. 断点：仅 openrouter 适配器打 cache_control；OpenRouter 对 Gemini 只用最后一个断点，先清掉其他插件加的断点
     if (full && cfg.mode !== 'off' && msgs.length) {
       msgs.forEach(stripCC);
@@ -808,7 +822,9 @@
       const now = Date.now();
       const idleSec = s.lastT ? (now - s.lastT) / 1000 : null;
       const ttlEff = TTL_EFF_DEFAULT; // A1 未实现：冷窗口 / 应命中 用审查默认 240s
-      const r = applyToRequest(req, o, { adapter, sessionId: full && ctx.conv ? sessionIdFor(ctx.conv.id) : '', rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined), idleSec, ttlEff, segments: ctx.meta && ctx.meta.gcacheRpcache && ctx.meta.rpSegments ? ctx.meta.rpSegments : null });
+      const rr = rollingRate(s.roll);
+      const cacheStats = { hitRate: rr != null ? rr / 100 : null, hitSamples: (s.roll || []).filter(x => x && x.known).length };
+      const r = applyToRequest(req, o, { adapter, sessionId: full && ctx.conv ? sessionIdFor(ctx.conv.id) : '', rp: !!(ctx.meta && ctx.meta.gcacheRp), prevStaticHash: s.static_hash, hybrid: hyOn ? hd.hybrid : null, ids: (ctx.messages || []).map(m => m && m._src ? m._src.id : undefined), idleSec, ttlEff, segments: ctx.meta && ctx.meta.gcacheRpcache && ctx.meta.rpSegments ? ctx.meta.rpSegments : null, cacheStats });
       s.hybridInfo = r.hybrid ? r.hybrid : { off: o.hybrid === false ? 'setting' : 'rpcache' };
       s.requests++;
       if (s.lastT) s.gaps = (s.gaps || []).concat([Math.round((now - s.lastT) / 100) / 10]).slice(-50);

@@ -10,10 +10,13 @@
     minObs: 5,
     defaultH: 0.5,
     dwell: 8,
-    switchMargin: 0.97, // best 必须比 current 便宜到 pe < cur*0.97 才考虑切
+    switchMargin: 0.97, // best 必须比 current 便宜到 score < cur*0.97 才考虑切
     zPessimistic: 1.28, // ~10% 悲观分位
     failBreak: 3,       // 连续失败熔断
     enabled: true,
+    latencyWeight: 0.15, // 延迟维：相对 ref 的偏离按此权重乘进有效分
+    latencyRefMs: 2000,
+    latEwmaAlpha: 0.3,
   };
 
   function settingsOf(cfg) {
@@ -43,8 +46,49 @@
     return hh * hit + (1 - hh) * pm;
   }
 
+  function scaleAmount(v, scale) {
+    const sl = Number(scale);
+    if (!(sl > 0) || sl === 1) return v;
+    const n = Number(v);
+    return isFinite(n) ? n * sl : v;
+  }
+
+  /** 把已有 EWMA 对账 scale 接到路由候选价上（用量页同一份 calib，不再另建对账）。 */
+  function applyCalibScale(list, calib, model) {
+    const c = calib && model && calib[model];
+    const scale = c && c.scale > 0 ? c.scale : 1;
+    return (Array.isArray(list) ? list : []).map(x => {
+      if (!x) return x;
+      const sl = (x.scale > 0 ? x.scale : scale);
+      if (!(sl > 0) || sl === 1) return Object.assign({}, x, { calibScale: sl > 0 ? sl : 1 });
+      return Object.assign({}, x, {
+        pMiss: scaleAmount(x.pMiss, sl),
+        pHit: x.pHit != null ? scaleAmount(x.pHit, sl) : x.pHit,
+        calibScale: sl,
+      });
+    });
+  }
+
+  function latencyOf(priceItem, stats) {
+    const fromPrice = priceItem && Number(priceItem.latencyMs);
+    if (fromPrice > 0) return fromPrice;
+    const ew = stats && Number(stats.latEwma);
+    return ew > 0 ? ew : 0;
+  }
+
+  /** 有效分 = 校准后有效价 × 延迟因子。无延迟观测时退回 pe，旧单测行为不变。 */
+  function effectiveScore(pe, latencyMs, opts) {
+    if (!isFinite(pe)) return pe;
+    const cfg = settingsOf(opts);
+    const lat = Number(latencyMs);
+    if (!(lat > 0) || !(cfg.latencyWeight > 0)) return pe;
+    const ref = cfg.latencyRefMs > 0 ? cfg.latencyRefMs : DEFAULTS.latencyRefMs;
+    const factor = 1 + cfg.latencyWeight * (lat / ref - 1);
+    return pe * Math.max(0.7, Math.min(1.8, factor));
+  }
+
   function emptyUpstream() {
-    return { a: DEFAULTS.priorA, b: DEFAULTS.priorB, obs: 0, lastAt: 0, fails: 0 };
+    return { a: DEFAULTS.priorA, b: DEFAULTS.priorB, obs: 0, lastAt: 0, fails: 0, latEwma: 0, latN: 0 };
   }
 
   /** 确保 router 状态树：{ [model]: { current, lastSwitchAt, upstreams: { [slug]: stats } } } */
@@ -93,6 +137,12 @@
     u.lastAt = at;
     if (obs && obs.ok === false) u.fails = (u.fails | 0) + 1;
     else if (obs && obs.ok !== false) u.fails = 0;
+    if (obs && Number(obs.latencyMs) > 0) {
+      const alpha = (opts && opts.latEwmaAlpha != null) ? opts.latEwmaAlpha : DEFAULTS.latEwmaAlpha;
+      const lat = Number(obs.latencyMs);
+      u.latEwma = (u.latN > 0 && u.latEwma > 0) ? (u.latEwma * (1 - alpha) + lat * alpha) : lat;
+      u.latN = (u.latN | 0) + 1;
+    }
     ms.current = slug;
     return state;
   }
@@ -132,31 +182,39 @@
       if ((st.obs | 0) >= cfg.minObs) h = hitQuantile(st.a, st.b, cfg.zPessimistic);
       else h = cfg.defaultH; // 冷启动默认 h
       const pe = effectivePrice(x.pMiss, x.pHit != null ? x.pHit : x.pMiss, h);
+      const lat = latencyOf(x, st);
+      const score = effectiveScore(pe, lat, cfg);
       scored.push({
         slug: x.slug,
         pe,
+        score,
+        latencyMs: lat,
         h,
         obs: st.obs | 0,
         pMiss: Number(x.pMiss),
         pHit: x.pHit != null ? Number(x.pHit) : Number(x.pMiss),
         cold: (st.obs | 0) < cfg.minObs,
+        calibScale: x.calibScale,
       });
     }
     if (!scored.length) return current || null;
     // 参与比价：至少 minObs；若全员冷启动则维持现状（或返回第一个）
     const ripe = scored.filter(x => !x.cold);
     if (!ripe.length) return current || scored[0].slug;
-    ripe.sort((a, b) => a.pe - b.pe || a.slug.localeCompare(b.slug));
+    ripe.sort((a, b) => a.score - b.score || a.pe - b.pe || a.slug.localeCompare(b.slug));
     const best = ripe[0];
     if (!current) return best.slug;
     const cur = ripe.find(x => x.slug === current) || scored.find(x => x.slug === current);
     if (!cur) return best.slug;
     if (best.slug === current) return current;
-    // 滞回：更便宜且省下的钱 × 驻留轮数 > 切换成本
-    if (!(best.pe < cur.pe * cfg.switchMargin)) return current;
+    // 滞回：更优（有效分含延迟）且省下的钱 × 驻留轮数 > 切换成本
+    if (!(best.score < cur.score * cfg.switchMargin)) return current;
     const savedPerTurn = Math.max(0, prefixTokens | 0) * (cur.pe - best.pe) / 1e6;
     const cost = switchCost(cur.pe, best.pe, prefixTokens, cur.pMiss, cur.pHit);
     if (savedPerTurn * cfg.dwell > cost) return best.slug;
+    // 表价几乎持平（差 ≤ 1-switchMargin）时，延迟维有效分优势允许切换
+    const peClose = Math.abs(cur.pe - best.pe) <= Math.max(1e-9, cur.pe * (1 - cfg.switchMargin));
+    if (peClose) return best.slug;
     return current;
   }
 
@@ -187,12 +245,17 @@
     } else if (st) {
       h = (st.obs | 0) >= DEFAULTS.minObs ? hitQuantile(st.a, st.b) : DEFAULTS.defaultH;
     }
+    const lat = st && st.latEwma > 0 ? st.latEwma : (priceMap && slug && priceMap[slug] && priceMap[slug].latencyMs) || 0;
+    const score = pe != null ? effectiveScore(pe, lat, null) : null;
     return {
       upstream: slug,
       effectivePrice: pe,
+      effectiveScore: score,
+      latencyMs: lat || null,
       hitRate: h,
       lastSwitchAt: ms.lastSwitchAt || 0,
       obs: st ? (st.obs | 0) : 0,
+      calibScale: priceMap && slug && priceMap[slug] && priceMap[slug].calibScale,
     };
   }
 
@@ -244,7 +307,8 @@
   }
 
   const api = {
-    DEFAULTS, settingsOf, hitQuantile, effectivePrice, emptyUpstream, ensureModel, ensureUpstream,
+    DEFAULTS, settingsOf, hitQuantile, effectivePrice, effectiveScore, applyCalibScale, scaleAmount, latencyOf,
+    emptyUpstream, ensureModel, ensureUpstream,
     observe, evidenceWeight, markFail, switchCost, chooseUpstream, buildProviderField, panelView, recordSwitch, replay,
   };
   root.Router = api;

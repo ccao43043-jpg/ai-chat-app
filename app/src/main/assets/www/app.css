@@ -1067,3 +1067,73 @@ html, body { background: var(--bg); }
 .wd-log .wd-log-title { font-size: 12px; color: var(--fg-2, var(--fg-3)); margin-bottom: 6px; }
 .wd-log .wd-log-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .wd-log .wd-log-item button { flex: 0 0 auto; font-size: 12px; }
+
+/* ===== v0.26.0 P0 UI：Composer + 侧栏 / 顶栏用量 ===== */
+.topbar.main-top .model-pill { max-width: 120px; }
+.topbar.main-top .model-pill .mp-model { max-width: 96px; }
+.usage-pill {
+  flex: 0 0 auto; height: 28px; padding: 0 10px; border-radius: 999px; border: 0;
+  background: #27272a; color: #a1a1aa; font-size: 11px; font-weight: 550;
+  display: inline-flex; align-items: center; gap: 6px; max-width: 108px;
+  white-space: nowrap;
+}
+.usage-pill:active { background: #3f3f46; color: #f4f4f5; }
+.usage-pill .up-cost { overflow: hidden; text-overflow: ellipsis; }
+.usage-pill .up-bal { color: #c4b5fd; font-variant-numeric: tabular-nums; }
+.usage-pill .up-bal[hidden] { display: none !important; }
+.usage-menu { min-width: 220px; max-width: 280px; padding: 10px 12px; }
+.usage-menu .um-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 6px 0; }
+.usage-menu .um-k { color: #a1a1aa; }
+.usage-menu .um-v { color: #f4f4f5; font-variant-numeric: tabular-nums; }
+.usage-menu .um-actions { display: flex; gap: 8px; margin-top: 8px; }
+.usage-menu .um-actions button { flex: 1; height: 32px; border-radius: 8px; border: 0; background: #27272a; color: #e4e4e7; font-size: 13px; }
+
+.composer-tools .tool-overflow { display: none !important; }
+.composer-tools .tool-overflow.active,
+.composer-tools .tool-overflow.is-visible { display: inline-flex !important; }
+.composer-tools .tpl-caret { width: 10px; height: 10px; margin-left: 1px; opacity: .7; }
+.tpl-chip { max-width: 42vw; }
+.tpl-chip #tpl-chip-label { max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-recent-row {
+  display: flex; align-items: center; gap: 6px; padding: 0 2px 8px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.tpl-recent-row[hidden] { display: none !important; }
+.tpl-recent-row::-webkit-scrollbar { display: none; }
+.tpl-recent-row .tpl-mini {
+  flex: 0 0 auto; height: 24px; padding: 0 9px; border-radius: 999px; border: 0;
+  background: #18181b; color: #a1a1aa; font-size: 11px; max-width: 9em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tpl-recent-row .tpl-mini.on { background: rgba(124, 58, 237, .22); color: #c4b5fd; }
+.composer-more-menu { min-width: 168px; padding: 6px; }
+.composer-more-menu .cm-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 12px; border: 0; border-radius: 8px; background: transparent;
+  color: #e4e4e7; font-size: 13.5px; text-align: left;
+}
+.composer-more-menu .cm-item:active { background: #27272a; }
+.composer-more-menu .cm-item svg { width: 16px; height: 16px; color: #a1a1aa; }
+.composer-more-menu .cm-item.on { color: #c4b5fd; }
+
+.drawer-sec-toggle {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  background: transparent; border: 0; text-align: left; cursor: pointer;
+}
+.drawer-sec-toggle::after {
+  content: ''; width: 8px; height: 8px; border-right: 1.5px solid #71717a; border-bottom: 1.5px solid #71717a;
+  transform: rotate(45deg); margin-right: 6px; transition: transform .15s;
+}
+.drawer-sec-toggle[aria-expanded="false"]::after { transform: rotate(-45deg); margin-top: 4px; }
+.drawer-recent { padding: 0 0 6px; }
+.drawer-recent[hidden],
+.drawer-grid[hidden] { display: none !important; }
+.drawer-recent .dr-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 12px; border: 0; border-radius: 8px; background: transparent;
+  color: #e4e4e7; font-size: 13px; text-align: left;
+}
+.drawer-recent .dr-item:active { background: #27272a; }
+.drawer-recent .dr-kind { font-size: 10px; color: #71717a; margin-left: auto; }
+.drawer-recent .dr-empty { font-size: 12px; color: #71717a; padding: 6px 12px; }
+#btn-usage.drawer-account, #btn-balance.drawer-account { opacity: .92; }

@@ -48,6 +48,13 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.26.0：P0 成本路由接入 + Composer / 侧栏**
+
+- EWMA scale 接入路由与有效成本；路由增加延迟维；OpenRouter 价目同步进 CostCore；缓存门槛自适应（不低于官方值，质量门 ≥0.60）
+- Composer：「+」菜单收纳低频工具，模板 chip 优化并展示最近使用
+- 侧栏：用量/余额前置到模型胶囊旁；世界/助手/模板最近使用，支持折叠
+- Android `0.26.0`（versionCode 80）/ 桌面 / npm `0.26.0`
+
 **v0.25.0：世界模板版本 / 块哈希三路合并 / 同步可回滚**
 
 - 模板 `version` + `blockHash`；对话 `worldRef` 检出漂移；按块三路合并（本地改动保留，冲突进 `_pending`）
