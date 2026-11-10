@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.25.0：世界模板版本 / 块哈希三路合并 / 同步可回滚**
+
+- 模板 `version` + `blockHash`；对话 `worldRef` 检出漂移；按块三路合并（本地改动保留，冲突进 `_pending`）
+- 同步可一键回滚（`worldLog`）；[仅同步未改动的块] [全部覆盖] [不同步]
+- Android `0.25.0`（versionCode 79）/ 桌面 / npm `0.25.0`
+
 **v0.24.2：默认 max_tokens 封顶 · OpenRouter 402 自动降级重试**
 
 - 默认 max_tokens 封顶 8192（勿直通超大 maxOutput）；402 `can only afford` 降级重试一次

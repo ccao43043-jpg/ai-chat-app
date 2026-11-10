@@ -44,6 +44,45 @@
     },
   };
 
+  /** 与 rpcache.canonicalize 对齐，保证块 hash 与写入 RP 缓存后的内容一致 */
+  function canonBlock(text) {
+    let s = String(text == null ? '' : text);
+    s = s.replace(/^\uFEFF/, '');
+    s = s.replace(/\r\n?/g, '\n');
+    s = s.replace(/[ \t\u00A0]+$/gm, '');
+    s = s.replace(/\n{5,}/g, '\n\n\n');
+    s = s.replace(/^\n+/, '').replace(/\n+$/, '');
+    return s;
+  }
+
+  function hashBlock(text) {
+    const s = canonBlock(text);
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 16777619);
+      h2 = Math.imul(h2 ^ c, 0x01000193);
+    }
+    return ('00000000' + (h1 >>> 0).toString(16)).slice(-8)
+      + ('00000000' + (h2 >>> 0).toString(16)).slice(-8);
+  }
+
+  function blockHashMap(blocks) {
+    const src = blocks && typeof blocks === 'object' ? blocks : {};
+    const out = {};
+    BLOCK_IDS.forEach(id => { out[id] = hashBlock(src[id] || ''); });
+    return out;
+  }
+
+  function normalizeChangelog(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(e => ({
+      version: (e && e.version) | 0,
+      at: (e && e.at) || 0,
+      note: String((e && e.note) || ''),
+    })).filter(e => e.version > 0);
+  }
+
   function emptyBlocks() {
     const o = {};
     BLOCK_IDS.forEach(id => { o[id] = ''; });
@@ -53,19 +92,30 @@
   function normalizeBlocks(raw) {
     const src = raw && typeof raw === 'object' ? raw : {};
     const out = emptyBlocks();
-    BLOCK_IDS.forEach(id => { out[id] = String(src[id] != null ? src[id] : '').replace(/\r\n/g, '\n'); });
+    BLOCK_IDS.forEach(id => { out[id] = canonBlock(src[id] != null ? src[id] : ''); });
     return out;
   }
 
   function normalizeWorld(w) {
     w = w || {};
+    const blocks = normalizeBlocks(w.blocks);
+    const blockHash = blockHashMap(blocks);
+    let version = w.version | 0;
+    if (version < 1) version = 1;
+    let changelog = normalizeChangelog(w.changelog);
+    if (!changelog.length) {
+      changelog = [{ version, at: w.updatedAt || w.createdAt || 0, note: '创建' }];
+    }
     return {
       id: w.id || 'w-' + uid(),
       emoji: String(w.emoji || '🌍').trim().slice(0, 4) || '🌍',
       name: String(w.name || '').trim() || '未命名世界',
       desc: String(w.desc || '').trim(),
       greeting: String(w.greeting || '').replace(/\r\n/g, '\n').trim(),
-      blocks: normalizeBlocks(w.blocks),
+      blocks,
+      blockHash,
+      version,
+      changelog,
       updatedAt: w.updatedAt || 0,
       createdAt: w.createdAt || 0,
     };
@@ -73,15 +123,35 @@
 
   function defaultWorlds() { return []; }
 
-  function upsert(list, item) {
+  function blocksChanged(a, b) {
+    const ha = (a && a.blockHash) || blockHashMap(a && a.blocks);
+    const hb = (b && b.blockHash) || blockHashMap(b && b.blocks);
+    return BLOCK_IDS.some(id => ha[id] !== hb[id]);
+  }
+
+  function upsert(list, item, note) {
     const n = normalizeWorld(item);
     const now = Date.now();
     if (!n.createdAt) n.createdAt = now;
     n.updatedAt = now;
     const i = (list || []).findIndex(x => x.id === n.id);
     const out = (list || []).slice();
-    if (i >= 0) out[i] = Object.assign({}, list[i], n, { createdAt: list[i].createdAt || n.createdAt });
-    else out.push(n);
+    if (i >= 0) {
+      const prev = normalizeWorld(list[i]);
+      if (blocksChanged(prev, n)) {
+        n.version = (prev.version || 1) + 1;
+        n.changelog = (prev.changelog || []).concat([{ version: n.version, at: now, note: note || '更新设定' }]);
+      } else {
+        n.version = prev.version || 1;
+        n.changelog = prev.changelog && prev.changelog.length ? prev.changelog : n.changelog;
+        n.blockHash = prev.blockHash;
+      }
+      out[i] = Object.assign({}, list[i], n, { createdAt: list[i].createdAt || n.createdAt });
+    } else {
+      n.version = 1;
+      n.changelog = [{ version: 1, at: now, note: note || '创建' }];
+      out.push(n);
+    }
     return out;
   }
 
@@ -90,6 +160,7 @@
     if (!src) return list || [];
     const copy = normalizeWorld(Object.assign({}, JSON.parse(JSON.stringify(src)), {
       id: 'w-' + uid(), name: src.name + '（副本）', createdAt: 0, updatedAt: 0,
+      version: 1, changelog: [],
     }));
     const i = list.indexOf(src);
     const out = list.slice();
@@ -173,10 +244,372 @@
     return {
       conv: Object.assign({}, conv, {
         worldId: w.id, worldName: w.name, worldEmoji: w.emoji,
+        worldRef: makeWorldRef(w, t),
+        worldPending: {},
         plugins,
       }),
       changed: applied.changed,
     };
+  }
+
+
+  function makeWorldRef(world, at) {
+    const w = normalizeWorld(world);
+    return {
+      id: w.id,
+      version: w.version,
+      blockHash: Object.assign({}, w.blockHash),
+      syncedAt: at || Date.now(),
+    };
+  }
+
+  function normalizeWorldRef(ref) {
+    if (!ref || typeof ref !== 'object') return null;
+    const blockHash = {};
+    const src = ref.blockHash && typeof ref.blockHash === 'object' ? ref.blockHash : {};
+    BLOCK_IDS.forEach(id => {
+      if (src[id] != null && src[id] !== '') blockHash[id] = String(src[id]);
+    });
+    return {
+      id: String(ref.id || ''),
+      version: ref.version | 0,
+      blockHash,
+      syncedAt: ref.syncedAt || 0,
+    };
+  }
+
+  function getConvBlocks(conv, RPCache) {
+    const out = emptyBlocks();
+    const st = conv && conv.plugins && conv.plugins.rpcache && conv.plugins.rpcache.state;
+    if (!st || !RPCache || typeof RPCache.getBlock !== 'function') return out;
+    BLOCK_IDS.forEach(id => {
+      const b = RPCache.getBlock(st, id);
+      out[id] = b && b.content != null ? String(b.content) : '';
+    });
+    return out;
+  }
+
+  function normalizePending(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    BLOCK_IDS.forEach(id => {
+      if (raw[id] != null && String(raw[id]).length) out[id] = canonBlock(raw[id]);
+    });
+    return out;
+  }
+
+  /**
+   * 三路合并：base = 对话同步时的模板块，current = 对话当前块，theirs = 新模板块。
+   * 冲突时保留 current，theirs 写入 _pending。
+   */
+  function merge3(base, current, theirs) {
+    const b = canonBlock(base);
+    const c = canonBlock(current);
+    const t = canonBlock(theirs);
+    if (c === b) return { content: t, action: 'takeTheirs' };
+    if (c === t) return { content: c, action: 'unchanged' };
+    if (b === t) return { content: c, action: 'keepCurrent' };
+    return { content: c, action: 'conflict', _pending: t };
+  }
+
+  /**
+   * 按块分类。worldRef 缺失（老对话）时，无法还原 base：current==theirs 视为无需变更，否则保守标为冲突。
+   */
+  function classifyBlock(id, current, theirs, worldRef) {
+    const c = canonBlock(current);
+    const t = canonBlock(theirs);
+    const ref = normalizeWorldRef(worldRef);
+    const refHash = ref && ref.blockHash ? ref.blockHash[id] : undefined;
+    const hasBase = refHash != null;
+    const curHash = hashBlock(c);
+    const theirsHash = hashBlock(t);
+    const drifted = !hasBase || refHash !== theirsHash;
+    if (!hasBase) {
+      if (c === t) return { id, action: 'unchanged', content: c, drifted: false, locallyEdited: false };
+      return { id, action: 'conflict', content: c, _pending: t, drifted: true, locallyEdited: true };
+    }
+    const currentEqualsBase = curHash === refHash;
+    const currentEqualsTheirs = curHash === theirsHash;
+    const baseEqualsTheirs = refHash === theirsHash;
+    if (currentEqualsTheirs) return { id, action: 'unchanged', content: c, drifted: !baseEqualsTheirs, locallyEdited: !currentEqualsBase };
+    if (currentEqualsBase) return { id, action: 'takeTheirs', content: t, drifted: !baseEqualsTheirs, locallyEdited: false };
+    if (baseEqualsTheirs) return { id, action: 'keepCurrent', content: c, drifted: false, locallyEdited: true };
+    return { id, action: 'conflict', content: c, _pending: t, drifted: true, locallyEdited: true };
+  }
+
+  function detectDrift(conv, world, currentBlocks) {
+    const w = normalizeWorld(world);
+    const blocks = currentBlocks || (conv && conv._blocks) || emptyBlocks();
+    const ref = normalizeWorldRef(conv && conv.worldRef);
+    const classified = BLOCK_IDS.map(id => classifyBlock(id, blocks[id], w.blocks[id], ref));
+    const ids = classified.filter(x => x.drifted).map(x => x.id);
+    const drift = {};
+    ids.forEach(id => { drift[id] = true; });
+    return {
+      drift,
+      ids,
+      classified,
+      world: w,
+      ref,
+      stale: ids.length > 0 || !ref || ref.version !== w.version || (ref.id && ref.id !== w.id),
+    };
+  }
+
+  function blockTitle(id) {
+    return (BLOCK_META[id] && BLOCK_META[id].title) || id;
+  }
+
+  /** 「模板已更新到 v4：世界观、禁止事项 2 块有新内容；角色卡你本地改过，将保留」 */
+  function formatDriftMessage(report, world) {
+    const w = world || (report && report.world) || {};
+    const ver = w.version | 0;
+    const list = (report && report.classified) || [];
+    const fresh = list.filter(x => x.action === 'takeTheirs');
+    const kept = list.filter(x => x.action === 'conflict' || (x.locallyEdited && x.drifted));
+    const parts = ['模板已更新到 v' + ver];
+    const bits = [];
+    if (fresh.length) {
+      bits.push(fresh.map(x => blockTitle(x.id)).join('、') + ' ' + fresh.length + ' 块有新内容');
+    }
+    if (kept.length) {
+      bits.push(kept.map(x => blockTitle(x.id)).join('、') + (kept.length === 1 ? '块' : '') + '你本地改过，将保留');
+    }
+    if (!bits.length && report && report.ids && report.ids.length) {
+      bits.push(report.ids.map(blockTitle).join('、') + ' 有变更');
+    }
+    return parts[0] + (bits.length ? '：' + bits.join('；') : '');
+  }
+
+  function snapshotBlocks(blocks, ids) {
+    const src = blocks || {};
+    const out = {};
+    (ids || BLOCK_IDS).forEach(id => { out[id] = canonBlock(src[id] || ''); });
+    return out;
+  }
+
+  /**
+   * 规划一次同步。mode:
+   *   merge     — 仅同步未改动的块（冲突保留 current，theirs 进 _pending）
+   *   overwrite — 全部覆盖为新模板
+   *   skip      — 不同步
+   */
+  function planSync(conv, world, currentBlocks, mode) {
+    const w = normalizeWorld(world);
+    const blocks = currentBlocks || emptyBlocks();
+    const report = detectDrift(Object.assign({}, conv, { worldRef: conv && conv.worldRef }), w, blocks);
+    const m = mode || 'merge';
+    const nextBlocks = Object.assign({}, blocks);
+    const pending = normalizePending(conv && conv.worldPending);
+    const changed = [];
+    if (m === 'skip') {
+      return {
+        mode: 'skip',
+        world: w,
+        report,
+        nextBlocks,
+        pending,
+        changed,
+        message: formatDriftMessage(report, w),
+        worldRef: conv && conv.worldRef ? normalizeWorldRef(conv.worldRef) : null,
+        skipVersion: w.version,
+      };
+    }
+    report.classified.forEach(row => {
+      if (m === 'overwrite') {
+        if (canonBlock(blocks[row.id] || '') !== canonBlock(w.blocks[row.id] || '')) changed.push(row.id);
+        nextBlocks[row.id] = w.blocks[row.id] || '';
+        delete pending[row.id];
+        return;
+      }
+      // merge
+      if (row.action === 'takeTheirs') {
+        nextBlocks[row.id] = row.content;
+        delete pending[row.id];
+        changed.push(row.id);
+      } else if (row.action === 'conflict') {
+        nextBlocks[row.id] = row.content;
+        pending[row.id] = row._pending;
+      } else {
+        nextBlocks[row.id] = row.content;
+        if (row.action !== 'unchanged') delete pending[row.id];
+      }
+    });
+    return {
+      mode: m,
+      world: w,
+      report,
+      nextBlocks,
+      pending,
+      changed,
+      message: formatDriftMessage(report, w),
+      worldRef: makeWorldRef(w, 0),
+      skipVersion: undefined,
+    };
+  }
+
+  function applyBlockMap(conv, blocks, RPCache, at, ids) {
+    const plugins = Object.assign({}, conv.plugins || {});
+    const data = Object.assign({}, plugins.rpcache || {});
+    data.enabled = true;
+    let st = data.state ? RPCache.normalizeState(data.state) : RPCache.newState();
+    let any = false;
+    const targets = ids || BLOCK_IDS;
+    targets.forEach(id => {
+      const r = RPCache.setBlock(st, id, blocks[id] || '', at);
+      st = r.state;
+      if (r.changed) any = true;
+    });
+    if (typeof RPCache.syncBase === 'function') {
+      st = RPCache.syncBase(st, conv.systemPrompt || '');
+    }
+    data.state = st;
+    plugins.rpcache = data;
+    return { plugins, changed: any, state: st };
+  }
+
+  function applySyncToConversation(conv, world, RPCache, opts) {
+    if (!conv || !RPCache) throw new Error('需要 conv 与 RPCache');
+    opts = opts || {};
+    const mode = opts.mode || 'merge';
+    const t = opts.at || Date.now();
+    const w = normalizeWorld(world);
+    const current = getConvBlocks(conv, RPCache);
+    const plan = planSync(conv, w, current, mode);
+    const beforeRef = normalizeWorldRef(conv.worldRef);
+    const beforePending = normalizePending(conv.worldPending);
+    if (mode === 'skip') {
+      const log = {
+        at: t,
+        from: beforeRef ? beforeRef.version : 0,
+        to: w.version,
+        blocks: [],
+        mode: 'skip',
+        before: { worldRef: beforeRef, blocks: snapshotBlocks(current, []), pending: beforePending },
+        after: { worldRef: beforeRef, blocks: snapshotBlocks(current, []), pending: beforePending },
+      };
+      return {
+        conv: Object.assign({}, conv, {
+          worldId: w.id, worldName: w.name, worldEmoji: w.emoji,
+          worldSkipVersion: w.version,
+          worldLog: (conv.worldLog || []).concat([log]),
+        }),
+        plan,
+        changed: false,
+      };
+    }
+    const ids = mode === 'overwrite' ? BLOCK_IDS.slice() : plan.changed.concat(Object.keys(plan.pending));
+    const uniqueIds = BLOCK_IDS.filter(id => ids.indexOf(id) >= 0 || plan.changed.indexOf(id) >= 0);
+    const applied = applyBlockMap(conv, plan.nextBlocks, RPCache, t, mode === 'overwrite' ? BLOCK_IDS : uniqueIds);
+    const nextRef = makeWorldRef(w, t);
+    const log = {
+      at: t,
+      from: beforeRef ? beforeRef.version : 0,
+      to: w.version,
+      blocks: mode === 'overwrite' ? BLOCK_IDS.slice() : plan.changed.slice(),
+      mode,
+      before: {
+        worldRef: beforeRef,
+        blocks: snapshotBlocks(current, BLOCK_IDS),
+        pending: beforePending,
+        skipVersion: conv.worldSkipVersion || 0,
+      },
+      after: {
+        worldRef: nextRef,
+        blocks: snapshotBlocks(plan.nextBlocks, BLOCK_IDS),
+        pending: plan.pending,
+      },
+    };
+    return {
+      conv: Object.assign({}, conv, {
+        worldId: w.id, worldName: w.name, worldEmoji: w.emoji,
+        worldRef: nextRef,
+        worldPending: plan.pending,
+        worldSkipVersion: 0,
+        worldLog: (conv.worldLog || []).concat([log]),
+        plugins: applied.plugins,
+      }),
+      plan,
+      changed: applied.changed || plan.changed.length > 0,
+    };
+  }
+
+  /** 采用某块的 _pending（模板方可选用），保留审计 */
+  function applyPendingBlock(conv, blockId, RPCache, at) {
+    if (!conv || !RPCache) throw new Error('需要 conv 与 RPCache');
+    const pending = normalizePending(conv.worldPending);
+    if (!pending[blockId]) return { conv, changed: false };
+    const t = at || Date.now();
+    const current = getConvBlocks(conv, RPCache);
+    const next = Object.assign({}, current, { [blockId]: pending[blockId] });
+    const rest = Object.assign({}, pending);
+    delete rest[blockId];
+    const applied = applyBlockMap(conv, next, RPCache, t, [blockId]);
+    const ref = normalizeWorldRef(conv.worldRef) || { id: conv.worldId || '', version: 0, blockHash: {}, syncedAt: t };
+    const nextRef = Object.assign({}, ref, {
+      blockHash: Object.assign({}, ref.blockHash, { [blockId]: hashBlock(next[blockId]) }),
+      syncedAt: t,
+    });
+    const log = {
+      at: t,
+      from: ref.version,
+      to: ref.version,
+      blocks: [blockId],
+      mode: 'pending',
+      before: { worldRef: ref, blocks: snapshotBlocks(current, [blockId]), pending: pending },
+      after: { worldRef: nextRef, blocks: snapshotBlocks(next, [blockId]), pending: rest },
+    };
+    return {
+      conv: Object.assign({}, conv, {
+        worldRef: nextRef,
+        worldPending: rest,
+        worldLog: (conv.worldLog || []).concat([log]),
+        plugins: applied.plugins,
+      }),
+      changed: true,
+    };
+  }
+
+  /**
+   * 回滚到某次同步之前（同时撤销该次及之后的同步）。
+   * logIndex 默认最后一条。
+   */
+  function rollbackWorldLog(conv, RPCache, opts) {
+    if (!conv || !RPCache) throw new Error('需要 conv 与 RPCache');
+    const log = Array.isArray(conv.worldLog) ? conv.worldLog : [];
+    if (!log.length) return { conv, changed: false, reason: 'empty' };
+    const idx = opts && opts.index != null ? opts.index : log.length - 1;
+    if (idx < 0 || idx >= log.length) return { conv, changed: false, reason: 'index' };
+    const entry = log[idx];
+    const t = (opts && opts.at) || Date.now();
+    const current = getConvBlocks(conv, RPCache);
+    const before = entry.before || {};
+    const restoreBlocks = Object.assign({}, current, before.blocks || {});
+    const ids = Object.keys(before.blocks || {});
+    const applied = applyBlockMap(conv, restoreBlocks, RPCache, t, ids.length ? ids : BLOCK_IDS);
+    return {
+      conv: Object.assign({}, conv, {
+        worldRef: before.worldRef || null,
+        worldPending: normalizePending(before.pending),
+        worldSkipVersion: before.skipVersion || 0,
+        worldLog: log.slice(0, idx),
+        plugins: applied.plugins,
+      }),
+      changed: true,
+      entry,
+    };
+  }
+
+  function shouldShowDrift(conv, world, currentBlocks) {
+    const report = detectDrift(conv, world, currentBlocks);
+    const pending = normalizePending(conv && conv.worldPending);
+    const hasPending = Object.keys(pending).length > 0;
+    if (!report.ids.length && !hasPending) return Object.assign({ show: false, pending }, report);
+    const skip = conv && conv.worldSkipVersion;
+    const ver = report.world.version;
+    if (skip && skip === ver && !hasPending) {
+      return Object.assign({ show: false, skipped: true, pending }, report);
+    }
+    return Object.assign({ show: true, pending }, report);
   }
 
   function greetingMessage(world, conv, now, idFn) {
@@ -192,7 +625,11 @@
 
   const api = {
     BLOCK_IDS, BLOCK_META, emptyBlocks, normalizeBlocks, normalizeWorld,
-    defaultWorlds, upsert, duplicate, remove,
+    defaultWorlds, upsert, duplicate, remove, blocksChanged,
+    canonBlock, hashBlock, blockHashMap, makeWorldRef, normalizeWorldRef,
+    getConvBlocks, normalizePending, merge3, classifyBlock, detectDrift,
+    formatDriftMessage, planSync, applySyncToConversation, applyPendingBlock,
+    rollbackWorldLog, shouldShowDrift, blockTitle,
     WORLD_START_TEMPLATE_ID, immersiveFields, conversationFromWorld, applyWorldToState, applyWorldToConversation, greetingMessage, filledBlockCount,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.24.2';
+  const APP_VERSION = '0.25.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -764,6 +764,7 @@
       else sub.textContent = '文字生成 · 多模型';
     }
     renderConvBar();
+    renderWorldDrift();
   }
   function dayGroup(t) {
     const d = new Date(t); const n = new Date();
@@ -2440,7 +2441,7 @@
       const el = document.createElement('div'); el.className = 'persona-card';
       el.innerHTML = '<div class="pcard-top"><span class="pcard-emoji">' + esc(wd.emoji) + '</span><button class="ci-more" aria-label="更多">' + ICON.more + '</button></div>' +
         '<div class="pcard-name">' + esc(wd.name) + '</div><div class="pcard-desc">' + esc(wd.desc || '点此开聊或编辑 L1 设定') + '</div>' +
-        '<div class="pcard-tags"><span>' + n + '/7 块</span></div>';
+        '<div class="pcard-tags"><span>v' + (wd.version || 1) + ' · ' + n + '/7 块</span></div>';
       el.onclick = () => startFromWorld(wd);
       el.querySelector('.ci-more').onclick = e => {
         e.stopPropagation();
@@ -2465,6 +2466,151 @@
     worlds = Worlds.remove(worlds, wd.id);
     saveWorlds(); renderWorldGrid(); refreshWorldCount(); toast('已删除');
   }
+
+  function currentWorldForConv(c) {
+    const id = c && c.worldId;
+    return id ? worlds.find(x => x.id === id) : null;
+  }
+  function renderWorldDrift() {
+    const bar = $('#world-drift-bar');
+    if (!bar) return;
+    const wd = currentWorldForConv(conv);
+    if (!conv || !wd) { bar.hidden = true; bar.innerHTML = ''; return; }
+    const cur = Worlds.getConvBlocks(conv, RPCache);
+    const shown = Worlds.shouldShowDrift(conv, wd, cur);
+    const pending = shown.pending || Worlds.normalizePending(conv.worldPending);
+    const pendingIds = Object.keys(pending);
+    const log = Array.isArray(conv.worldLog) ? conv.worldLog : [];
+    if (!shown.show && !pendingIds.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+    bar.hidden = false;
+    const msg = document.createElement('div');
+    msg.className = 'wd-msg';
+    msg.textContent = shown.ids && shown.ids.length
+      ? Worlds.formatDriftMessage(shown, wd)
+      : ('模板更新可选用：' + pendingIds.map(Worlds.blockTitle).join('、'));
+    const actions = document.createElement('div');
+    actions.className = 'wd-actions';
+    const addBtn = (label, cls, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = cls; b.textContent = label; b.onclick = fn;
+      actions.appendChild(b);
+    };
+    if (shown.ids && shown.ids.length && !shown.skipped) {
+      addBtn('仅同步未改动的块', 'pill-btn primary', () => doWorldSync(wd, 'merge'));
+      addBtn('全部覆盖', 'ghost-btn danger', () => doWorldSync(wd, 'overwrite'));
+      addBtn('不同步', 'ghost-btn', () => doWorldSync(wd, 'skip'));
+    }
+    if (log.length) {
+      addBtn('回滚上次同步', 'ghost-btn', () => rollbackWorldSync(log.length - 1));
+    }
+    bar.innerHTML = '';
+    bar.appendChild(msg);
+    bar.appendChild(actions);
+    if (pendingIds.length) {
+      const box = document.createElement('div');
+      box.className = 'wd-pending';
+      pendingIds.forEach(id => {
+        const row = document.createElement('div');
+        row.appendChild(document.createTextNode(Worlds.blockTitle(id) + '：模板更新可选用'));
+        const use = document.createElement('button');
+        use.type = 'button'; use.className = 'text-btn'; use.textContent = '采用模板';
+        use.onclick = () => applyWorldPending(id);
+        row.appendChild(use);
+        box.appendChild(row);
+      });
+      bar.appendChild(box);
+    }
+  }
+  function doWorldSync(wd, mode) {
+    if (!conv) { toast('没有当前对话'); return; }
+    if (running) { toast('请先停止当前生成'); return; }
+    if (!wd) return;
+    const r = Worlds.applySyncToConversation(conv, wd, RPCache, { mode, at: Date.now() });
+    conv = r.conv;
+    saveConv();
+    renderAll();
+    if (mode === 'skip') toast('已跳过本版同步');
+    else if (mode === 'overwrite') toast('已用「' + wd.name + '」覆盖当前对话的 L1 块');
+    else {
+      const n = (r.plan && r.plan.changed || []).length;
+      const p = Object.keys((r.conv && r.conv.worldPending) || {}).length;
+      toast('已同步「' + wd.name + '」v' + wd.version + (n ? '（更新 ' + n + ' 块）' : '') + (p ? '，' + p + ' 块保留本地并待选用' : ''));
+    }
+  }
+  async function rollbackWorldSync(index) {
+    if (!conv) return;
+    if (running) { toast('请先停止当前生成'); return; }
+    const log = conv.worldLog || [];
+    const entry = log[index];
+    if (!entry) return;
+    const ok = await dialog({
+      title: '回滚此次同步？',
+      body: '将恢复到 v' + (entry.from || 0) + ' → v' + (entry.to || 0) + '（' + (entry.mode || '') + '）这次同步之前的 L1 块。该次及之后的同步都会撤销。',
+      okText: '回滚', danger: true,
+    });
+    if (!ok) return;
+    const r = Worlds.rollbackWorldLog(conv, RPCache, { index, at: Date.now() });
+    conv = r.conv;
+    saveConv(); renderAll();
+    toast('已回滚同步');
+  }
+  function applyWorldPending(blockId) {
+    if (!conv || running) return;
+    const r = Worlds.applyPendingBlock(conv, blockId, RPCache, Date.now());
+    conv = r.conv;
+    saveConv(); renderAll();
+    toast('已采用模板的「' + Worlds.blockTitle(blockId) + '」');
+  }
+  function presentWorldSync(wd) {
+    if (!conv) { toast('没有当前对话'); return; }
+    if (running) { toast('请先停止当前生成'); return; }
+    if (!wd) return;
+    const cur = Worlds.getConvBlocks(conv, RPCache);
+    const report = Worlds.detectDrift(conv, wd, cur);
+    if (!report.ids.length && report.ref && report.ref.version === wd.version && report.ref.id === wd.id) {
+      dialog({
+        title: '同步到当前对话？',
+        body: '当前对话已是「' + wd.name + '」v' + wd.version + '。全部覆盖将用模板覆盖本地 L1 块。',
+        okText: '全部覆盖',
+      }).then(ok => { if (ok) doWorldSync(wd, 'overwrite'); });
+      return;
+    }
+    actionSheet(Worlds.formatDriftMessage(report, wd), [
+      { label: '仅同步未改动的块', onClick: () => doWorldSync(wd, 'merge') },
+      { label: '全部覆盖', danger: true, onClick: () => doWorldSync(wd, 'overwrite') },
+      { label: '不同步', onClick: () => doWorldSync(wd, 'skip') },
+    ]);
+  }
+  function fillWorldVersion(wd) {
+    const el = $('#wd-version');
+    if (!el) return;
+    if (!wd || wd.isNew) { el.textContent = ''; return; }
+    const n = Worlds.normalizeWorld(wd);
+    el.textContent = '版本 v' + n.version + ' · ' + Worlds.filledBlockCount(n) + '/7 块已填写';
+  }
+  function fillWorldLog() {
+    const box = $('#wd-log');
+    if (!box) return;
+    const log = conv && Array.isArray(conv.worldLog) ? conv.worldLog : [];
+    const same = conv && editingWorld && conv.worldId === editingWorld.id && log.length;
+    if (!same) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '<div class="wd-log-title">当前对话的同步记录（可回滚）</div>';
+    log.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'wd-log-item';
+      const t = e.at ? new Date(e.at).toLocaleString() : '';
+      const mode = e.mode === 'merge' ? '仅同步未改动' : e.mode === 'overwrite' ? '全部覆盖' : e.mode === 'skip' ? '不同步' : (e.mode || '');
+      const left = document.createElement('div');
+      left.textContent = 'v' + (e.from || 0) + ' → v' + (e.to || 0) + ' · ' + mode + (e.blocks && e.blocks.length ? ' · ' + e.blocks.length + ' 块' : '') + (t ? ' · ' + t : '');
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'text-btn'; btn.textContent = '回滚';
+      btn.onclick = () => rollbackWorldSync(i);
+      row.appendChild(left); row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
   function startFromWorld(wd) {
     if (running) { toast('请先停止当前生成'); return; }
     if (!wd) return;
@@ -2482,13 +2628,7 @@
     toast('已用「' + wd.name + '」开聊（沉浸式 RP + RP 缓存）');
   }
   function syncWorldToCurrent(wd) {
-    if (!conv) { toast('没有当前对话'); return; }
-    if (running) { toast('请先停止当前生成'); return; }
-    const applied = Worlds.applyWorldToConversation(conv, wd, RPCache, Date.now());
-    conv = applied.conv;
-    saveConv();
-    renderAll();
-    toast('已同步「' + wd.name + '」到当前对话');
+    presentWorldSync(wd);
   }
   function openWorldEdit(id) {
     const wd = id ? worlds.find(x => x.id === id) : null;
@@ -2514,6 +2654,8 @@
       lab.appendChild(ta); box.appendChild(lab);
     });
     $('#page-world').classList.add('show');
+    fillWorldVersion(editingWorld);
+    fillWorldLog();
   }
   function closeWorldEdit() {
     $('#page-world').classList.remove('show');
@@ -2541,7 +2683,7 @@
     $('#wd-delete').style.display = '';
     $('#wd-start').style.display = '';
     $('#wd-sync').style.display = '';
-    saveWorlds(); refreshWorldCount(); toast('已保存');
+    saveWorlds(); refreshWorldCount(); fillWorldVersion(editingWorld); fillWorldLog(); toast('已保存');
   };
   $('#wd-start').onclick = () => {
     const item = readWorldForm();
@@ -2550,21 +2692,16 @@
     const wd = worlds.find(x => x.id === item.id);
     startFromWorld(wd);
   };
-  $('#wd-sync').onclick = async () => {
-    const item = readWorldForm();
   $('#wd-knowledge').onclick = () => {
     if (!editingWorld || !editingWorld.id || editingWorld.isNew) { toast('请先保存世界'); return; }
     openPluginPanel('knowledge', editingWorld.id);
   };
+  $('#wd-sync').onclick = async () => {
+    const item = readWorldForm();
     if (!item.name) { toast('请填写世界名称'); return; }
     worlds = Worlds.upsert(worlds, item); saveWorlds();
     const wd = worlds.find(x => x.id === item.id);
-    const ok = await dialog({
-      title: '同步到当前对话？',
-      body: '将用「' + item.name + '」覆盖当前对话的 L1 块并启用 RP 缓存。其他已开对话不会改动。',
-      okText: '同步',
-    });
-    if (!ok) return;
+    fillWorldVersion(wd); fillWorldLog();
     syncWorldToCurrent(wd);
   };
   $('#wd-delete').onclick = async () => {
