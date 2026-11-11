@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.28.1：OpenRouter Image API + 生图模型下拉**
+
+- OpenRouter 生图改为新 Image API：`resolution` + `aspect_ratio` + `input_references`（最多 16 张），不再使用旧 `image` 字段，路径仍为 `/images`
+- 生图页增加图片模型下拉（按服务商 models 筛选），保留手动输入；切换服务商刷新列表
+- Android `0.28.1`（versionCode 83）/ 桌面 / npm `0.28.1`
+
 **v0.28.0：追加式会话 op log / 周期快照 / 最小同步 / golden 回归扩展**
 
 - 会话改为追加 op log + 周期快照（不再每次全量序列化）；首次加载自动迁移，可导出为旧格式

@@ -1,3 +1,13 @@
+**v0.28.1：OpenRouter Image API + 生图模型下拉**
+
+- **OpenRouter 新 Image API**：生图请求对 OpenRouter 始终走 `/images`，请求体使用 `resolution` + `aspect_ratio` + `input_references`（参考图最多 16 张），不再发送旧的 `body.image` / `size`
+- **生图页模型选择**：图片模型改为上方下拉（从当前服务商 `models` 用 `classifyModel` 筛出图片模型）+ 下方手动输入；选择同步到输入框并 persist；手动值不在列表中不被覆盖；切换服务商刷新下拉
+- **尺寸映射**：UI 像素尺寸自动转为官方分辨率档位与宽高比（`512x512` 现映射为 `512`）
+- 其他服务商行为不变
+- Android `0.28.1`（versionCode **83**）
+
+---
+
 **v0.28.0：追加式会话 op log / 周期快照 / 最小同步 / golden 回归扩展**
 
 - **r5 C op log**：会话写入改为 `push(op)` 立即追加（`conv_<id>.log.jsonl`），不再每次全量序列化正文；读取为 snapshot + 尾部 replay；每 200 op 或 1MB 打快照（`fflate` 可压缩老章节）
