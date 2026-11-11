@@ -1,3 +1,12 @@
+**v0.28.3：诊断构建（定位主界面点击无响应）**
+
+- **诊断包**：界面右上角增加「诊」浮动按钮（HTML 内置，不依赖 `app.js`）。打开后显示 window.onerror / unhandledrejection、console.error / console.warn（含 source:line）、`[init]` 日志、捕获阶段的 pointerdown/touchstart/click（坐标、elementFromPoint 的 tag#id.class / z-index / pointer-events / opacity、目标 handler 是否执行）、版本 / UA / 视口 / devicePixelRatio，以及覆盖超过 50% 视口的 visible fixed/absolute 元素；可一键复制到剪贴板
+- **原生**：`WebView.setWebContentsDebuggingEnabled(true)`；`WebChromeClient.onConsoleMessage` 输出到 logcat（标签 `AIChatConsole`）；版本号变化时清除 WebView 资源缓存（不清 DOM / 密钥等用户数据）
+- 其他功能与 v0.28.2 相同，便于覆盖安装后把诊断日志发回
+- Android `0.28.3`（versionCode **85**）
+
+---
+
 **v0.28.2：启动异常不再让主界面失去响应**
 
 - **根因**：`app.js` 启动 IIFE 里若有未捕获异常（例如 `migrateSecrets` 调用 `bridge.registerProvider` 失败），会在事件绑定和 boot 之前中断，界面仍显示静态 HTML（模型胶囊停在「选择模型」、消息区空白），点击无反应。v0.28.1 的 Image API / 模型下拉不在启动路径上，完整 AndroidBridge 下与 v0.28.0 一样可正常启动

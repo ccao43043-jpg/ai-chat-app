@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.28.3：诊断构建（定位主界面点击无响应）**
+
+- 右上角「诊」面板：即使 `app.js` 失败也能记录错误、`[init]` 日志与点击命中（elementFromPoint / handler 是否执行），并支持复制
+- 打开 WebView 远程调试；console 写入 logcat；升级版本时清除 WebView 资源缓存
+- Android `0.28.3`（versionCode 85）/ 桌面 / npm `0.28.3`
+
 **v0.28.2：启动异常不再让主界面失去响应**
 
 - 初始化加空值保护与 try-catch：单个模块失败不再导致主界面点什么都没反应；模型胶囊不再停在「选择模型」占位

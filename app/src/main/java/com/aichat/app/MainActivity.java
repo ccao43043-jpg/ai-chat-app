@@ -3,9 +3,12 @@ package com.aichat.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.util.Log;
+import android.webkit.ConsoleMessage;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -25,6 +28,17 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         webView = new WebView(this);
         setContentView(webView);
+
+        WebView.setWebContentsDebuggingEnabled(true);
+        SharedPreferences cachePrefs = getSharedPreferences("aichat_webview", MODE_PRIVATE);
+        String ver = "";
+        try { ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception ignored) {}
+        String lastVer = cachePrefs.getString("cache_ver", "");
+        if (ver != null && !ver.isEmpty() && !ver.equals(lastVer)) {
+            webView.clearCache(true);
+            cachePrefs.edit().putString("cache_ver", ver).apply();
+            Log.i("AIChat", "cleared WebView cache on version change " + lastVer + " -> " + ver);
+        }
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -50,6 +64,12 @@ public class MainActivity extends Activity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage cm) {
+                Log.i("AIChatConsole", cm.messageLevel() + " " + cm.sourceId() + ":" + cm.lineNumber() + " " + cm.message());
+                return super.onConsoleMessage(cm);
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
