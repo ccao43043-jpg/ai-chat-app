@@ -209,13 +209,45 @@ test('FLUX + 参考图：input_references（非 image）', () => {
   assert.strictEqual(body.aspect_ratio, '1:1');
 });
 
-test('OpenRouter 非 FLUX 仍可用 size，URL 为 /images', () => {
+test('OpenRouter 始终使用 resolution + aspect_ratio，不含 image，URL 为 /images', () => {
   const or = { type: 'openai', presetId: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1/', apiKey: 'k' };
   const r = P.buildImageRequest(or, 'openai/gpt-image-1', 'cat', { size: '1024x1024' });
   assert.strictEqual(r.url, 'https://openrouter.ai/api/v1/images');
+  assert.ok(!r.url.includes('/images/generations'));
   const b = JSON.parse(r.body);
-  assert.strictEqual(b.size, '1024x1024');
-  assert.ok(!('resolution' in b));
+  assert.strictEqual(b.resolution, '1K');
+  assert.strictEqual(b.aspect_ratio, '1:1');
+  assert.ok(!('size' in b));
+  assert.ok(!('image' in b));
+  assert.ok(!('input_references' in b));
+
+  const portrait = JSON.parse(P.buildImageRequest(or, 'google/gemini-2.5-flash-image', 'x', { size: '1024x1792' }).body);
+  assert.strictEqual(portrait.resolution, '1.5K');
+  assert.strictEqual(portrait.aspect_ratio, '9:16');
+
+  const viaUrl = { type: 'openai', presetId: 'custom', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k' };
+  const u = P.buildImageRequest(viaUrl, 'openai/gpt-image-1', 'x', { size: '512x512' });
+  assert.ok(u.url.endsWith('/images'));
+  const ub = JSON.parse(u.body);
+  assert.strictEqual(ub.resolution, '512');
+  assert.strictEqual(ub.aspect_ratio, '1:1');
+});
+
+test('OpenRouter 参考图：input_references 最多 16 张，不含 image', () => {
+  const or = { type: 'openai', presetId: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k' };
+  const refs = [];
+  for (let i = 0; i < 20; i++) refs.push('data:image/jpeg;base64,' + String(i));
+  const body = JSON.parse(P.buildImageRequest(or, 'openai/gpt-image-1', 'edit', {
+    size: '1024x1024', images: refs,
+  }).body);
+  assert.ok(!('image' in body));
+  assert.ok(!('size' in body));
+  assert.ok(Array.isArray(body.input_references));
+  assert.strictEqual(body.input_references.length, 16);
+  assert.deepStrictEqual(body.input_references[0], { type: 'image_url', image_url: { url: refs[0] } });
+  assert.deepStrictEqual(body.input_references[15], { type: 'image_url', image_url: { url: refs[15] } });
+  assert.strictEqual(body.resolution, '1K');
+  assert.strictEqual(body.aspect_ratio, '1:1');
 });
 
 test('SiliconFlow Kolors 仍用 image_size + image', () => {
@@ -249,7 +281,7 @@ test('isFluxTierModel / pixelSizeToTier 辅助', () => {
   assert.ok(P.isFluxTierModel('bytedance/seedream-4', { presetId: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1' }));
   assert.ok(!P.isFluxTierModel('bytedance/seedream-4', { presetId: 'openai', baseUrl: 'https://api.openai.com/v1' }));
   assert.deepStrictEqual(P.pixelSizeToTier('768x768'), { resolution: '768', aspect_ratio: '1:1' });
-  assert.deepStrictEqual(P.pixelSizeToTier('512x512'), { resolution: '768', aspect_ratio: '1:1' });
+  assert.deepStrictEqual(P.pixelSizeToTier('512x512'), { resolution: '512', aspect_ratio: '1:1' });
   assert.strictEqual(P.closestAspectRatio(1024, 1792), '9:16');
   assert.strictEqual(P.closestAspectRatio(1792, 1024), '16:9');
 });

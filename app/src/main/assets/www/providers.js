@@ -724,6 +724,7 @@
   }
 
   function resolutionFromLongEdge(maxEdge) {
+    if (maxEdge <= 512) return '512';
     if (maxEdge <= 768) return '768';
     if (maxEdge <= 1280) return '1K';
     if (maxEdge <= 1792) return '1.5K';
@@ -753,15 +754,17 @@
     };
   }
 
-  /** OpenAI 兼容图像生成；FLUX 档位模型用 resolution+aspect_ratio；OpenRouter 走 /images */
+  /** OpenAI 兼容图像生成；OpenRouter 始终用新 Image API（resolution+aspect_ratio+input_references，路径 /images） */
   function buildImageRequest(provider, model, prompt, opts) {
     opts = opts || {};
     const body = { model: model, prompt: prompt, n: 1 };
-    const images = Array.isArray(opts.images) ? opts.images.filter(Boolean).slice(0, 10) : [];
-    const tier = isFluxTierModel(model, provider);
     const openrouter = isOpenRouterProvider(provider);
+    const tier = isFluxTierModel(model, provider);
+    const useImageApi = openrouter || tier;
+    const maxRefs = openrouter ? 16 : 10;
+    const images = Array.isArray(opts.images) ? opts.images.filter(Boolean).slice(0, maxRefs) : [];
 
-    if (tier) {
+    if (useImageApi) {
       const mapped = pixelSizeToTier(opts.size || '1024x1024');
       body.resolution = mapped.resolution;
       body.aspect_ratio = mapped.aspect_ratio;

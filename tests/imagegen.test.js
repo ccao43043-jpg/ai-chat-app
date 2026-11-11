@@ -140,3 +140,63 @@ test('isFluxTierModel / sizeOptionLabel', () => {
   assert.ok(ImageGen.sizeOptionLabel('768x768', true).includes('768'));
   assert.ok(ImageGen.sizeOptionLabel('1024x1792', true).includes('9:16') || ImageGen.sizeOptionLabel('1024x1792', true).includes('1.5K'));
 });
+
+
+test('OpenRouter 非 FLUX 也走新 Image API（resolution，不含 image）', () => {
+  const p = { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk', imageModel: 'openai/gpt-image-1', presetId: 'openrouter' };
+  const req = ImageGen.buildRequest(p, 'a balloon', '1024x1024');
+  assert.ok(req.url.endsWith('/images'));
+  assert.ok(!req.url.includes('/generations'));
+  const body = JSON.parse(req.body);
+  assert.strictEqual(body.model, 'openai/gpt-image-1');
+  assert.strictEqual(body.resolution, '1K');
+  assert.strictEqual(body.aspect_ratio, '1:1');
+  assert.ok(!('size' in body));
+  assert.ok(!('image' in body));
+});
+
+test('OpenRouter buildRequest 参考图 → input_references，最多 16 张', () => {
+  const p = { type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk', imageModel: 'openai/gpt-image-1', presetId: 'openrouter' };
+  const refs = Array.from({ length: 18 }, (_, i) => 'data:image/png;base64,' + i);
+  const body = JSON.parse(ImageGen.buildRequest(p, 'edit', '1024x1024', null, { images: refs }).body);
+  assert.ok(!('image' in body));
+  assert.strictEqual(body.input_references.length, 16);
+  assert.deepStrictEqual(body.input_references[0], { type: 'image_url', image_url: { url: refs[0] } });
+});
+
+test('listImageModels：用 classifyModel 筛出图片模型；match 不覆盖手动值', () => {
+  const p = {
+    models: [
+      'openai/gpt-4o',
+      'openai/gpt-image-1',
+      'black-forest-labs/flux-3-image',
+      '  ',
+      'openai/gpt-image-1',
+      'google/gemini-2.5-flash-image',
+      'text-embedding-3-small',
+    ],
+    modelMeta: {
+      'openai/gpt-4o': { modality: 'text+image->text' },
+      'google/gemini-2.5-flash-image': { modality: 'text+image->image' },
+    },
+  };
+  const list = ImageGen.listImageModels(p);
+  assert.deepStrictEqual(list, [
+    'openai/gpt-image-1',
+    'black-forest-labs/flux-3-image',
+    'google/gemini-2.5-flash-image',
+  ]);
+  assert.deepStrictEqual(ImageGen.listImageModels({ models: ['gpt-4o-mini'] }), []);
+  assert.deepStrictEqual(ImageGen.listImageModels(null), []);
+  assert.strictEqual(ImageGen.matchImageModelSelect(list, 'openai/gpt-image-1'), 'openai/gpt-image-1');
+  assert.strictEqual(ImageGen.matchImageModelSelect(list, '  openai/gpt-image-1  '), 'openai/gpt-image-1');
+  assert.strictEqual(ImageGen.matchImageModelSelect(list, 'my-custom-img'), '');
+  assert.strictEqual(ImageGen.matchImageModelSelect(list, ''), '');
+});
+
+test('切换服务商时模型列表随 models 变化', () => {
+  const a = { models: ['gpt-4o', 'dall-e-3', 'gpt-image-1'] };
+  const b = { models: ['deepseek-chat', 'Kwai-Kolors/Kolors'] };
+  assert.deepStrictEqual(ImageGen.listImageModels(a), ['dall-e-3', 'gpt-image-1']);
+  assert.deepStrictEqual(ImageGen.listImageModels(b), ['Kwai-Kolors/Kolors']);
+});

@@ -109,9 +109,39 @@
     return size;
   }
 
+
+  /**
+   * 从服务商 models 列表中筛出图片模型（Providers.classifyModel + modelMeta）。
+   * 去重并保持原顺序；无 Providers 时返回空数组。
+   */
+  function listImageModels(provider) {
+    const Providers = root.Providers || (typeof require !== 'undefined' ? require('./providers.js') : null);
+    if (!Providers || !Providers.classifyModel) return [];
+    const models = provider && Array.isArray(provider.models) ? provider.models : [];
+    const meta = (provider && provider.modelMeta) || {};
+    const out = [];
+    const seen = Object.create(null);
+    for (let i = 0; i < models.length; i++) {
+      const id = models[i] == null ? '' : String(models[i]).trim();
+      if (!id || seen[id]) continue;
+      if (Providers.classifyModel(id, meta[id]) === 'image') {
+        seen[id] = true;
+        out.push(id);
+      }
+    }
+    return out;
+  }
+
+  /** 当前模型若在列表中则返回该值，否则返回 ''（不覆盖手动输入） */
+  function matchImageModelSelect(models, current) {
+    const cur = (current == null ? '' : String(current)).trim();
+    if (cur && Array.isArray(models) && models.indexOf(cur) >= 0) return cur;
+    return '';
+  }
+
   const api = { SIZES, DEFAULT_SIZE, HISTORY_LIMIT, canGenerate, effectiveModel, listImageProviders,
     normalizeSize, buildPromptFromMessages, buildRequest, parseResponse, progressStage, formatElapsed,
-    isFluxTierModel, sizeOptionLabel };
+    isFluxTierModel, sizeOptionLabel, listImageModels, matchImageModelSelect };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ImageGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);

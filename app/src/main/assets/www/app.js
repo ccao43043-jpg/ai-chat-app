@@ -4464,14 +4464,16 @@
     const p = resolveImageProvider();
     const model = resolveImageModel(p);
     const flux = ImageGen.isFluxTierModel(model, p);
+    const openrouter = !!(Providers.isOpenRouterProvider && Providers.isOpenRouterProvider(p));
+    const useTier = flux || openrouter;
     sel.innerHTML = sizes.map(s => {
-      const label = ImageGen.sizeOptionLabel(s, flux);
+      const label = ImageGen.sizeOptionLabel(s, useTier);
       return '<option value="' + esc(s) + '"' + (s === want ? ' selected' : '') + '>' + esc(label) + '</option>';
     }).join('');
     const hint = $('#ig-size-hint');
     if (hint) {
-      hint.textContent = flux
-        ? 'FLUX 3 使用分辨率档位 + 宽高比（已自动转换）'
+      hint.textContent = useTier
+        ? '使用分辨率档位 + 宽高比（已自动转换）'
         : '默认取自设置里的「生成图片尺寸」';
     }
   }
@@ -4497,9 +4499,44 @@
     if (!(settings.imageGenModel || '').trim() && model) {
       settings.imageGenModel = model;
     }
+    fillImageModelSelect(cur, model);
     igUiSyncing = false;
     fillImageSizeSelect($('#ig-size') && $('#ig-size').value);
     refreshImageGenMeta();
+  }
+  function fillImageModelSelect(provider, currentModel) {
+    const sel = $('#ig-model-sel');
+    if (!sel) return;
+    const prev = igUiSyncing;
+    igUiSyncing = true;
+    const models = ImageGen.listImageModels(provider);
+    const matched = ImageGen.matchImageModelSelect(models, currentModel);
+    sel.innerHTML = '<option value="">' + (models.length ? '选择图片模型' : '（无图片模型，可手动输入）') + '</option>'
+      + models.map(m => '<option value="' + esc(m) + '">' + esc(m) + '</option>').join('');
+    sel.value = matched;
+    igUiSyncing = prev;
+  }
+  function onImageModelSelectChange() {
+    if (igUiSyncing) return;
+    const sel = $('#ig-model-sel');
+    const modelEl = $('#ig-model');
+    const v = sel ? (sel.value || '').trim() : '';
+    if (v && modelEl) modelEl.value = v;
+    persistImageGenSelection();
+  }
+  function syncImageModelSelectFromInput() {
+    if (igUiSyncing) return;
+    const sel = $('#ig-model-sel');
+    const modelEl = $('#ig-model');
+    if (!sel || !modelEl) return;
+    const models = ImageGen.listImageModels(resolveImageProvider());
+    const matched = ImageGen.matchImageModelSelect(models, modelEl.value);
+    if (sel.value !== matched) {
+      const prev = igUiSyncing;
+      igUiSyncing = true;
+      sel.value = matched;
+      igUiSyncing = prev;
+    }
   }
   function persistImageGenSelection() {
     if (igUiSyncing) return;
@@ -4523,6 +4560,7 @@
     if (modelEl) modelEl.value = next;
     settings.imageGenModel = next;
     saveSettings();
+    fillImageModelSelect(p, next);
     fillImageSizeSelect($('#ig-size') && $('#ig-size').value);
     refreshImageGenMeta();
   }
@@ -4639,7 +4677,9 @@
     const size = ImageGen.normalizeSize($('#ig-size').value || settings.imageSize);
     settings.imageSize = size; saveSettings();
     let status = 0, raw = '';
-    if (igRefs.length > 1) toast('当前仅使用第一张参考图');
+    const or = !!(Providers.isOpenRouterProvider && Providers.isOpenRouterProvider(p));
+    if (or && igRefs.length > 16) toast('最多使用 16 张参考图');
+    else if (!or && igRefs.length > 1) toast('当前仅使用第一张参考图');
     const req = authed(ImageGen.buildRequest(p, prompt, size, model, { images: igRefs.slice() }), p.id);
     const progress = beginImageGenProgress();
     $('#ig-generate').style.display = 'none';
@@ -4721,9 +4761,10 @@
   $('#ig-generate').onclick = () => runImageGenPage();
   $('#ig-stop').onclick = () => stopImageGenPage();
   if ($('#ig-provider-sel')) $('#ig-provider-sel').onchange = () => onImageGenProviderChange();
+  if ($('#ig-model-sel')) $('#ig-model-sel').addEventListener('change', () => onImageModelSelectChange());
   if ($('#ig-model')) {
-    $('#ig-model').addEventListener('change', () => persistImageGenSelection());
-    $('#ig-model').addEventListener('blur', () => persistImageGenSelection());
+    $('#ig-model').addEventListener('change', () => { persistImageGenSelection(); syncImageModelSelectFromInput(); });
+    $('#ig-model').addEventListener('blur', () => { persistImageGenSelection(); syncImageModelSelectFromInput(); });
   }
 
   function openUsage() {

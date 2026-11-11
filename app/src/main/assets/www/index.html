@@ -171,12 +171,13 @@
     <div class="group form">
       <label class="field"><span>生图服务商</span>
         <select id="ig-provider-sel"></select></label>
-      <label class="field"><span>图片模型<small>默认取自该服务商的 imageModel，可改写</small></span>
+      <label class="field"><span>图片模型<small>可从已有图片模型中选择，或在下方手动输入</small></span>
+        <select id="ig-model-sel"></select>
         <input id="ig-model" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例如 gpt-image-1"></label>
       <div id="ig-provider-status" class="ig-provider muted" style="margin-top:-4px">—</div>
       <label class="field"><span>提示词</span>
         <textarea id="ig-prompt" rows="6" placeholder="描述你想生成的图片，例如：赛博朋克风格的城市夜景，霓虹灯倒映在湿润路面上"></textarea></label>
-      <label class="field"><span>参考图（可选）<small>有参考图时走图生图（需服务商支持 image 字段）；不支持时会报错可清掉参考图重试</small></span>
+      <label class="field"><span>参考图（可选）<small>有参考图时走图生图。OpenRouter 使用 input_references，最多 16 张；其他服务商通常仅使用第一张（需支持 image 字段）</small></span>
         <button type="button" class="pill-btn" id="ig-pick-refs" style="margin-top:8px">从相册选择</button>
         <div id="ig-refs" class="ig-refs"></div>
         <input type="file" id="ig-file" accept="image/*" multiple hidden></label>
