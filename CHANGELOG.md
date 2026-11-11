@@ -1,3 +1,12 @@
+**v0.28.2：启动异常不再让主界面失去响应**
+
+- **根因**：`app.js` 启动 IIFE 里若有未捕获异常（例如 `migrateSecrets` 调用 `bridge.registerProvider` 失败），会在事件绑定和 boot 之前中断，界面仍显示静态 HTML（模型胶囊停在「选择模型」、消息区空白），点击无反应。v0.28.1 的 Image API / 模型下拉不在启动路径上，完整 AndroidBridge 下与 v0.28.0 一样可正常启动
+- **修复**：密钥登记、迁移、数据加载与 boot 均加空值保护 / try-catch 并记录 `[init]` 错误；单个模块失败不再让整个界面失去响应。OpenRouter Image API 与生图模型下拉保持不变
+- **回归**：新增 `tests/boot-smoke.test.js`（无头 Chrome），纳入 `npm test`，覆盖完整桥 / 残缺桥 / registerProvider 抛错 / 旧数据迁移 / 空服务商等；要求无未捕获异常，且侧栏、选择模型、用量、新对话、Composer +、模板、发送点击有反应
+- Android `0.28.2`（versionCode **84**）
+
+---
+
 **v0.28.1：OpenRouter Image API + 生图模型下拉**
 
 - **OpenRouter 新 Image API**：生图请求对 OpenRouter 始终走 `/images`，请求体使用 `resolution` + `aspect_ratio` + `input_references`（参考图最多 16 张），不再发送旧的 `body.image` / `size`

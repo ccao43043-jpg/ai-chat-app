@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.28.1';
+  const APP_VERSION = '0.28.2';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -37,6 +37,13 @@
   // v0.9.0：读取到损坏的 JSON 时不再静默用默认值覆盖——先把坏文件改名为 name.corrupt-<时间戳> 保留，
   // 再尝试用上一次成功写入留下的 name.bak 恢复；原生层写入为「写临时文件 → 旧文件转 .bak → 改名」。
   const storeIssues = []; // [{ name, restored: 'bak'|'' , corrupt }]
+  function logInitError(name, err) {
+    try { console.error('[init] ' + name, err); } catch (_) {}
+    try { storeIssues.push({ name: 'init:' + name, error: String(err && (err.message || err)) }); } catch (_) {}
+  }
+  function runInit(name, fn) {
+    try { return fn(); } catch (err) { logInitError(name, err); }
+  }
   const lsKey = n => 'aichat_' + n;
   const Store = {
     raw(name) { return bridge ? bridge.storeGet(name) : localStorage.getItem(lsKey(name)); },
@@ -99,7 +106,15 @@
       clear() { if (native) bridge.clearSecrets(); else Object.keys(localStorage).filter(k => k.startsWith('aichat_secret:')).forEach(k => localStorage.removeItem(k)); },
       /** 登记服务商的 Base URL 与认证方式；返回 'cleared' 表示主机变了、原密钥已被原生层清除 */
       register(id, baseUrl, authType) {
-        if (native) return bridge.registerProvider(id, baseUrl || '', authType || 'bearer') || 'ok';
+        if (native) {
+          try {
+            if (typeof bridge.registerProvider !== 'function') {
+              logInitError('registerProvider-missing', 'bridge.registerProvider is not a function');
+              return 'ok';
+            }
+            return bridge.registerProvider(id, baseUrl || '', authType || 'bearer') || 'ok';
+          } catch (err) { logInitError('registerProvider', err); return 'error'; }
+        }
         const old = reg[id]; reg[id] = { baseUrl, authType };
         if (old && Secure.originOf(old.baseUrl) !== Secure.originOf(baseUrl)) {
           const kind = id.startsWith('search:') ? 'search_key' : 'provider_key', kid = id.startsWith('search:') ? id.slice(7) : id;
@@ -188,20 +203,27 @@
   function defaultSearch() { return { provider: 'tavily', hasKeys: {}, urls: {}, count: 5, rewrite: false }; }
   const stored = Store.get('settings.json', null);
   let settings = stored ? Object.assign(defaultSettings(), { settingsVersion: 1 }, stored) : defaultSettings();
+  if (!Array.isArray(settings.providers)) settings.providers = [];
   // v0.8.4：首条消息自动生成角色卡默认改为「直接生成」；旧版默认的「先询问」迁移一次（关闭的保持关闭）
   if (!settings.autoCharV084) { if (!settings.autoCharMode || settings.autoCharMode === 'ask') settings.autoCharMode = 'auto'; settings.autoCharV084 = true; }
-  let convIndex = loadConvIndex(); // [{id,title,providerId,model,updatedAt}]
+  let convIndex = [];
+  runInit('loadConvIndex', function () {
+    const idx = loadConvIndex();
+    convIndex = Array.isArray(idx) ? idx : [];
+  });
   /** v0.9.0：convs.json 损坏 / 丢失但还有 conv_*.json 时，扫描对话文件重建索引 */
   function loadConvIndex() {
-    const idx = Store.get('convs.json', null);
-    if (Array.isArray(idx)) return idx;
-    const ids = (window.ConvLog && ConvLog.listConvIds(Store)) || Store.list().filter(n => ConvLog ? ConvLog.isConvJsonName(n) : /^conv_[^./]+\.json$/.test(n)).map(n => n.replace(/^conv_/, '').replace(/\.json$/, ''));
-    if (!ids.length) return [];
-    const rebuilt = Secure.rebuildIndex(ids.map(id => (window.ConvLog && ConvLog.loadMeta(Store, id)) || Store.get('conv_' + id + '.json', null)));
-    Store.set('convs.json', rebuilt);
-    storeIssues.push({ name: 'convs.json', restored: 'rebuild', count: rebuilt.length });
-    console.warn('[store] 已从 ' + ids.length + ' 个对话文件重建 convs.json');
-    return rebuilt;
+    try {
+      const idx = Store.get('convs.json', null);
+      if (Array.isArray(idx)) return idx;
+      const ids = (window.ConvLog && ConvLog.listConvIds(Store)) || Store.list().filter(n => ConvLog ? ConvLog.isConvJsonName(n) : /^conv_[^./]+\.json$/.test(n)).map(n => n.replace(/^conv_/, '').replace(/\.json$/, ''));
+      if (!ids.length) return [];
+      const rebuilt = Secure.rebuildIndex(ids.map(id => (window.ConvLog && ConvLog.loadMeta(Store, id)) || Store.get('conv_' + id + '.json', null)));
+      Store.set('convs.json', rebuilt);
+      storeIssues.push({ name: 'convs.json', restored: 'rebuild', count: rebuilt.length });
+      console.warn('[store] 已从 ' + ids.length + ' 个对话文件重建 convs.json');
+      return rebuilt;
+    } catch (err) { logInitError('loadConvIndex', err); return []; }
   }
   let conv = null;
   let attachments = [];   // 图片 data URL
@@ -211,18 +233,34 @@
   let lastRequest = null;
 
   settings.search = Object.assign(defaultSearch(), settings.search || {});
-  let personas = Personas.mergeBuiltins(Store.get('personas.json', null) || Personas.defaultPersonas(), settings.removedPersonas);
-  let prompts = (Store.get('prompts.json', null) || Personas.defaultPrompts()).map(Personas.normalizePrompt);
+  let personas = [];
+  runInit('personas', function () {
+    personas = Personas.mergeBuiltins(Store.get('personas.json', null) || Personas.defaultPersonas(), settings.removedPersonas);
+  });
+  if (!Array.isArray(personas)) personas = [];
+  let prompts = [];
+  runInit('prompts', function () {
+    prompts = (Store.get('prompts.json', null) || Personas.defaultPrompts()).map(Personas.normalizePrompt);
+  });
+  if (!Array.isArray(prompts)) prompts = [];
   const savePersonas = () => Store.set('personas.json', personas);
   const savePrompts = () => Store.set('prompts.json', prompts);
-  let worlds = (Store.get('worlds.json', null) || Worlds.defaultWorlds()).map(Worlds.normalizeWorld);
+  let worlds = [];
+  runInit('worlds', function () {
+    worlds = (Store.get('worlds.json', null) || Worlds.defaultWorlds()).map(Worlds.normalizeWorld);
+  });
+  if (!Array.isArray(worlds)) worlds = [];
   const saveWorlds = () => Store.set('worlds.json', worlds);
-  let templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
+  let templates = [];
+  runInit('templates', function () {
+    templates = Templates.mergeBuiltins(Store.get('templates.json', null) || Templates.defaultTemplates(), settings.removedTemplates);
+  });
+  if (!Array.isArray(templates)) templates = [];
   const saveTemplates = () => Store.set('templates.json', templates);
   // 全局 Token 用量统计（非插件，独立页面）
   // v0.9.0：用量明细改为追加式 usage-stats.jsonl（每条一行），价格等元数据放 usage-stats-meta.json
   const USAGE_LOG = 'usage-stats.jsonl', USAGE_META = 'usage-stats-meta.json';
-  let usageState = loadUsageStats();
+  let usageState = runInit('usage', loadUsageStats) || UsageStats.normalize(null);
   let lastDiag = null;
   const ROUTER_FILE = 'router-affinity.json';
   let routerState = Store.get(ROUTER_FILE, null) || {};
@@ -307,27 +345,33 @@
   function saveConvSoon(c) { if (!c) return; pendingSaves.set(c.id, c); if (!saveTimer) saveTimer = setTimeout(flushSaves, 500); }
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushSaves(); });
   window.addEventListener('pagehide', flushSaves);
-  const getProvider = id => settings.providers.find(p => p.id === id);
-  const configured = () => settings.providers.filter(hasKey);
+  const getProvider = id => (settings.providers || []).find(p => p && p.id === id);
+  const configured = () => (settings.providers || []).filter(hasKey);
 
   // ---------------- 升级迁移（不改 API Key） ----------------
-  (function migrate() {
-    (settings.providers || []).forEach(Providers.normalizeModelFields); // 0.6.3：补齐模型分类字段（缺失 = ''）
+  runInit('migrate', function () {
+    if (!Array.isArray(settings.providers)) settings.providers = [];
+    settings.providers.forEach(Providers.normalizeModelFields); // 0.6.3：补齐模型分类字段（缺失 = ''）
     const r = Providers.migrateSettings(settings);
     if (!r.changed) return;
     settings = r.settings;
+    if (!Array.isArray(settings.providers)) settings.providers = [];
     let n = 0;
-    convIndex.forEach(meta => {
+    (convIndex || []).forEach(meta => {
+      if (!meta || !meta.id) return;
       const c = loadStoredConv(meta.id);
       if (c && Providers.migrateConversation(c, settings.providers)) { saveConv(c, false); n++; }
     });
     saveSettings();
     if (n) console.log('migrated conversations: ' + n);
-  })();
+  });
   // 合并新增的预设
-  Providers.PRESETS.forEach(pr => {
-    if (pr.presetId !== 'custom' && !settings.providers.some(p => p.presetId === pr.presetId) && !(settings.removedPresets || []).includes(pr.presetId))
-      settings.providers.push(presetToProvider(pr));
+  runInit('mergePresets', function () {
+    if (!Array.isArray(settings.providers)) settings.providers = [];
+    Providers.PRESETS.forEach(pr => {
+      if (pr.presetId !== 'custom' && !settings.providers.some(p => p && p.presetId === pr.presetId) && !(settings.removedPresets || []).includes(pr.presetId))
+        settings.providers.push(presetToProvider(pr));
+    });
   });
 
 
@@ -341,16 +385,16 @@
     const hk = {}; Search.SEARCH_PROVIDERS.forEach(x => { if (Secrets.has('search_key', x.id)) hk[x.id] = true; });
     settings.search.hasKeys = hk;
   }
-  (function migrateSecrets() {
-    settings.providers.forEach(registerProvider);
+  runInit('migrateSecrets', function () {
+    (settings.providers || []).forEach(function (p) { if (p) registerProvider(p); });
     Search.SEARCH_PROVIDERS.forEach(x => registerSearch(x.id));
     const r = Secure.stripSecrets(settings);
     let ok = true;
-    r.secrets.forEach(x => { if (!Secrets.set(x.kind, x.id, x.value)) ok = false; });
+    (r.secrets || []).forEach(x => { if (!Secrets.set(x.kind, x.id, x.value)) ok = false; });
     refreshKeyFlags();
     if (r.changed && ok) { saveSettings(); if (r.secrets.length) console.log('[secrets] 已迁移 ' + r.secrets.length + ' 个密钥到安全存储'); }
     else if (r.changed) console.warn('[secrets] 部分密钥写入安全存储失败，settings.json 暂不改写');
-  })();
+  });
 
   // ---------------- 工具 ----------------
   let toastTimer;
@@ -2657,7 +2701,7 @@
   }
   function closeModelMenu() { $('#model-menu').classList.remove('show'); $('#menu-mask').classList.remove('show'); $('#model-pill').classList.remove('open'); }
   (function bindModelPill() {
-    const pill = $('#model-pill');
+    const pill = $('#model-pill'); if (!pill) return;
     let t = 0, long = false;
     const clear = () => { if (t) { clearTimeout(t); t = 0; } };
     pill.addEventListener('pointerdown', e => {
@@ -4758,8 +4802,8 @@
     }
     renderIgRefs();
   };
-  $('#ig-generate').onclick = () => runImageGenPage();
-  $('#ig-stop').onclick = () => stopImageGenPage();
+  const igGenBtn = $('#ig-generate'); if (igGenBtn) igGenBtn.onclick = () => runImageGenPage();
+  const igStopBtn = $('#ig-stop'); if (igStopBtn) igStopBtn.onclick = () => stopImageGenPage();
   if ($('#ig-provider-sel')) $('#ig-provider-sel').onchange = () => onImageGenProviderChange();
   if ($('#ig-model-sel')) $('#ig-model-sel').addEventListener('change', () => onImageModelSelectChange());
   if ($('#ig-model')) {
@@ -4913,16 +4957,25 @@
   }
 
   // ---------------- 启动 ----------------
-  saveSettings();
-  if (!Store.get('personas.json', null)) savePersonas();
-  if (!Store.get('prompts.json', null)) savePrompts();
-  $('#persona-count').textContent = personas.length + ' 助手 · ' + prompts.length + ' 提示词';
-  $('#plugin-count').textContent = pluginSummaryShort(); $('#set-plugins-sub').textContent = pluginSummary();
-  $('#template-count').textContent = templates.length + ' 个模板';
-  if (!Store.get('templates.json', null)) saveTemplates();
-  backfillUsageStats();
-  updateBalanceSubtitle();
-  if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
-  renderSearchChip();
-  updateSendState();
+  runInit('boot', function () {
+    try { saveSettings(); } catch (err) { logInitError('saveSettings', err); }
+    try { if (!Store.get('personas.json', null)) savePersonas(); } catch (err) { logInitError('savePersonas', err); }
+    try { if (!Store.get('prompts.json', null)) savePrompts(); } catch (err) { logInitError('savePrompts', err); }
+    const personaCountEl = $('#persona-count');
+    if (personaCountEl) personaCountEl.textContent = (personas || []).length + ' 助手 · ' + (prompts || []).length + ' 提示词';
+    const pluginCountEl = $('#plugin-count'); if (pluginCountEl) pluginCountEl.textContent = pluginSummaryShort();
+    const pluginsSubEl = $('#set-plugins-sub'); if (pluginsSubEl) pluginsSubEl.textContent = pluginSummary();
+    const tplCountEl = $('#template-count'); if (tplCountEl) tplCountEl.textContent = (templates || []).length + ' 个模板';
+    try { if (!Store.get('templates.json', null)) saveTemplates(); } catch (err) { logInitError('saveTemplates', err); }
+    try { backfillUsageStats(); } catch (err) { logInitError('backfillUsage', err); }
+    try { updateBalanceSubtitle(); } catch (err) { logInitError('updateBalance', err); }
+    try {
+      if (!(convIndex.length && openConv(convIndex[0].id))) newConv();
+    } catch (err) {
+      logInitError('openConv', err);
+      try { newConv(); } catch (err2) { logInitError('newConv', err2); }
+    }
+    try { renderSearchChip(); } catch (err) { logInitError('renderSearchChip', err); }
+    try { updateSendState(); } catch (err) { logInitError('updateSendState', err); }
+  });
 })();

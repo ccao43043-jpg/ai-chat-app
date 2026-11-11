@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.28.2：启动异常不再让主界面失去响应**
+
+- 初始化加空值保护与 try-catch：单个模块失败不再导致主界面点什么都没反应；模型胶囊不再停在「选择模型」占位
+- 新增启动冒烟测试（无头 Chrome，纳入 `npm test`），发版前必跑
+- Android `0.28.2`（versionCode 84）/ 桌面 / npm `0.28.2`
+
 **v0.28.1：OpenRouter Image API + 生图模型下拉**
 
 - OpenRouter 生图改为新 Image API：`resolution` + `aspect_ratio` + `input_references`（最多 16 张），不再使用旧 `image` 字段，路径仍为 `/images`
