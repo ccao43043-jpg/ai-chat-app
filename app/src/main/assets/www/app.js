@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.28.6';
+  const APP_VERSION = '0.28.7';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -3252,6 +3252,53 @@
     fillWorldVersion(wd); fillWorldLog();
     syncWorldToCurrent(wd);
   };
+  // v0.28.7：一键粘贴完整设定 → 拆到各块；复制当前世界为一段分节全文（不自动保存）
+  const WP_PARSERS = () => ({ RPCache: window.RPCache, AutoChar: window.AutoChar });
+  $('#wd-copy-all').onclick = () => {
+    if (!editingWorld) return;
+    const text = Worlds.formatWorldSections(readWorldForm());
+    if (!text.trim()) { toast('还没有可复制的设定'); return; }
+    copyText(text);
+  };
+  function closeWorldPaste() { $('#wp-mask').classList.remove('show'); }
+  $('#wd-paste').onclick = async () => {
+    if (!editingWorld) return;
+    const ta = $('#wp-text'); ta.value = '';
+    $('#wp-mask').classList.add('show');
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const clip = await navigator.clipboard.readText();
+        if (clip && !ta.value && /【[^】]{1,12}】|^\s{0,3}#{1,3}\s/m.test(clip)) ta.value = clip;
+      }
+    } catch (e) { /* Android WebView 可能不给读剪贴板：手动长按粘贴 */ }
+    setTimeout(() => { try { ta.focus(); } catch (e) {} }, 60);
+  };
+  function writeWorldForm(w) {
+    Worlds.BLOCK_IDS.forEach(id => { const el = $('#wd-block-' + id); if (el) el.value = (w.blocks && w.blocks[id]) || ''; });
+    $('#wd-greeting').value = w.greeting || '';
+    $('#wd-name').value = w.name || '';
+  }
+  function applyWorldPaste(parsed, overwrite) {
+    const form = readWorldForm();
+    const r = Worlds.applySectionsToWorld(form, parsed, { overwrite });
+    writeWorldForm(r.world);
+    const names = r.filled.map(Worlds.sectionTitle);
+    if (r.greetingFilled) names.push('开场白');
+    if (r.nameFilled) names.push('名称');
+    const skippedN = r.skipped.length + (r.greetingSkipped ? 1 : 0) + (r.nameSkipped ? 1 : 0);
+    const head = names.length ? (overwrite ? '已覆盖：' : '已填入：') + names.join('、') : (overwrite ? '内容相同，无需覆盖' : '没有空着的项可填');
+    if (!overwrite && skippedN) {
+      toast(head + '。另有 ' + skippedN + ' 项已有内容未改，检查后点「保存」', [{ label: '覆盖已有', onClick: () => applyWorldPaste(parsed, true) }]);
+    } else toast(head + (names.length ? '，检查后点「保存」' : ''));
+  }
+  $('#wp-cancel').onclick = closeWorldPaste;
+  $('#wp-mask').onclick = e => { if (e.target.id === 'wp-mask') closeWorldPaste(); };
+  $('#wp-ok').onclick = () => {
+    const parsed = Worlds.parseWorldSections($('#wp-text').value, WP_PARSERS());
+    if (!parsed) { toast('没识别到分段：需要至少两段带【世界观】【角色卡】这类标题的设定'); return; }
+    closeWorldPaste();
+    applyWorldPaste(parsed, false);
+  };
   $('#wd-delete').onclick = async () => {
     const wd = worlds.find(x => x.id === editingWorld.id);
     if (!wd) return;
@@ -4344,6 +4391,7 @@
     if (shown('#dialog-mask')) { closeDialog(null); return true; }
     if (shown('#editor')) { closeEditor(null); return true; }
     if (shown('#pe2-mask')) { closePromptEdit(); return true; }
+    if (shown('#wp-mask')) { closeWorldPaste(); return true; }
     if (shown('#rp-quick')) { applyRpQuick(); closeRpQuickPanel(); return true; }
     if (shown('#action-sheet')) { closeActionSheet(); return true; }
     if (shown('#fetch-sheet')) { closeFetch(); return true; }

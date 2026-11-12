@@ -1176,3 +1176,8 @@ html, body { background: var(--bg); }
   background: var(--surface-2); color: var(--fg-2); font-size: 12px; font-weight: 650;
 }
 #rp-quick .field input[type=range] { width: 100%; }
+
+/* v0.28.7：世界编辑「从全文填入 / 复制全文」 */
+.wd-paste-row { display: flex; gap: 8px; margin: 10px 0 4px; }
+.wd-paste-row .ghost-btn { flex: 1; margin: 0; }
+#wp-text { min-height: 38vh; max-height: 52vh; font-size: 14px; }

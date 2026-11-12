@@ -623,6 +623,91 @@
     return BLOCK_IDS.filter(id => (b[id] || '').trim()).length;
   }
 
+  /* ---------- v0.28.7：一键粘贴完整设定 → 拆到各块；当前世界 → 一段分节全文 ---------- */
+  /** 与「角色卡 Skill」/ AutoChar 输出一致的标题字面 */
+  const SECTION_TITLES = { world: '世界观', character: '角色卡', rules: 'RP规则', format: '输出格式', fewshot: '示例对白', prohibit: '禁止事项', style: '写作风格' };
+  const KEEP_MARK = '\u2063'; // 不可见分隔符：保护正文里的小标题不被 parseSections 当成段落切断
+  const KNOWN_HEAD = /^(世界观|世界背景|背景设定|世界设定|角色卡|角色设定|人物设定|角色|RP ?规则|规则|扮演规则|输出格式|回复格式|格式|示例对白|示例对话|对白示例|禁止事项|禁止|写作风格|文风|风格|开场白|开场|开场旁白|精修说明|说明|备注)$/i;
+  function protectSubheads(text) {
+    return String(text || '').split('\n').map(line => {
+      const m = line.match(/^\s*(?:#+\s*)?(?:\*\*)?【([^】]{1,12})】/) || line.match(/^\s{0,3}#{1,3}\s+([^\n]{1,12})\s*$/);
+      if (m && !KNOWN_HEAD.test(m[1].trim())) return KEEP_MARK + line;
+      return line;
+    }).join('\n');
+  }
+  function unprotect(s) { return String(s || '').split(KEEP_MARK).join(''); }
+  function pickParsers(parsers) {
+    const p = parsers || {};
+    const rp = p.RPCache || p.rpcache || (p.parseSections ? p : null) || root.RPCache || null;
+    const ac = p.AutoChar || p.autochar || root.AutoChar || null;
+    return { rp, ac };
+  }
+  /**
+   * 解析粘贴的完整设定 → { blocks, greeting, name, fields }；少于 2 个可导入块返回 null（同 RPCache.parseSections）。
+   * parsers：{ RPCache, AutoChar }（AutoChar 可选，用于容错标题 / 思考块 / 取姓名）。
+   */
+  function parseWorldSections(text, parsers) {
+    const { rp, ac } = pickParsers(parsers);
+    if (!rp || typeof rp.parseSections !== 'function') return null;
+    let t = String(text || '');
+    if (!t.trim()) return null;
+    if (ac && typeof ac.normalize === 'function') t = ac.normalize(t);
+    const raw = rp.parseSections(protectSubheads(t));
+    if (!raw) return null;
+    const fields = {};
+    Object.keys(raw).forEach(k => { const v = canonBlock(unprotect(raw[k])); if (v) fields[k] = v; });
+    const blocks = {};
+    BLOCK_IDS.forEach(id => { if (fields[id]) blocks[id] = fields[id]; });
+    if (Object.keys(blocks).length < 2) return null;
+    let name = '';
+    if (ac && typeof ac.charName === 'function') name = ac.charName(fields) || '';
+    else {
+      const m = String(fields.character || '').replace(/\*\*|__/g, '').match(/(?:姓名|名字|角色名)\s*[：:]\s*([^\n，,（(、；;/|]{1,20})/);
+      name = m ? m[1].trim().replace(/[。.\s]+$/, '') : '';
+    }
+    return { blocks, greeting: fields.opening || '', name, fields };
+  }
+  const isBlank = v => !String(v == null ? '' : v).trim();
+  /**
+   * 把解析结果写进世界（表单值）：overwrite=false 只填空的块 / 开场白 / 名称；true 覆盖所有解析到的项。
+   * 只处理解析到的键，不会清空其它字段。→ { world, filled, skipped, greetingFilled, nameFilled }
+   */
+  function applySectionsToWorld(world, parsed, opts) {
+    const overwrite = !!(opts && opts.overwrite);
+    const src = world && typeof world === 'object' ? world : {};
+    const out = Object.assign({}, src, { blocks: Object.assign({}, src.blocks || {}) });
+    const filled = [], skipped = [];
+    let greetingFilled = false, nameFilled = false, greetingSkipped = false, nameSkipped = false;
+    if (!parsed || !parsed.blocks) return { world: out, filled, skipped, greetingFilled, nameFilled, greetingSkipped, nameSkipped };
+    BLOCK_IDS.forEach(id => {
+      const v = parsed.blocks[id];
+      if (isBlank(v)) return;
+      if (!overwrite && !isBlank(out.blocks[id])) { if (canonBlock(out.blocks[id]) !== canonBlock(v)) skipped.push(id); return; }
+      if (canonBlock(out.blocks[id]) === canonBlock(v)) return;
+      out.blocks[id] = v; filled.push(id);
+    });
+    if (!isBlank(parsed.greeting)) {
+      if (!overwrite && !isBlank(out.greeting)) { if (String(out.greeting).trim() !== String(parsed.greeting).trim()) greetingSkipped = true; }
+      else if (String(out.greeting || '').trim() !== String(parsed.greeting).trim()) { out.greeting = parsed.greeting; greetingFilled = true; }
+    }
+    if (!isBlank(parsed.name)) {
+      if (!overwrite && !isBlank(out.name)) { if (String(out.name).trim() !== String(parsed.name).trim()) nameSkipped = true; }
+      else if (String(out.name || '').trim() !== String(parsed.name).trim()) { out.name = parsed.name; nameFilled = true; }
+    }
+    return { world: out, filled, skipped, greetingFilled, nameFilled, greetingSkipped, nameSkipped };
+  }
+  /** 当前世界 → 一段【世界观】【角色卡】…【开场白】全文；空块省略 */
+  function formatWorldSections(world) {
+    const w = world && typeof world === 'object' ? world : {};
+    const b = w.blocks || {};
+    const parts = [];
+    BLOCK_IDS.forEach(id => { const v = canonBlock(b[id]); if (v.trim()) parts.push('【' + SECTION_TITLES[id] + '】\n' + v); });
+    const g = canonBlock(w.greeting);
+    if (g.trim()) parts.push('【开场白】\n' + g);
+    return parts.join('\n\n');
+  }
+  function sectionTitle(id) { return id === 'opening' ? '开场白' : (SECTION_TITLES[id] || id); }
+
   const api = {
     BLOCK_IDS, BLOCK_META, emptyBlocks, normalizeBlocks, normalizeWorld,
     defaultWorlds, upsert, duplicate, remove, blocksChanged,
@@ -631,6 +716,7 @@
     formatDriftMessage, planSync, applySyncToConversation, applyPendingBlock,
     rollbackWorldLog, shouldShowDrift, blockTitle,
     WORLD_START_TEMPLATE_ID, immersiveFields, conversationFromWorld, applyWorldToState, applyWorldToConversation, greetingMessage, filledBlockCount,
+    SECTION_TITLES, parseWorldSections, applySectionsToWorld, formatWorldSections, sectionTitle,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Worlds = api;

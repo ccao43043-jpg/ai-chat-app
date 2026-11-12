@@ -280,7 +280,7 @@
       <button class="row-btn" id="btn-export-legacy">导出对话为旧格式</button>
       <button class="row-btn danger" id="btn-clear-all">删除全部对话</button>
     </div>
-    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.28.6 · 数据仅存储在本机</small></div></div>
+    <div class="about"><img src="logo.svg" alt=""><div><b>AI Chat</b><br><small id="about-ver">v0.28.7 · 数据仅存储在本机</small></div></div>
     </div>
   </div>
 </section>
@@ -479,6 +479,10 @@
     <div class="hint soft" id="wd-version" style="margin:8px 0 0"></div>
     <div class="group-title">L1 设定（写入 RP 缓存块）</div>
     <div class="hint soft">与 RP 缓存「固定设定」块一致。角色卡 / 禁止 / 示例对白里可写必须、禁止与情感对白样例。</div>
+    <div class="wd-paste-row" id="wd-paste-row">
+      <button class="ghost-btn" id="wd-paste" type="button">📋 从全文填入</button>
+      <button class="ghost-btn" id="wd-copy-all" type="button">复制全文</button>
+    </div>
     <div class="group form" id="wd-blocks"></div>
     <div class="group" style="margin-top:12px">
       <button class="pill-btn primary" id="wd-start" type="button" style="width:100%">用此世界开聊</button>
@@ -586,6 +590,19 @@
     <div class="btn-row">
       <button class="pill-btn" id="tv-cancel">取消</button>
       <button class="pill-btn primary" id="tv-ok">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.28.7：世界「从全文填入」 -->
+<div id="wp-mask" class="mask center">
+  <div class="dialog">
+    <div class="dialog-title">从全文填入</div>
+    <div class="hint small" style="margin:0 0 6px">粘贴带【世界观】【角色卡】【RP规则】等标题的完整设定，将自动拆到下面各块；【开场白】填到上方开场白。只填空着的项，已有内容可在提示里选「覆盖已有」。填入后请检查并点「保存」。</div>
+    <label class="field"><textarea id="wp-text" rows="10" placeholder="粘贴带【世界观】【角色卡】【RP规则】等标题的完整设定，将自动拆到下面各块；【开场白】填到上方开场白。"></textarea></label>
+    <div class="btn-row">
+      <button class="pill-btn" id="wp-cancel" type="button">取消</button>
+      <button class="pill-btn primary" id="wp-ok" type="button">填入</button>
     </div>
   </div>
 </div>
