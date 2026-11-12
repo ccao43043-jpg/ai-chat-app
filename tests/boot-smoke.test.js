@@ -28,6 +28,25 @@ const OLD_CONV = {
   createdAt: 1, updatedAt: 1,
 };
 
+// v0.24.x 旧数据：OpenRouter 服务商编辑页刷新最低价后，modelMeta 里落盘了 _endpoints（v0.26.0 起启动时会同步进用量价目）。
+// v0.28.3 及以前：syncPricesFromProviderMeta 在 saveUsageMeta 声明前调用 → TDZ ReferenceError，主界面点击全失效。
+const V024_OR_MODEL = 'deepseek/deepseek-chat';
+const V024_OR_SETTINGS = {
+  providers: [
+    { id: 'openrouter', presetId: 'openrouter', name: 'OpenRouter', type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', models: [V024_OR_MODEL, 'openai/gpt-4o-mini'], imageModel: '',
+      modelMeta: {
+        [V024_OR_MODEL]: { contextLength: 64000, price: { prompt: 0.3, completion: 1.2 }, priceIsFloor: true,
+          _endpoints: [
+            { provider_name: 'DeepInfra', pricing: { prompt: '0.0000003', completion: '0.0000012', input_cache_read: '0.00000003' } },
+            { provider_name: 'Novita', pricing: { prompt: '0.0000004', completion: '0.0000013' } },
+          ] },
+        'openai/gpt-4o-mini': { contextLength: 128000, endpoints: [{ provider_name: 'OpenAI', pricing: { prompt: '0.00000015', completion: '0.0000006' } }] },
+      } },
+  ],
+  systemPrompt: '', stream: true, temperature: '', maxTokens: '', imageSize: '1024x1024',
+  lastProviderId: 'openrouter', lastModel: V024_OR_MODEL,
+};
+
 function injectBridge(opts) {
   return (opts) => {
     const mem = Object.assign({}, opts.seed || {});
@@ -188,6 +207,7 @@ test('启动冒烟：完整桥 / 残缺桥 / 抛错 / 迁移 / 空服务商，�
       'convs.json': JSON.stringify([{ id: 'oldc1', title: '旧对话', providerId: 'deepseek', model: 'deepseek-reasoner', updatedAt: 1 }]),
       'conv_oldc1.json': JSON.stringify(OLD_CONV),
     } },
+    { name: 'v024-openrouter-endpoints', bridge: 'complete', seed: { 'settings.json': JSON.stringify(V024_OR_SETTINGS) } },
   ];
   try {
     for (const c of cases) {
@@ -203,6 +223,48 @@ test('启动冒烟：完整桥 / 残缺桥 / 抛错 / 迁移 / 空服务商，�
         assert.notEqual(snap.mp, '选择模型', c.name + ' 模型胶囊不应停留在 HTML 占位（说明 boot 未跑完）');
         assert.ok(snap.igSel, '生图页模型下拉应存在');
         await assertClicksWork(page);
+      } finally {
+        await page.close();
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test('启动回归（v0.28.4）：v0.24 旧 settings 带 OpenRouter modelMeta._endpoints，无 TDZ ReferenceError，最低价写入用量价目，按钮已绑定', async (t) => {
+  if (!chromeAvailable()) { t.skip('未找到 Chrome（' + CHROME + '），无法跑界面冒烟'); return; }
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    headless: 'new',
+    args: ['--no-sandbox', '--allow-file-access-from-files', '--disable-gpu'],
+  });
+  try {
+    let seed = { 'settings.json': JSON.stringify(V024_OR_SETTINGS) };
+    for (const launch of [1, 2]) { // 第二次启动：确认价目已落盘、不会每次启动重抛
+      const { page, errors } = await openPage(browser, { bridge: 'complete', seed });
+      try {
+        const st = await page.evaluate(() => ({
+          errs: window.__pageErrors || [],
+          menuOnclick: typeof document.getElementById('btn-menu').onclick,
+          newOnclick: typeof document.getElementById('btn-new').onclick,
+          mp: (document.getElementById('mp-model') && document.getElementById('mp-model').textContent) || '',
+          meta: window.__mem['usage-stats-meta.json'] || null,
+          mem: Object.assign({}, window.__mem),
+          initIssues: (window.__diag && window.__diag.dump && (window.__diag.dump().match(/\[init\][^\n]*/g) || [])) || [],
+        }));
+        const all = errors.concat(st.errs);
+        assert.equal(all.length, 0, '第 ' + launch + ' 次启动未捕获异常: ' + all.join(' | '));
+        assert.ok(!all.some(e => /ReferenceError|before initialization/.test(e)), '不应有 TDZ ReferenceError');
+        assert.ok(!st.initIssues.some(l => /syncPrices/.test(l)), '价目同步不应记 [init] 错误: ' + st.initIssues.join(' | '));
+        assert.equal(st.menuOnclick, 'function', '#btn-menu 应已绑定 onclick');
+        assert.equal(st.newOnclick, 'function', '#btn-new 应已绑定 onclick');
+        assert.notEqual(st.mp, '选择模型', '模型胶囊不应停留在 HTML 占位');
+        assert.ok(st.meta, 'syncUsagePricesFromEndpoints 应调用 saveUsageMeta 写入 usage-stats-meta.json');
+        const prices = JSON.parse(st.meta).prices || {};
+        assert.ok(prices[V024_OR_MODEL], '最低价应同步进用量价目: ' + st.meta);
+        await assertClicksWork(page);
+        seed = st.mem;
       } finally {
         await page.close();
       }

@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.28.4：修复从 v0.24 升级后主界面点击无响应**
+
+- 修复启动时 `saveUsageMeta` 在声明前被调用（TDZ）：v0.24 旧设置里带 OpenRouter 最低价 `_endpoints` 时，启动报错导致按钮全部没绑定
+- 价目同步改在 `runInit` 中执行，失败不再中断启动；启动冒烟新增 v0.24 旧数据回归用例
+- Android `0.28.4`（versionCode 86）/ 桌面 / npm `0.28.4`
+
 **v0.28.3：诊断构建（定位主界面点击无响应）**
 
 - 右上角「诊」面板：即使 `app.js` 失败也能记录错误、`[init]` 日志与点击命中（elementFromPoint / handler 是否执行），并支持复制
