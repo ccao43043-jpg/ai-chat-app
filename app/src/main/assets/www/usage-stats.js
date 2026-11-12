@@ -152,8 +152,8 @@
     let cost = 0, priced = 0, actualSum = 0, actualN = 0;
     (list || []).forEach(e => {
       const c = costOf(e, prices, mode, peak, calib);
-      if (c != null) { cost += c; priced++; }
-      if (e && typeof e.actualCost === 'number' && e.actualCost > 0) { actualSum += e.actualCost; actualN++; }
+      if (typeof c === 'number' && isFinite(c)) { cost += c; priced++; } // v0.28.5：NaN/Infinity 不计入，避免合计 $NaN
+      if (e && typeof e.actualCost === 'number' && isFinite(e.actualCost) && e.actualCost > 0) { actualSum += e.actualCost; actualN++; }
     });
     return { cost, priced, total: (list || []).length, actualSum, actualN };
   }

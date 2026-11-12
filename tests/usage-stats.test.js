@@ -118,3 +118,85 @@ test('日期范围 preset 与 clear / CSV', () => {
   assert.strictEqual(s.log.length, 0);
   assert.ok(s.backfilled);
 });
+
+// ---------- v0.28.5：部分价目 / NaN 不得让估算花费变成 $NaN ----------
+const CostCore = require('../app/src/main/assets/www/cost-core.js');
+const fsNan = require('fs');
+const pathNan = require('path');
+
+test('v0.28.5：价目缺 hit/out（OpenRouter 部分最低价）时 estimateCost 仍为有限数', () => {
+  const prices = Object.assign({}, U.DEFAULT_PRICES, { 'vendor/partial': { miss: 0.3, source: 'openrouter-floor' } });
+  const list = [
+    U.makeEntry({ usage: usage(4000, 600, 3000, 1000), model: 'vendor/partial', at: 1000, key: 'p1' }),
+    U.makeEntry({ usage: usage(1200, 300), model: 'deepseek-chat', at: 2000, key: 'p2' }),
+  ];
+  const est = U.estimateCost(list, prices, 'peak');
+  assert.ok(Number.isFinite(est.cost), 'cost 应为有限数: ' + est.cost);
+  assert.ok(est.cost > 0);
+  assert.strictEqual(est.priced, 2);
+  // 单条
+  const one = CostCore.costOfEntry(list[0], prices, 'peak');
+  assert.ok(Number.isFinite(one), 'costOfEntry 应为有限数: ' + one);
+  // 1000 miss × 0.3 / 1e6；hit / out 缺失按 0
+  assert.ok(Math.abs(one - 1000 * 0.3 / 1e6) < 1e-12, String(one));
+  const raw = CostCore.costOf({ model: 'vendor/partial', prompt_tokens: 4000, cache_hit_tokens: 3000, cache_miss_tokens: 1000, completion_tokens: 600 }, prices, 'peak');
+  assert.ok(Number.isFinite(raw.actual) && Number.isFinite(raw.noCache) && Number.isFinite(raw.saved), JSON.stringify(raw));
+});
+
+test('v0.28.5：价目字段为 NaN / 非数字字符串、条目 token 缺失时不污染合计', () => {
+  const prices = Object.assign({}, U.DEFAULT_PRICES, {
+    'bad-nan': { hit: NaN, miss: NaN, out: 'abc' },
+    'str-ok': { hit: '0.1', miss: '1', out: '2' },
+  });
+  const list = [
+    { model: 'bad-nan', at: 1, prompt: 100, completion: 10, hit: 50, miss: 50, cache: true },
+    { model: 'str-ok', at: 2, prompt: 1000, completion: 1000, hit: 0, miss: 1000, cache: false },
+    { model: 'deepseek-chat', at: 3, prompt: undefined, completion: undefined, cache: true },
+    { model: 'unknown-x', at: 4, prompt: 100, completion: 10 }, // default 兜底分支，hit/miss 未给
+  ];
+  const est = U.estimateCost(list, prices, 'peak');
+  assert.ok(Number.isFinite(est.cost), 'cost 应为有限数: ' + est.cost);
+  assert.ok(Math.abs(CostCore.costOfEntry(list[1], prices, 'peak') - (1000 * 1 + 1000 * 2) / 1e6) < 1e-12);
+});
+
+test('v0.28.5：价目为 Infinity 时合计仍为有限数', () => {
+  const prices = Object.assign({}, U.DEFAULT_PRICES, { 'inf-model': { hit: 0, miss: Infinity, out: 1 } });
+  const est = U.estimateCost([{ model: 'inf-model', at: 1, prompt: 10, completion: 1, hit: 0, miss: 10, cache: false }], prices, 'peak');
+  assert.ok(Number.isFinite(est.cost), 'Infinity 价目按 0 处理，合计仍为有限数: ' + est.cost);
+});
+
+test('v0.28.5：mergeFloorPrice 只给部分字段时补齐 miss/hit/out', () => {
+  const a = CostCore.mergeFloorPrice({}, 'm1', { prompt: 0.3 }, 5).m1;
+  assert.strictEqual(a.miss, 0.3);
+  assert.ok(Number.isFinite(a.hit) && Number.isFinite(a.out), JSON.stringify(a));
+  assert.strictEqual(a.out, CostCore.USAGE_DEFAULT_PRICES.default.out);
+  // 旧条目有 out/hit：保留
+  const b = CostCore.mergeFloorPrice({ m2: { hit: 0.02, miss: 1, out: 4 } }, 'm2', { prompt: 0.5 }, 6).m2;
+  assert.deepStrictEqual({ hit: b.hit, miss: b.miss, out: b.out }, { hit: 0.02, miss: 0.5, out: 4 });
+  // 只给 completion：miss 用 default 兜底
+  const c = CostCore.mergeFloorPrice({}, 'm3', { completion: 2 }, 7).m3;
+  assert.strictEqual(c.out, 2);
+  assert.strictEqual(c.miss, CostCore.USAGE_DEFAULT_PRICES.default.miss);
+  // 合并后估算不为 NaN
+  const est = U.estimateCost([{ model: 'm1', at: 1, prompt: 100, completion: 50, hit: 20, miss: 80, cache: true }],
+    Object.assign({}, U.DEFAULT_PRICES, { m1: a }), 'peak');
+  assert.ok(Number.isFinite(est.cost) && est.cost > 0);
+});
+
+test('v0.28.5：app.js 的 usFmtUsd / fmtUsdShort 永不输出 $NaN', () => {
+  const src = fsNan.readFileSync(pathNan.join(__dirname, '../app/src/main/assets/www/app.js'), 'utf8');
+  const m1 = src.match(/const usFmtUsd = (v => [^\n]+);/);
+  assert.ok(m1, '找不到 usFmtUsd');
+  const usFmtUsd = eval(m1[1]);
+  const m2 = src.match(/function fmtUsdShort\(n\) \{[\s\S]*?\n  \}/);
+  assert.ok(m2, '找不到 fmtUsdShort');
+  const fmtUsdShort = eval('(' + m2[0] + ')');
+  [NaN, Infinity, -Infinity, undefined, null, 'abc'].forEach(v => {
+    assert.doesNotMatch(String(usFmtUsd(v)), /NaN|Infinity/, 'usFmtUsd(' + String(v) + ')');
+    assert.doesNotMatch(String(fmtUsdShort(v)), /NaN|Infinity/, 'fmtUsdShort(' + String(v) + ')');
+  });
+  assert.strictEqual(usFmtUsd(NaN), '—');
+  assert.strictEqual(usFmtUsd(0.302), '$0.302');
+  assert.strictEqual(fmtUsdShort(0), '$0.0');
+  assert.strictEqual(fmtUsdShort(1.5), '$1.50');
+});

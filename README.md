@@ -48,6 +48,12 @@ exe 未做代码签名，首次运行时 Windows SmartScreen 可能提示「Wind
 
 ## 功能
 
+**v0.28.5：窄屏用量弹层跑出屏幕 + 估算花费 `$NaN`**
+
+- 顶栏用量弹层、Composer「更多工具」不再套通用弹层的 `translate(-50%)` 居中，打开后夹回视口；窄屏（384px）上「今日花费」「用量详情」不再跑到屏幕外
+- OpenRouter 最低价只给部分字段时补齐 `miss` / `hit` / `out`；估算花费只累加有限数，格式化遇到非有限数显示「—」，用量页不再出现 `$NaN`
+- Android `0.28.5`（versionCode 87）/ 桌面 / npm `0.28.5`
+
 **v0.28.4：修复从 v0.24 升级后主界面点击无响应**
 
 - 修复启动时 `saveUsageMeta` 在声明前被调用（TDZ）：v0.24 旧设置里带 OpenRouter 最低价 `_endpoints` 时，启动报错导致按钮全部没绑定
