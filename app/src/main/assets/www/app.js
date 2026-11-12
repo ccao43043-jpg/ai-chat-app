@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.28.4';
+  const APP_VERSION = '0.28.5';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -893,7 +893,7 @@
     return (ids || []).map(id => (list || []).find(x => x && x.id === id)).filter(Boolean);
   }
   function fmtUsdShort(n) {
-    if (!(n > 0) && n !== 0) return '用量';
+    if (typeof n !== 'number' || !isFinite(n) || n < 0) return '—'; // v0.28.5：NaN/非数字不显示 $NaN
     if (n < 0.01) return '$' + Number(n).toPrecision(2);
     if (n < 10) return '$' + n.toFixed(2);
     return '$' + n.toFixed(1);
@@ -904,7 +904,7 @@
     const list = UsageStats.filterLog(usageState.log, range);
     const sum = UsageStats.sumList(list);
     const est = UsageStats.estimateCost(list, usageState.prices, usageState.priceMode, null, usageState.calib);
-    return { cost: est.cost || 0, total: sum.total || 0, requests: sum.requests || 0, priced: est.priced || 0 };
+    return { cost: (typeof est.cost === 'number' && isFinite(est.cost)) ? est.cost : 0, total: sum.total || 0, requests: sum.requests || 0, priced: est.priced || 0 };
   }
   function firstBalanceText() {
     let cache;
@@ -932,6 +932,25 @@
       else { balEl.textContent = ''; balEl.hidden = true; }
     }
   }
+  /** v0.28.5：弹层按 JS 定位时去掉通用 .popover 的 translate(-50%)，并夹回视口内（左右各留 8px） */
+  function clampPopoverIntoView(m, anchor) {
+    if (!m) return;
+    const pad = 8, vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    m.style.transform = 'none';
+    const rect = m.getBoundingClientRect();
+    let left = rect.left;
+    if (anchor === 'right') {
+      if (left < pad) {
+        const right = Math.max(pad, Math.round(vw - pad - rect.width));
+        m.style.right = right + 'px'; m.style.left = 'auto';
+      }
+    } else if (left + rect.width > vw - pad || left < pad) {
+      left = Math.min(Math.max(pad, left), Math.max(pad, vw - pad - rect.width));
+      m.style.left = Math.round(left) + 'px'; m.style.right = 'auto';
+    }
+    const r2 = m.getBoundingClientRect();
+    if (r2.left < pad || r2.right > vw - pad) { m.style.left = pad + 'px'; m.style.right = pad + 'px'; m.style.width = 'auto'; }
+  }
   function closeUsageMenu() {
     const m = $('#usage-menu'); if (!m) return;
     m.hidden = true; m.classList.remove('show');
@@ -951,7 +970,9 @@
     m.style.top = Math.round(r.bottom + 6) + 'px';
     m.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
     m.style.left = 'auto';
+    m.style.bottom = 'auto';
     m.hidden = false; m.classList.add('show');
+    clampPopoverIntoView(m, 'right');
     const uBtn = m.querySelector('#um-open-usage'); if (uBtn) uBtn.onclick = () => { closeUsageMenu(); openUsage(); };
     const bBtn = m.querySelector('#um-open-bal'); if (bBtn) bBtn.onclick = () => { closeUsageMenu(); openBalance(); };
   }
@@ -2559,7 +2580,9 @@
     m.style.left = Math.max(8, Math.round(r.left)) + 'px';
     m.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + 6)) + 'px';
     m.style.top = 'auto';
+    m.style.right = 'auto';
     m.hidden = false; m.classList.add('show');
+    clampPopoverIntoView(m, 'left');
     b.setAttribute('aria-expanded', 'true');
   }
   const moreBtn = $('#btn-composer-more');
@@ -4470,7 +4493,8 @@
   // ---------------- 用量统计页 ----------------
   let usRange = '30d', usTab = 'day', usCustom = null;
   const usFmtN = n => (n == null ? '—' : n >= 1e8 ? (n / 1e8).toFixed(2) + '亿' : n >= 1e4 ? (n / 1e4).toFixed(n >= 1e5 ? 1 : 2).replace(/\.?0+$/, '') + '万' : String(Math.round(n)));
-  const usFmtUsd = v => (v == null ? '—' : '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3)));
+  // v0.28.5：非有限数（NaN/Infinity/非数字）显示 —，绝不出现 $NaN
+  const usFmtUsd = v => ((typeof v !== 'number' || !isFinite(v)) ? '—' : '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(3)));
   // ---------------- 生图页 ----------------
   // 独立于聊天顶栏：settings.imageGenProviderId / imageGenModel
   // 聊天输入框「图片模式」(#btn-imagegen) 仍用当前对话服务商，见 generateImage(currentProvider)

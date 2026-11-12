@@ -88,7 +88,7 @@ async function openPage(browser, opts) {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(String(e.message || e)));
-  await page.setViewport({ width: 390, height: 820, isMobile: true, hasTouch: true });
+  await page.setViewport(Object.assign({ width: 390, height: 820, isMobile: true, hasTouch: true }, opts.viewport || {}));
   if (opts.bridge !== 'none') await page.evaluateOnNewDocument(injectBridge(opts), opts);
   else {
     await page.evaluateOnNewDocument(() => {
@@ -123,6 +123,29 @@ async function tap(page, sel) {
   await sleep(200);
 }
 
+// v0.28.5：JS 贴边定位的弹层必须完整落在视口内（旧版 .popover.show 的 translate(-50%) 会把用量弹层左半截推出屏幕）
+async function assertPopoverOnScreen(page, sel, label) {
+  await sleep(300); // 等开场动画结束
+  const g = await page.$eval(sel, el => {
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const btns = Array.from(el.querySelectorAll('button')).map(b => {
+      const br = b.getBoundingClientRect();
+      return { text: (b.textContent || '').trim(), left: br.left, right: br.right, top: br.top, bottom: br.bottom, w: br.width, h: br.height };
+    });
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw, vh, transform: getComputedStyle(el).transform, btns };
+  });
+  const info = label + ' ' + JSON.stringify({ left: g.left, right: g.right, top: g.top, bottom: g.bottom, vw: g.vw, transform: g.transform });
+  assert.ok(g.left >= 8 - 0.5, label + ' 左边缘应 ≥ 8px：' + info);
+  assert.ok(g.right <= g.vw - 8 + 0.5, label + ' 右边缘不应超出视口：' + info);
+  assert.ok(g.top >= 0 && g.bottom <= g.vh + 0.5, label + ' 上下不应超出视口：' + info);
+  g.btns.forEach(b => {
+    assert.ok(b.w > 0 && b.h > 0, label + ' 按钮「' + b.text + '」应可见');
+    assert.ok(b.left >= 0 && b.right <= g.vw && b.left >= g.left - 0.5 && b.right <= g.right + 0.5, label + ' 按钮「' + b.text + '」不应被裁到屏幕外：' + JSON.stringify(b) + ' ' + info);
+  });
+  return g;
+}
+
 async function assertClicksWork(page) {
   // 侧栏
   await tap(page, '#btn-menu');
@@ -137,6 +160,7 @@ async function assertClicksWork(page) {
   // 用量
   await tap(page, '#usage-pill');
   assert.ok(await page.$eval('#usage-menu', el => !el.hidden && el.classList.contains('show')), '点击用量应打开用量菜单');
+  await assertPopoverOnScreen(page, '#usage-menu', '用量弹层');
   await closeOverlays(page);
 
   // 新对话
@@ -151,6 +175,7 @@ async function assertClicksWork(page) {
   // Composer +
   await tap(page, '#btn-composer-more');
   assert.ok(await page.$eval('#composer-more-menu', el => !el.hidden && el.classList.contains('show')), '点击 Composer + 应打开更多工具');
+  await assertPopoverOnScreen(page, '#composer-more-menu', '更多工具弹层');
   await closeOverlays(page);
 
   // 模板
@@ -268,6 +293,77 @@ test('启动回归（v0.28.4）：v0.24 旧 settings 带 OpenRouter modelMeta._e
       } finally {
         await page.close();
       }
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// v0.28.5：小米 2410DPN6CC 实机视口 384x792（dpr 3.75）。旧版用量弹层右对齐却仍套 translate(-50%)，
+// 「今日花费 / 用量详情」跑到屏幕左外侧；部分 OpenRouter 最低价（缺 hit/out）让用量页「估算花费」显示 $NaN。
+const PARTIAL_MODEL = 'vendor/partial-floor-model';
+function nanSeed() {
+  const now = Date.now();
+  const meta = { version: 1, backfilled: true, priceMode: 'auto', calib: {},
+    prices: { [PARTIAL_MODEL]: { miss: 0.3, source: 'openrouter-floor', syncedAt: now } } }; // 缺 hit / out
+  const line = e => JSON.stringify(e);
+  const log = [
+    { id: 'u1', key: 'k1', at: now - 60000, type: 'chat', prompt: 4000, completion: 600, hit: 3000, miss: 1000, cache: true, model: PARTIAL_MODEL, providerId: 'openrouter', actualCost: 0.002 },
+    { id: 'u2', key: 'k2', at: now - 30000, type: 'chat', prompt: 1200, completion: 300, hit: 0, miss: 1200, cache: false, model: 'deepseek-chat', providerId: 'deepseek' },
+  ];
+  return {
+    'settings.json': JSON.stringify(V024_OR_SETTINGS),
+    'usage-stats-meta.json': JSON.stringify(meta),
+    'usage-stats.jsonl': log.map(line).join('\n') + '\n',
+  };
+}
+
+test('窄屏回归（v0.28.5）：384x792 下用量弹层 / 更多工具完整在屏内；部分价目不让估算花费变 $NaN', async (t) => {
+  if (!chromeAvailable()) { t.skip('未找到 Chrome（' + CHROME + '），无法跑界面冒烟'); return; }
+  const browser = await puppeteer.launch({
+    executablePath: CHROME,
+    headless: 'new',
+    args: ['--no-sandbox', '--allow-file-access-from-files', '--disable-gpu'],
+  });
+  try {
+    const { page, errors } = await openPage(browser, { bridge: 'complete', seed: nanSeed(), viewport: { width: 384, height: 792, deviceScaleFactor: 3.75 } });
+    try {
+      assert.equal(errors.length, 0, '未捕获异常: ' + errors.join(' | '));
+      assert.equal(await page.evaluate(() => window.innerWidth), 384);
+
+      await tap(page, '#usage-pill');
+      assert.ok(await page.$eval('#usage-menu', el => !el.hidden && el.classList.contains('show')), '点击用量应打开用量菜单');
+      const g = await assertPopoverOnScreen(page, '#usage-menu', '用量弹层(384)');
+      const texts = g.btns.map(b => b.text);
+      assert.ok(texts.includes('用量详情') && texts.includes('账户余额'), '应有 用量详情 / 账户余额 按钮: ' + texts.join(','));
+      const menuText = await page.$eval('#usage-menu', el => el.textContent);
+      assert.match(menuText, /今日花费/);
+      assert.doesNotMatch(menuText, /NaN/, '用量弹层不应出现 NaN: ' + menuText);
+      // 「今日花费」标签本身也必须在屏内
+      const k = await page.$eval('#usage-menu .um-k', el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; });
+      assert.ok(k.left >= 8 - 0.5, '「今日花费」标签应在屏内: ' + JSON.stringify(k));
+      const pillText = await page.$eval('#usage-pill', el => el.textContent + ' ' + (el.title || ''));
+      assert.doesNotMatch(pillText, /NaN/, '用量胶囊不应出现 NaN: ' + pillText);
+
+      // 进入用量详情：估算花费不应是 $NaN
+      await page.$eval('#um-open-usage', el => el.click());
+      await sleep(300);
+      const usage = await page.$eval('#page-usage', el => ({ show: el.classList.contains('show'), text: el.textContent }));
+      assert.ok(usage.show, '点击「用量详情」应打开用量统计页');
+      assert.match(usage.text, /估算花费/);
+      assert.doesNotMatch(usage.text, /NaN/, '用量统计页不应出现 $NaN: ' + usage.text.slice(0, 400));
+      await page.evaluate(() => document.getElementById('page-usage').classList.remove('show'));
+      await closeOverlays(page);
+
+      await tap(page, '#btn-composer-more');
+      assert.ok(await page.$eval('#composer-more-menu', el => !el.hidden && el.classList.contains('show')), '点击 Composer + 应打开更多工具');
+      await assertPopoverOnScreen(page, '#composer-more-menu', '更多工具弹层(384)');
+      await closeOverlays(page);
+
+      const errs = await page.evaluate(() => window.__pageErrors || []);
+      assert.deepEqual(errs, [], '操作过程中不应有未捕获异常');
+    } finally {
+      await page.close();
     }
   } finally {
     await browser.close();

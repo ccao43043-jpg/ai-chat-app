@@ -1,3 +1,15 @@
+**v0.28.5：窄屏用量弹层跑出屏幕 + 估算花费 `$NaN`**
+
+- **用量弹层跑出屏幕**：顶栏用量弹层（`#usage-menu`）由 JS 贴右对齐，却仍继承通用 `.popover.show` 的 `translate(-50%, 0)` 居中动画，约 280px 宽的弹层被整体左移半个宽度；384px 宽的手机上「今日花费 / 今日 Token / 余额」标签和「用量详情」按钮跑到屏幕左外侧。Composer「更多工具」（`#composer-more-menu`）同样冲突
+- **修复**：两个弹层单独覆盖 `.popover` 的 transform，改为不居中的轻量展开动画（用量弹层 `transform-origin: top right`，更多工具 `bottom left`），用量弹层 `max-width: min(280px, calc(100vw - 16px))`；打开后 `clampPopoverIntoView` 去掉 transform 并把弹层夹回视口（左右各留 8px）
+- **估算花费 `$NaN`**：v0.28.4 起启动时真正把 OpenRouter 最低价写进用量价目，`mergeFloorPrice` 只写 >0 的字段，新模型条目可能缺 `hit` / `out`，`undefined × tokens = NaN`，`estimateCost` 只判 `!= null`，一条坏价目把合计变成 NaN，用量页显示 `$NaN`（顶栏胶囊被 `|| 0` 掩盖成 `$0.0`）
+- **修复**：`CostCore.costOf` / `costOfEntry` 对缺失或非数字的价目字段按 0 计；`estimateCost` 只累加有限数；`mergeFloorPrice` 缺的 `miss` / `hit` / `out` 用旧条目或用量默认价补齐；`usFmtUsd` / `fmtUsdShort` 遇到非有限数显示「—」，不再出现 `$NaN`
+- **测试**：启动冒烟所有用例断言用量弹层 / 更多工具完整在屏内；新增 384×792（dpr 3.75，与实机一致）窄屏用例，含缺 `hit` / `out` 的价目种子，断言「用量详情 / 账户余额」可见、用量页无 `NaN`；`usage-stats` 单测覆盖部分价目、NaN / 字符串价目、`mergeFloorPrice` 补齐与格式化函数
+- 其他功能与 v0.28.4 相同（保留 `saveUsageMeta` TDZ 修复与诊断面板）；同签名可直接覆盖安装
+- Android `0.28.5`（versionCode **87**）
+
+---
+
 **v0.28.4：修复从 v0.24 升级后主界面点击无响应**
 
 - **根因**：v0.26.0 起，启动时 `syncPricesFromProviderMeta` 会把 OpenRouter 服务商 `modelMeta` 里的 endpoints 最低价同步进用量价目，并调用 `saveUsageMeta()`；但 `const saveUsageMeta` 声明在该 IIFE 之后。v0.24.x 刷新过最低价的旧设置带有 `_endpoints`，启动即抛 `ReferenceError: Cannot access 'saveUsageMeta' before initialization`（TDZ），之后的事件绑定全部没执行，界面停在静态 HTML、点什么都没反应；且价目从未写入，每次启动都会重抛

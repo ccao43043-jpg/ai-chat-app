@@ -1,7 +1,7 @@
 /* 诊断面板：必须在其他业务脚本之前加载，app.js 失败时仍可记录错误与点击。 */
 (function () {
   'use strict';
-  var APP_VERSION = '0.28.4';
+  var APP_VERSION = '0.28.5';
   var MAX_LINES = 500;
   var lines = [];
   var logEl = null;

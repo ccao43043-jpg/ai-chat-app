@@ -48,6 +48,14 @@
   const BIAS_ABS_THRESHOLD = 0.15;
   const BIAS_STREAK_MARK = 3;
 
+  /** 有限数字（含数字字符串）→ number，否则 null */
+  function finNum(v) {
+    if (v == null || v === '') return null;
+    const n = typeof v === 'number' ? v : Number(v);
+    return isFinite(n) ? n : null;
+  }
+  const fin0 = v => { const n = finNum(v); return n == null ? 0 : n; };
+
   function priceForRules(model, prices, builtinOnly) {
     prices = prices || DEFAULT_PRICES;
     const m = String(model || '').toLowerCase();
@@ -133,10 +141,16 @@
   function mergeFloorPrice(prices, model, floor, now) {
     if (!model || !floor) return prices || {};
     const bag = Object.assign({}, prices || {});
-    const rec = Object.assign({}, bag[model] || {});
+    const prev = bag[model] || {};
+    const rec = Object.assign({}, prev);
     if (floor.prompt > 0) rec.miss = floor.prompt;
     if (floor.cacheRead > 0) rec.hit = floor.cacheRead;
     if (floor.completion > 0) rec.out = floor.completion;
+    // v0.28.5：最低价只给了部分字段时，缺的 miss/hit/out 用旧条目或用量默认价补齐，避免 undefined × tokens = NaN
+    const def = (bag.default && finNum(bag.default.miss) != null) ? bag.default : USAGE_DEFAULT_PRICES.default;
+    if (finNum(rec.miss) == null) rec.miss = finNum(prev.miss) != null ? prev.miss : def.miss;
+    if (finNum(rec.out) == null) rec.out = finNum(prev.out) != null ? prev.out : def.out;
+    if (finNum(rec.hit) == null) rec.hit = finNum(prev.hit) != null ? prev.hit : (finNum(def.hit) != null ? def.hit : 0);
     rec.source = rec.source || 'openrouter-floor';
     rec.syncedAt = now || Date.now();
     bag[model] = rec;
@@ -153,11 +167,15 @@
     const p0 = calib ? priceForCalibrated(e.model, prices, calib) : priceFor(e.model, prices);
     if (!p0) return null;
     const p = p0;
-    const f = factorFor(p, e.timestamp, mode, peak);
-    const hitP = e.cache_mode === 'explicit' && p.hit_explicit != null ? p.hit_explicit : p.hit;
-    const write = (e.cache_write_tokens || 0) * Math.max(0, (p.write != null ? p.write : p.miss) - p.miss);
-    const actual = ((e.cache_hit_tokens || 0) * hitP + (e.cache_miss_tokens || 0) * p.miss + write + (e.completion_tokens || 0) * p.out) / 1e6 * f;
-    const noCache = ((e.prompt_tokens || 0) * p.miss + (e.completion_tokens || 0) * p.out) / 1e6 * f;
+    const f0 = factorFor(p, e.timestamp, mode, peak);
+    const f = isFinite(f0) ? f0 : 1;
+    // v0.28.5：价目字段缺失/非数字一律按 0，避免一条坏价目把合计变成 NaN
+    const miss = fin0(p.miss), out = fin0(p.out);
+    const hitP = e.cache_mode === 'explicit' && finNum(p.hit_explicit) != null ? fin0(p.hit_explicit) : fin0(p.hit);
+    const writeP = finNum(p.write) != null ? fin0(p.write) : miss;
+    const write = fin0(e.cache_write_tokens) * Math.max(0, writeP - miss);
+    const actual = (fin0(e.cache_hit_tokens) * hitP + fin0(e.cache_miss_tokens) * miss + write + fin0(e.completion_tokens) * out) / 1e6 * f;
+    const noCache = (fin0(e.prompt_tokens) * miss + fin0(e.completion_tokens) * out) / 1e6 * f;
     return { actual, noCache, saved: noCache - actual };
   }
 
@@ -186,14 +204,16 @@
     const via = priceFor(e.model, usePrices);
     if (via) {
       const r = costOf(mapped, usePrices, mode, peak, calib);
-      return r ? r.actual : null;
+      return r && isFinite(r.actual) ? r.actual : null;
     }
-    const f = factorFor(p, e.at, mode, peak);
+    const f0 = factorFor(p, e.at, mode, peak);
+    const f = isFinite(f0) ? f0 : 1;
     const inCost = e.cache
-      ? (e.hit * (p.hit || 0) + e.miss * (p.miss || 0))
-      : (e.prompt * (p.miss != null ? p.miss : (p.in || 0)));
-    const outCost = e.completion * (p.out || 0);
-    return (inCost + outCost) / 1e6 * f;
+      ? (fin0(e.hit) * fin0(p.hit) + fin0(e.miss) * fin0(p.miss))
+      : (fin0(e.prompt) * (finNum(p.miss) != null ? fin0(p.miss) : fin0(p.in)));
+    const outCost = fin0(e.completion) * fin0(p.out);
+    const v = (inCost + outCost) / 1e6 * f;
+    return isFinite(v) ? v : null;
   }
 
   /** D2：用真实 usage.cost 对账。bias=(est-actual)/actual；|bias|>15% 连续 streak 轮标记失真；scale EWMA(α=0.3) */
@@ -248,7 +268,7 @@
   const api = {
     CNY_PER_USD, DEFAULT_PEAK, DEFAULT_PRICES, BUILTIN_PRICES, USAGE_DEFAULT_PRICES,
     EWMA_ALPHA, BIAS_ABS_THRESHOLD, BIAS_STREAK_MARK,
-    priceForRules, priceFor, priceForUsage, priceForCalibrated, scalePrice, calibScale, mergeFloorPrice,
+    priceForRules, priceFor, priceForUsage, priceForCalibrated, scalePrice, calibScale, mergeFloorPrice, finNum,
     parseWindows, isPeak, peakFactor, factorFor,
     costOf, costOfEntry,
     emptyCalib, reconcile, calibView, distortedModels,

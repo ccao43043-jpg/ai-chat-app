@@ -1117,6 +1117,14 @@ html, body { background: var(--bg); }
 .composer-more-menu .cm-item svg { width: 16px; height: 16px; color: #a1a1aa; }
 .composer-more-menu .cm-item.on { color: #c4b5fd; }
 
+/* v0.28.5：用量弹层 / 输入框「更多」由 JS 贴边定位，不能再套通用 .popover 的 translate(-50%) 居中，否则窄屏左半截跑出屏幕 */
+#usage-menu.popover { left: auto; width: auto; max-width: min(280px, calc(100vw - 16px)); box-sizing: border-box;
+  transform: translate(0, -8px) scale(.97); transform-origin: top right; }
+#usage-menu.popover.show { transform: none; }
+#composer-more-menu.popover { width: auto; max-width: calc(100vw - 16px); box-sizing: border-box;
+  transform: translate(0, 8px) scale(.97); transform-origin: bottom left; }
+#composer-more-menu.popover.show { transform: none; }
+
 .drawer-sec-toggle {
   display: flex; align-items: center; justify-content: space-between; width: 100%;
   background: transparent; border: 0; text-align: left; cursor: pointer;

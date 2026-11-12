@@ -79,7 +79,7 @@ test('诊断面板可打开并记录点击、错误与 [init] / 覆盖层信息'
     assert.ok(await page.$eval('#diag-box', el => el.open), '点击「诊」应打开面板');
 
     const meta = await page.$eval('#diag-meta', el => el.textContent || '');
-    assert.match(meta, /v0\.28\.4/);
+    assert.match(meta, /v0\.28\.5/);
     assert.match(meta, /ua=/);
     assert.match(meta, /viewport=/);
     assert.match(meta, /dpr=/);
@@ -132,7 +132,7 @@ test('诊断面板可打开并记录点击、错误与 [init] / 覆盖层信息'
       await new Promise(r => setTimeout(r, 50));
       return window.__copied || window.__diag.dump();
     });
-    assert.match(copied, /v0\.28\.4/);
+    assert.match(copied, /v0\.28\.5/);
     assert.match(copied, /\[tap\]/);
     assert.ok(copied.length > 80, '复制内容应包含元信息与日志');
   } finally {
