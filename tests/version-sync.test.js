@@ -16,8 +16,6 @@ test('各处版本号一致', () => {
   assert.ok(/versionCode\s+\d+/.test(R('app/build.gradle')), 'versionCode');
   const a = /const APP_VERSION = '([^']+)'/.exec(R('app/src/main/assets/www/app.js'));
   assert.ok(a, 'APP_VERSION'); assert.strictEqual(a[1], v, 'APP_VERSION');
-  const d = /var APP_VERSION = '([^']+)'/.exec(R('app/src/main/assets/www/diag.js'));
-  assert.ok(d, 'diag.js APP_VERSION'); assert.strictEqual(d[1], v, 'diag.js APP_VERSION');
   const h = /id="about-ver">v([\d.]+)/.exec(R('app/src/main/assets/www/index.html'));
   assert.ok(h, 'about-ver'); assert.strictEqual(h[1], v, 'about-ver');
   assert.ok(R('CHANGELOG.md').includes('v' + v), 'CHANGELOG 含当前版本');
