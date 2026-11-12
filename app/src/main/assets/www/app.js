@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.28.3';
+  const APP_VERSION = '0.28.4';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -283,13 +283,17 @@
     return st;
   }
   function usageMetaOf(st) { return { version: st.version, backfilled: st.backfilled, prices: st.prices, priceMode: st.priceMode, calib: st.calib || {} }; }
+  // v0.28.4：须在下方价目同步 IIFE 之前声明，否则 v0.24 旧数据（modelMeta._endpoints）启动时触发 TDZ ReferenceError
+  const saveUsageMeta = () => Store.set(USAGE_META, usageMetaOf(usageState));
+  /** 整体重写（清空 / 回填时用）；平时新增一条只追加一行 */
+  const saveUsageStats = () => { Store.writeJsonl(USAGE_LOG, usageState.log); saveUsageMeta(); };
   // 若 RP 插件里改过价格，合并过来（用户只改一处）
-  (function syncPricesFromRp() {
+  runInit('syncPricesFromRp', function syncPricesFromRp() {
     const rp = settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.prices;
     if (rp) usageState.prices = Object.assign({}, usageState.prices, rp);
     if (settings.plugins && settings.plugins.rpcache && settings.plugins.rpcache.priceMode)
       usageState.priceMode = settings.plugins.rpcache.priceMode;
-  })();
+  });
   /** 把已刷新的 OpenRouter endpoints 最低价同步进用量/路由共用的 CostCore 价目 */
   function syncUsagePricesFromEndpoints(modelId, endpoints) {
     if (!modelId || !endpoints || !Providers.syncFloorPrices) return false;
@@ -302,7 +306,7 @@
     saveUsageMeta();
     return true;
   }
-  (function syncPricesFromProviderMeta() {
+  runInit('syncPricesFromProviderMeta', function syncPricesFromProviderMeta() {
     (settings.providers || []).forEach(p => {
       const meta = p && p.modelMeta;
       if (!meta) return;
@@ -311,10 +315,7 @@
         if (eps.length) syncUsagePricesFromEndpoints(mid, eps);
       });
     });
-  })();
-  const saveUsageMeta = () => Store.set(USAGE_META, usageMetaOf(usageState));
-  /** 整体重写（清空 / 回填时用）；平时新增一条只追加一行 */
-  const saveUsageStats = () => { Store.writeJsonl(USAGE_LOG, usageState.log); saveUsageMeta(); };
+  });
   const saveSettings = () => Store.set('settings.json', settings);
   const saveIndex = () => Store.set('convs.json', convIndex);
   function loadStoredConv(id) {

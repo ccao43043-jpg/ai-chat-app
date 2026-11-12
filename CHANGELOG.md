@@ -1,3 +1,13 @@
+**v0.28.4：修复从 v0.24 升级后主界面点击无响应**
+
+- **根因**：v0.26.0 起，启动时 `syncPricesFromProviderMeta` 会把 OpenRouter 服务商 `modelMeta` 里的 endpoints 最低价同步进用量价目，并调用 `saveUsageMeta()`；但 `const saveUsageMeta` 声明在该 IIFE 之后。v0.24.x 刷新过最低价的旧设置带有 `_endpoints`，启动即抛 `ReferenceError: Cannot access 'saveUsageMeta' before initialization`（TDZ），之后的事件绑定全部没执行，界面停在静态 HTML、点什么都没反应；且价目从未写入，每次启动都会重抛
+- **修复**：`saveUsageMeta` / `saveUsageStats` 移到价目同步之前声明；`syncPricesFromRp`、`syncPricesFromProviderMeta` 改为在 `runInit` 中执行，单项失败只记 `[init]` 日志，不再中断启动
+- **测试**：启动冒烟新增「v0.24 旧设置：OpenRouter + `modelMeta._endpoints`」种子，断言无未捕获异常、最低价写入 `usage-stats-meta.json`、二次启动正常、`#btn-menu` 等按钮已绑定
+- 其他功能与 v0.28.3 相同（诊断面板保留）；同签名可直接覆盖安装
+- Android `0.28.4`（versionCode **86**）
+
+---
+
 **v0.28.3：诊断构建（定位主界面点击无响应）**
 
 - **诊断包**：界面右上角增加「诊」浮动按钮（HTML 内置，不依赖 `app.js`）。打开后显示 window.onerror / unhandledrejection、console.error / console.warn（含 source:line）、`[init]` 日志、捕获阶段的 pointerdown/touchstart/click（坐标、elementFromPoint 的 tag#id.class / z-index / pointer-events / opacity、目标 handler 是否执行）、版本 / UA / 视口 / devicePixelRatio，以及覆盖超过 50% 视口的 visible fixed/absolute 元素；可一键复制到剪贴板
