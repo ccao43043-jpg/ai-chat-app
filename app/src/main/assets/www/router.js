@@ -17,6 +17,11 @@
     latencyWeight: 0.15, // 延迟维：相对 ref 的偏离按此权重乘进有效分
     latencyRefMs: 2000,
     latEwmaAlpha: 0.3,
+    // v0.28.7：空闲粘滞。OpenRouter 官方 sticky 空闲 60 分钟过期、缓存只在那一家上游；
+    // 空闲超过此值回来时，只要 current 仍可用且未熔断，就不因「略便宜 / 延迟略好 / 缓存大概已过期」切走，
+    // 除非别家有效分便宜到 cur × idleSwitchMargin 以下（默认要便宜一半）。
+    stickyIdleMs: 60 * 60 * 1000,
+    idleSwitchMargin: 0.5,
   };
 
   function settingsOf(cfg) {
@@ -207,6 +212,14 @@
     const cur = ripe.find(x => x.slug === current) || scored.find(x => x.slug === current);
     if (!cur) return best.slug;
     if (best.slug === current) return current;
+    // v0.28.7：长时间空闲后优先回到上次成功的上游（缓存只在那一家），只有大幅更便宜才切
+    const curSt = ups[current];
+    const now = cfg.now != null ? Number(cfg.now) : Date.now();
+    const idleMs = cfg.idleMs != null ? Number(cfg.idleMs) : (curSt && curSt.lastAt > 0 ? Math.max(0, now - curSt.lastAt) : 0);
+    if (cfg.stickyIdleMs > 0 && idleMs >= cfg.stickyIdleMs && !(curSt && (curSt.fails | 0) > 0)) {
+      const m = cfg.idleSwitchMargin > 0 ? cfg.idleSwitchMargin : DEFAULTS.idleSwitchMargin;
+      return best.score < cur.score * m ? best.slug : current;
+    }
     // 滞回：更优（有效分含延迟）且省下的钱 × 驻留轮数 > 切换成本
     if (!(best.score < cur.score * cfg.switchMargin)) return current;
     const savedPerTurn = Math.max(0, prefixTokens | 0) * (cur.pe - best.pe) / 1e6;
