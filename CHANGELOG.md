@@ -1,10 +1,14 @@
-**v0.28.7：世界「从全文填入」/「复制全文」**
+**v0.28.7：世界「从全文填入」/「复制全文」+ 空闲后缓存保护**
 
 - **新增**：世界编辑页 L1 设定上方加「📋 从全文填入」与「复制全文」。粘贴带【世界观】【角色卡】【RP规则】【输出格式】【示例对白】【禁止事项】【写作风格】【开场白】标题的完整设定，自动拆到 7 个设定块，【开场白】填到上方开场白；名称为空时取【角色卡】里的「姓名：」
 - **只填空项**：默认只填空着的块 / 开场白 / 名称，已有内容不动；提示里点「覆盖已有」可改为全部覆盖。识别失败（不足两段标题）时提示并保留原内容；填入后不自动保存，检查后点「保存」
 - **容错**：复用 `RPCache.parseSections` 与 `AutoChar.normalize`（`1. 世界观`、`**角色卡**`、`### 【RP规则】`、思考块等变体标题；`【精修说明】` 跳过）；段内的 `### 势力`、`【主要NPC】` 等小标题保留在所在段，不会把内容切掉
 - **复制全文**：把当前表单（含未保存的修改）按固定标题拼成一段文字复制，空块省略；复制出来的文本可原样粘回
 - **实现**：`worlds.js` 新增纯函数 `parseWorldSections` / `applySectionsToWorld` / `formatWorldSections`，`worlds` 测试覆盖标准 8 段、标题变体、只填空项与覆盖、往返、无法识别、精修说明、姓名提取
+- **空闲后钉住上游**：OpenRouter 的缓存只在一家上游，官方粘滞空闲 60 分钟过期。`Router.chooseUpstream` 新增空闲粘滞：距上次在该上游请求 ≥ 60 分钟（`stickyIdleMs`）回来时，只要上次的上游仍在列表、未 `ok:false`、未熔断且上次没失败，就继续用它，不因别家略便宜 / 延迟略好 / 「缓存大概已过期」而切走；只有别家有效分便宜到一半以下（`idleSwitchMargin` 0.5）才切。`ms.current` 照常持久化，空闲不清空；缓存亲和的 `provider.order` 钉住逻辑不变
+- **稳定 `session_id`**：OpenRouter chat/completions 请求体顶层带每个对话恒定的 `session_id`（对话 id + 命名空间 `or`，与 `cache-common.sessionIdFor` 同算法），DeepSeek 等只开 RP 缓存优化器的模型也有；没钉上游（回退 `sort:price` 等）时帮 OpenRouter 粘同一家。不覆盖已有值；Gemini / MiniMax 缓存插件生效时仍由插件写各自的 `session_id`；没有对话 id 不发
+- **DeepSeek 空闲不提前摘要**：DeepSeek 硬盘缓存没有固定有效期（官方：不用后通常几小时到几天清除），以前空闲超过估计 TTL（3 小时）就按「缓存已过期、重建不额外花钱」在阈值 50% 提前摘要 / 60% 提前合并章节，改写前缀反而必然冷启动。现在只有 TTL ≤ 10 分钟的短缓存（千问显式 5 分钟 / 隐式 10 分钟）保留这条；DeepSeek 按正常阈值、前缀不动，缓存还在就命中，不在也只 miss 一轮再预热同一前缀。DeepSeek 估计 TTL 由 3 小时改为保守 24 小时
+- **实现 / 测试**：`router.js`（空闲粘滞）、`providers.js`（`orSessionIdFor`、OpenRouter 请求写 `session_id`）、`app.js`（把对话 id 传入请求选项）、`rpcache.js`（`coldRebuildOf` / `runtimeEnv.coldRebuild`）；新增 `cache-idle-0287` 测试覆盖空闲钉住 / 失败仍切、`session_id` 稳定与不覆盖、DeepSeek 与千问的冷却分支
 - 其他功能与 v0.28.6 相同（保留「本轮请求数据」、用量弹层与 `$NaN` 修复）；同签名可直接覆盖安装
 - Android `0.28.7`（versionCode **89**）
 

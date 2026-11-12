@@ -979,7 +979,7 @@
       p.auto = a;
       if (a.reason) { p.summaryReason = a.reason; p.needSummary = true; p.summaryBlocked = null; }
     }
-    const cold = !!(env && env.cold);
+    const cold = coldRebuildOf(env);
     // 合并章节：章节合计超上限；V3：缓存已冷（反正要重建）时提前到 60% 上限就合并
     p.needConsolidate = !!p.summaryReason && st.chapters.length > 1 && (chapterTokens >= cap || (cold && s.auto_summary !== false && chapterTokens >= cap * 0.6));
     // A：默认 lagrangian；greedy 时 applyLagrangeBudget 直接原样返回（与 v0.19.0 逐字段一致）
@@ -997,6 +997,23 @@
         chapter_cap_tokens: pick(sum.chapter_cap_tokens, d.summary.chapter_cap_tokens, b.chapter_cap_tokens) }) });
   }
   /**
+   * v0.28.7：空闲后「缓存已冷 → 趁重建提前摘要 / 合并」只对 TTL 短且可靠（≤10 分钟，如千问）的缓存生效。
+   * DeepSeek 硬盘缓存无固定有效期（官方：不用后通常几小时到几天才清，尽力而为），空闲久了也可能仍命中；
+   * 此时提前摘要会改写前缀、必然冷启动，所以保持正常阈值、前缀不动：缓存还在就命中，不在也只 miss 一轮再预热同一前缀。
+   * env.coldRebuild 由 runtimeEnv 给出；直接传 env（旧单测）时按 env.cap 推断，无 cap 与旧行为一致。
+   */
+  const COLD_REBUILD_MAX_TTL = 600;
+  function coldRebuildAllowedFor(cap) {
+    if (!cap) return true;
+    if (cap.vendor === 'deepseek') return false;
+    return !(Number(cap.ttl) > COLD_REBUILD_MAX_TTL);
+  }
+  function coldRebuildOf(env) {
+    if (!env || !env.cold) return false;
+    if (typeof env.coldRebuild === 'boolean') return env.coldRebuild;
+    return coldRebuildAllowedFor(env.cap);
+  }
+  /**
    * V3：自适应摘要。返回 { reason: 'cold'|'adaptive'|null, why, breakEven, unsummarized, trigger }
    *  - cold：距上次请求已超过缓存有效期（缓存大概率已失效），本轮无论如何都要重建 → 提前到阈值 50% 就摘要，重建不额外花钱
    *  - adaptive：未摘要历史 ≥ 阈值 70% 时按成本估算：摘要一次的花费 ÷ 每轮少发送的历史花费（按近期命中率加权）≤ 回本轮数上限 → 现在摘要更省
@@ -1009,12 +1026,14 @@
     if (U < T * 0.5) { r.why = '未摘要历史不足阈值一半'; return r; }
     if (p.batchRounds < minRounds) { r.why = '可摘要的旧对话不足 ' + minRounds + ' 轮'; return r; }
     if (p.sinceLast < Math.ceil(p.minGap / 2)) { r.why = '距上一章太近'; return r; }
-    if (env.cold) { r.reason = 'cold'; r.why = '缓存大概率已过期（空闲 ' + Math.round((env.idleSec || 0) / 60) + ' 分钟），本轮重建不额外花钱'; return r; }
+    const coldRb = coldRebuildOf(env);
+    if (env.cold && !coldRb) r.coldKept = true; // DeepSeek 等：空闲不提前摘要，前缀保持稳定
+    if (coldRb) { r.reason = 'cold'; r.why = '缓存大概率已过期（空闲 ' + Math.round((env.idleSec || 0) / 60) + ' 分钟），本轮重建不额外花钱'; return r; }
     if (U < T * 0.7) { r.why = '未摘要历史不足阈值 70%'; return r; }
     const c = env.cost || {};
     const pr = c.model ? priceFor(c.model, c.prices) : null;
     if (!pr) { r.why = '没有价格信息，按固定阈值'; return r; }
-    const est = summaryCost(p, Object.assign({}, c, { warm: env.warm != null ? env.warm : 1 }));
+    const est = summaryCost(p, Object.assign({}, c, { warm: env.cold && !coldRb ? 1 : (env.warm != null ? env.warm : 1) }));
     const batchTok = Math.round(estimateItems(p.batch) * k);
     // C-3：命中率用 Beta 后验悲观分位（替代 v0.16「无样本就禁用」：无样本时先验主导、逐步放开）
     const post = hitPosteriorOf(env);
@@ -1462,7 +1481,8 @@
     const p = provider || {}, base = String(p.baseUrl || '').toLowerCase();
     const m = String(model || '').toLowerCase(), bare = m.replace(/^.*\//, '');
     if (p.presetId === 'deepseek' || /deepseek/.test(base) || /deepseek/.test(m))
-      return { vendor: 'deepseek', kind: 'implicit', auto: true, ttl: 3 * 3600, explicit: null, label: 'DeepSeek 自动前缀缓存（硬盘缓存，通常数小时）' };
+      return { vendor: 'deepseek', kind: 'implicit', auto: true, ttl: 24 * 3600, explicit: null, label: 'DeepSeek 自动前缀缓存（硬盘缓存，通常数小时到数天）' };
+    // v0.28.7：ttl 3h → 24h（保守估计；官方说明不用的缓存通常几小时到几天清除，尽力而为），且空闲后不按「缓存已冷」提前摘要（见 coldRebuildOf）
     if (isDashscope(p) || /qwen|qwq/.test(m)) {
       if (isDashscope(p) && QWEN_EXPLICIT.test(bare) && !/flash-character/.test(bare))
         return { vendor: 'qwen', kind: 'explicit', auto: true, ttl: 300, explicit: { maxMarkers: 4, minTokens: 1024, lookback: 20 },
@@ -1552,9 +1572,10 @@
     const gapMedian = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 2)] : null;
     const ttl = cap && cap.ttl || 0;
     const cold = !!(ttl && idleSec != null && idleSec > ttl);
+    const coldRebuild = cold && coldRebuildAllowedFor(cap);
     // C-3：近 20 次有效请求的 Beta 后验（按 cache_hit_tokens / prompt_tokens；没有 token 时退回 hit_rate）
     const hitPost = hitPosterior(sup.slice(-20).map(e => e.prompt_tokens > 0 && e.cache_hit_tokens != null ? { hit: e.cache_hit_tokens, prompt: e.prompt_tokens } : { hit: e.hit_rate || 0, prompt: 1 }));
-    return { hitRate, hitSamples, hitPost, trend, idleSec, gapMedian, cold, warm: cold ? 0 : 1 };
+    return { hitRate, hitSamples, hitPost, trend, idleSec, gapMedian, cold, coldRebuild, warm: coldRebuild ? 0 : 1 };
   }
 
   // ---------------- 指纹与诊断 ----------------
@@ -1961,7 +1982,7 @@
   }
 
   const api = { STATIC_DEFS, BLOCK_DEFS, BLOCK_TITLES, LAYERS, LAYER_TITLES, LAYER_EN, LAYER_CN, DIAG_LABELS, diagLabel, SUMMARY_SECTION_CN, verLabel, DEFAULT_SETTINGS, DEFAULT_PRICES, DEFAULT_PEAK, SUMMARY_SECTIONS, BUILTIN_PRICES, CNY_PER_USD, QWEN_EXPLICIT,
-    capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, hitPosterior, effectiveSettings, budgetIsDefault, factorFor,
+    capability, contextInfo, autoBudget, chooseStrategy, runtimeEnv, adaptiveSummary, coldRebuildOf, coldRebuildAllowedFor, hitPosterior, effectiveSettings, budgetIsDefault, factorFor,
     canonicalize, sha256, vlabel, slabel, newState, normalizeState, migrateSummaries, getBlock, updateBlock, restoreBlock, setBlock, syncBase, explicitBaseUpdate, markHistoryCause,
     activeSummary, chaptersOf, coveredIds, addChapter, addSummary, commitChapter, chapterSourceFp, CRITICAL_SUMMARY, SUMMARY_MIN_QUALITY, isEmptySectionBody, scoreSummary, consolidate, editChapter, removeLastChapter,
     staticText, staticHash, memoryText, summaryText, deltaText, stateText, buildSystem, buildSystemSegments, systemStablePrefix, finalUserContent, serializeHistory, staticShortCircuitHits: () => _staticHits, resetLayerMemo: () => { _layerMemo.static = _layerMemo.memory = _layerMemo.summary = null; _staticHits = 0; },

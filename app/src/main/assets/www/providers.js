@@ -447,11 +447,28 @@
       if (!pinned) {
         const sf = openRouterSortField(provider, opts);
         if (sf) body.provider = Object.assign({}, body.provider || {}, sf);
+      }      // v0.28.7：稳定 session_id（对话 id + 'or'），让 OpenRouter 尽量粘同一上游；不覆盖已有值，不改 provider.order。
+      // gcache / mmcache 对本请求生效时由插件写各自的 session_id（保持其既有取值），这里跳过；没有对话 id 时不发。
+      if (body.session_id == null && opts.convId != null && opts.convId !== '' && !opts.orGemini && !opts.orMiniMax) {
+        const sid = orSessionIdFor(opts.convId);
+        if (sid) body.session_id = sid;
       }
     }
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
     if (stream) headers['Accept'] = 'text/event-stream';
     return { url: base + '/chat/completions', method: 'POST', headers, body: JSON.stringify(body) };
+  }
+
+  /** 与 plugins/cache/cache-common.js sessionIdFor(convId, 'or') 同算法（FNV-1a ×4 → UUID 形状）；同一对话恒定 */
+  function orSessionIdFor(convId, ns) {
+    if (convId == null || convId === '') return '';
+    const C = root.CacheCommon;
+    const n = ns || 'or';
+    if (C && C.sessionIdFor) return C.sessionIdFor(convId, n);
+    const hash = str => { let h = 0x811c9dc5; const t = String(str); for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+    const s = n + ':' + String(convId);
+    const h = [hash(s), hash('a' + s), hash('b' + s), hash('c' + s)].join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20, 32);
   }
 
   /** 已核实支持 response_format: json_object 的 OpenAI 兼容服务商 */
@@ -953,7 +970,7 @@
     buildModelsRequest, parseModelsResponse, buildChatRequest, createStreamParser, parseFullResponse, parseError, buildImageRequest,
     parseImageResponse, extractDeltas, splitDataUrl, normalizeUsage, mergeUsage, cacheView, cacheViewText, streamUsageEnabled, STREAM_USAGE_PRESETS, isQwenEndpoint, jsonModeSupported, parseModelsMeta, parsePricing, effectiveTokenPricing, floorPricingFromEndpoints, buildEndpointsRequest, parseEndpointsResponse, formatModelPrice, formatContext,
     MODEL_CATEGORIES, EXTRA_MODEL_FIELDS, normalizeModelFields, classifyModel,
-    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, endpointLatencyMs, applyCalibToRoutePrices, syncFloorPrices, planOpenRouterRoute, observeRoute, normalizeOrSort, openRouterSortField, resolveMaxTokens, SAFE_DEFAULT_MAX_TOKENS, MIN_DOWNGRADE_MAX_TOKENS, parseAffordTokens, downgradeMaxTokens };
+    isOpenRouterProvider, isFluxTierModel, parsePixelSize, pixelSizeToTier, closestAspectRatio, ASPECT_RATIOS, endpointRoutePrices, endpointLatencyMs, applyCalibToRoutePrices, syncFloorPrices, planOpenRouterRoute, observeRoute, orSessionIdFor, normalizeOrSort, openRouterSortField, resolveMaxTokens, SAFE_DEFAULT_MAX_TOKENS, MIN_DOWNGRADE_MAX_TOKENS, parseAffordTokens, downgradeMaxTokens };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Providers = api;
 })(typeof window !== 'undefined' ? window : globalThis);

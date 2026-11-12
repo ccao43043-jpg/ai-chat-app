@@ -2193,7 +2193,7 @@
     let rctx = {
       conv: thisConv, provider: p, model: thisConv.model, systemPrompt: thisConv.systemPrompt, settings, lastUser, meta: {},
       messages: thisConv.messages.filter(m => m !== bot && !m.error && !m.imageGen && !m.pending).map(m => Object.assign(toRequestMsg(m, m === lastUser), { _src: m })),
-      opts: { stream, temperature: temp, maxTokens: Providers.resolveMaxTokens(p, thisConv.model, settings.maxTokens) },
+      opts: { stream, temperature: temp, convId: thisConv.id, maxTokens: Providers.resolveMaxTokens(p, thisConv.model, settings.maxTokens) },
       setStatus: t => { if (t) bot.pluginStatus = t; else delete bot.pluginStatus; refresh(); },
       setCancel: c => { cur = c; },
     };
