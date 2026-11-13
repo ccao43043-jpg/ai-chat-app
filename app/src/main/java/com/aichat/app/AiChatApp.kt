@@ -55,6 +55,10 @@ class AppGraph(app: Application) {
     val library: LibraryRepository get() = data.library
     val keys: KeyVault get() = secretVault
     val usage: UsageRepository get() = data.usage
+    /** C 的 CharCardCodec 插槽（合并 C 时在这里赋值）；未接入为 null */
+    var charCard: com.aichat.app.domain.rp.CharCardCodec?
+        get() = data.charCard
+        set(v) { data.charCard = v }
     val migration: MigrationService get() = data.migration
     val convLog get() = data.convLog
     val knowledgeStore get() = data.knowledge

@@ -226,13 +226,17 @@ class Builtins(val personas: JsonArray, val prompts: JsonArray, val templates: J
         PersonaCodec.decodeList(personas).forEach { b -> if (out.none { it.id == b.id } && b.id !in removedIds) out += b.copy(builtin = true) }
         return out
     }
+    /** normalizePersona 只在为真时保留的角色卡字段（personas.js 48–53；alternateGreetings 需非空数组） */
+    private val CARD_KEYS = setOf("loreText", "firstMes", "mesExample", "alternateGreetings", "cardSpec", "cardRaw")
+    private fun cardTruthy(k: String, v: JsonElement): Boolean =
+        if (k == "alternateGreetings") (v as? JsonArray)?.isNotEmpty() == true else Js.truthy(Js.fromJson(v))
     /** personas.js normalizePersona 的基本字段部分 */
     fun normalizePersona(p: Persona): Persona {
         val base = setOf(ABSENT_KEY, "id", "emoji", "name", "desc", "systemPrompt", "providerId", "model", "temperature", "builtin")
         val emoji = p.emoji.ifEmpty { "🤖" }.trim().let { it.substring(0, minOf(4, it.length)) }.ifEmpty { "🤖" }
         return p.copy(id = p.id.ifEmpty { "p-" + jsUid() }, emoji = emoji, name = p.name.trim().ifEmpty { "未命名助手" }, desc = p.desc.trim(),
             model = p.model.trim(), temperature = p.temperature?.takeIf { !it.isNaN() }?.coerceIn(0.0, 2.0),
-            extras = JsonObject(p.extras.filterKeys { it !in base }))
+            extras = JsonObject(p.extras.filter { (k, v) -> k !in base && !(k in CARD_KEYS && !cardTruthy(k, v)) }))
     }
     /** Templates.mergeBuiltins：未改过的旧内置升级为新版内容；退役的未改旧内置删除、改过的转为自定义；缺失的内置补回 */
     fun mergeTemplates(list: List<PromptTemplate>, removedIds: List<String>): List<PromptTemplate> {

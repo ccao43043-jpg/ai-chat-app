@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import java.io.File
+import kotlinx.serialization.json.*
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -92,6 +93,13 @@ class StoreMigrationService(
             s?.providers?.forEach { p ->
                 if (!keys.has(p.id)) { if (p.hasKey) warnings += "服务商「${p.name}」标记有 Key 但安全存储里没有，需要重新填写"; return@forEach }
                 if (keys.canDecrypt(p.id)) keyCount++ else warnings += "服务商「${p.name}」的 Key 无法解密，需要重新填写"
+            }
+            // 联网搜索 Key（settings.search.hasKeys[id] = true ↔ 安全存储 search_key:<id>）——模拟器回归发现之前漏查
+            (s?.search?.get("hasKeys") as? JsonObject)?.forEach { (id, v) ->
+                if ((v as? JsonPrimitive)?.booleanOrNull != true) return@forEach
+                val sid = "search:$id"
+                if (!keys.has(sid)) warnings += "联网搜索「$id」标记有 Key 但安全存储里没有，需要重新填写"
+                else if (keys.canDecrypt(sid)) keyCount++ else warnings += "联网搜索「$id」的 Key 无法解密，需要重新填写"
             }
         }
         val report = MigrationReport(fromVersionCode(), convs, keyCount, corrupt, backupPath, warnings)

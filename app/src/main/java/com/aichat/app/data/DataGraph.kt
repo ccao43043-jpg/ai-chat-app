@@ -38,6 +38,9 @@ class DataGraph(
         m.afterImport = { reloadAll() }
     }
 
+    /** C 的角色卡编解码（www/charcard.js）；C 合并前为 null，A 据此提示「尚未接入」。契约变更 #q */
+    @Volatile var charCard: com.aichat.app.domain.rp.CharCardCodec? = null
+
     /** 导入备份 / 迁移改写设置后，让所有仓库重读磁盘 */
     fun reloadAll() {
         convLog.engine.clearSessions()

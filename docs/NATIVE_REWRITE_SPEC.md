@@ -172,6 +172,10 @@ com.aichat.app
 | m | `ChatEngine.send(convId, userText, images, files: List<FileAttachment> = emptyList())`；`FileAttachment` 键名同 app.js `user.files[]`（name/size/kind/text/total/truncated/pages?/scanned?/imagePages?），`AttachmentCodec` 互转。引擎负责写 files[] 并拼进请求，UI 不再把文件文字并进正文 | `domain/Contracts.kt`、`domain/model/Models.kt` |
 | n | `AppSettings.recentTemplates` / `recentWorlds` / `recentPersonas`（app.js 199 顶层键）。JS 没有 `removedPrompts`，不加 | `domain/model/Models.kt` |
 | o | 对话模板：`Conversation.templateId` / `templateName` / `templateEmoji`（顶层键，清除 = 三个都置 null，编码时删键）。每对话插件开关与数据不建模：`conv.extras["plugins"][id] = { enabled?: Boolean, … }`，enabled 缺失 = 跟随全局 `settings.plugins[id].enabled` | 同上 |
+| p | `MessageState.light: Boolean = false`（与 `dim` 同时为 true = 浅淡化，rp-plugin.js 445 `{dim:true, light:true}` → app.js `.dim-light`）。运行时计算，不落盘 | `domain/Contracts.kt` |
+| q | `DataGraph.charCard` / `AppGraph.charCard: CharCardCodec?`（可空插槽，默认 null；C 实现后在 AiChatApp 里赋值） | `data/DataGraph.kt`、`AiChatApp.kt` |
+| — | 接线备忘（AppGraph，D 负责）：C 的 worlds 开聊需要全局内置模板（JS `Templates`）——C 留了模板接口与全局挂载点，接线时由 D 用 `LibraryRepository.templates`（含 builtins.json 内置模板、按 removedTemplates 合并）实现并挂上；C 保持 RpContracts 不变、自带适配层 | — |
+| r | 行为修正（无签名变化）：`MigrationService` 的 Key 体检现在也检查 `settings.search.hasKeys` 里的搜索 Key（`search:<id>`），缺失同样给一条警告、计入 `report.keys` | `data/migration/StoreMigrationService.kt` |
 
 
 ### 3.5 行为对齐政策与有意差异（契约变更 #l）
@@ -181,9 +185,11 @@ com.aichat.app
 |---|---|---|---|
 | D1 | OpenRouter 402「can only afford N」重试时，只把已构造请求体里的 `max_tokens` 改成 80%（最低 256），不重新走 runBeforeRequest / buildChatRequest | JS 整体重建会让插件统计（rpcache/gcache/usage）重复计数一次 | B `net/` |
 | D2 | conv-log 章节 `contentZ`：Kotlin 用 java.util.zip.Deflater(6)，JS 用 fflate；字节可能不同，互相可解；「压缩后不短于原文就不压」的判定因此个别不同 | 平台无 fflate；replay 结果不受影响（golden 双向验证） | D `data/convlog/JsConvLog.kt` |
-| D4 | `Personas.mergeBuiltins` 的 normalize：基本字段与 JS 一致，但未知字段保留在 extras（JS 会丢） | 无损约定（§3.3-1）；JS 读到多余字段无害 | D `data/repo/Repositories.kt` |
+| D4 | `Personas.mergeBuiltins` 的 normalize：基本字段与 JS 一致，角色卡字段（loreText/firstMes/mesExample/alternateGreetings/cardSpec/cardRaw）为假 / 空数组时丢弃（同 JS，M3 回归发现后修正）；其余未知字段保留在 extras（JS 会丢） | 无损约定（§3.3-1）；JS 读到多余字段无害 | D `data/repo/Repositories.kt` |
 | D5 | 保存对话时，上次状态里有值、这次缺失的**消息顶层键**显式写 `null`（truncated/error/finishReason/vi…） | conv-log `msg.edit` 是 Object.assign 合并，缺键不删；JS 里 `delete m.truncated` 后重启会复活（JS 潜在 bug），原生 Codec 省略默认值也会撞上。JS 读这些键都是真假判断 / `vi\|0`，null 与缺键等价 | D `FileChatRepository.save` |
-| D3 | conv-log 在 JS 会抛 TypeError 的畸形数据上（如快照缺 tombstones.msg），Kotlin 按「缺失 = 空对象」继续 | 不让坏数据阻塞启动；正常数据行为一致 | D 同上 |
+| D6 | 字符串排序：JS `localeCompare` 在 Kotlin 侧用 `String.compareTo`（码点序）。conv-log 的 op 名排序两者结果相同（全是小写 ASCII + 同位 `.`，已核对 13 个 op 名），不影响回放；**用户可见**的是 knowledge.js 的分类名 / 条目标题 `localeCompare(…, 'zh')`（拼音序）与 providers.js 模型 id 排序——这些若在原生 UI 里重做，应使用 `java.text.Collator.getInstance(Locale.CHINESE)`，不要用码点序 | ICU 与码点序在中文、大小写上不同 | A/C（UI 排序）；D 无落盘排序 |
+| D3 | conv-log 在 JS 会抛 TypeError 的畸形数据上（如快照缺 tombstones.msg；C：RP 对话状态缺 `blocks` 时读设定块，JS 抛错、Kotlin 返回空块），Kotlin 按「缺失 = 空对象」继续 | 不让坏数据阻塞启动；正常数据行为一致 | D 同上 |
+| D7 | 错误文案：角色卡非法 base64（atob）与 zTXt 解压失败（fflate inflate，不校验 Adler-32）的报错**原文**不要求与 JS 逐字一致，只要求同一位置报错；golden 里归一化为 `<atob>` / `<inflate>` | 原文随 WebView 引擎和 fflate 版本变化 | C `domain/rp` 角色卡解析 |
 
 **v1 之后再议（不在 v1.0.0 做）**：① 续写时【续写】后缀从 system 末尾移到追加的 user 消息（保住缓存前缀，属于行为变更）；② OpenRouter `provider.order` 钉住上游与 session_id 粘滞的冲突诊断（mmcache 诊断降级或缓存插件生效时不钉住）。
 

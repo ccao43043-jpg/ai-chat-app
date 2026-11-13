@@ -55,7 +55,7 @@ class MigrationTest {
         assertTrue(s.contains("\"autoCharMode\":\"auto\""))
         assertTrue(g.store.exists("usage-stats.jsonl")); assertTrue(g.store.exists("usage-stats.json.migrated"))
         // d) Key 体检：p1 可解密；p2 标记有 Key 却不在安全存储
-        assertEquals(1, r.keys)
+        assertEquals("p1 + search:brave", 2, r.keys)
         assertTrue(r.warnings.any { it.contains("OR") && it.contains("重新填写") })
         // e) 标记文件
         val marker = Js.parse(g.store.get(".native-migrated")!!)

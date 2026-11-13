@@ -68,6 +68,35 @@ class RepositoryTest {
         val (code, text) = com.aichat.app.golden.Golden.runNode("tests/golden-export/verify-kotlin.mjs", "convlog", f.path)
         assertEquals(text, 0, code)
     }
+    /** A 报的第二处：「只保留当前版本」删 versions/vi，清除模板删对话顶层 templateId/Name/Emoji；重启后不能复活，JS 读到一致 */
+    @Test fun keyDeletionPersistsAndReplaysInJs() = runBlocking {
+        val g = graph()
+        val c0 = g.chats.create("p", "m")
+        val m = Message("m1", Role.ASSISTANT, "hi", 1, vi = 1, versions = listOf(JsonObject(emptyMap()), null))
+        g.chats.save(c0.copy(messages = listOf(m), templateId = "t-1", templateName = "周报", templateEmoji = "📋", personaName = "侦探", personaEmoji = "🕵"))
+        g.chats.save(g.chats.load(c0.id)!!.let { c -> c.copy(messages = listOf(c.messages[0].copy(versions = emptyList(), vi = 0)),
+            templateId = null, templateName = null, templateEmoji = null, personaName = null, personaEmoji = null) })
+        for (back in listOf(g.chats.load(c0.id)!!, graphOn(g).chats.load(c0.id)!!)) {
+            assertTrue(back.messages[0].versions.isEmpty()); assertEquals(0, back.messages[0].vi)
+            assertNull(back.templateId); assertNull(back.templateName); assertNull(back.templateEmoji); assertNull(back.personaName)
+        }
+        val exported = Js.parse(graphOn(g).chats.exportJson(c0.id)) as com.aichat.app.data.json.JsObj
+        listOf("templateId", "templateName", "templateEmoji", "personaName").forEach { assertFalse(it, Js.truthy(exported[it])) }
+        verifyInJs(g, c0.id) { conv ->
+            val mm = (conv["messages"] as List<*>)[0] as com.aichat.app.data.json.JsObj
+            assertFalse(Js.truthy(mm["versions"])); assertEquals(0, Js.int32(mm["vi"])); assertFalse(Js.truthy(conv["templateId"]))
+        }
+    }
+    private fun verifyInJs(g: DataGraph, id: String, check: (com.aichat.app.data.json.JsObj) -> Unit) {
+        val e = com.aichat.app.data.convlog.JsConvLog(now = { t }); val st = com.aichat.app.data.store.StoreJs(g.store)
+        val expect = e.load(st, id)!!; check(expect)
+        val files = com.aichat.app.data.json.JsObj(); g.store.list().sorted().filterNot { it.endsWith(".bak") }.forEach { files[it] = g.store.get(it) }
+        val f = java.io.File(com.aichat.app.golden.Golden.kotlinOutDir, "convlog-k2j-$id.jsonl")
+        f.parentFile.mkdirs(); f.writeText(Js.stringify(com.aichat.app.data.json.JsObj("label" to id, "id" to id, "files" to files, "expect" to expect)) + "\n")
+        org.junit.Assume.assumeTrue(com.aichat.app.golden.Golden.nodeBinary() != null)
+        val (code, text) = com.aichat.app.golden.Golden.runNode("tests/golden-export/verify-kotlin.mjs", "convlog", f.path)
+        assertEquals(text, 0, code)
+    }
     private fun graphOn(g: DataGraph) = DataGraph(g.store, g.keys, java.io.File(System.getProperty("java.io.tmpdir"), "aichat-t"), now = { t })
 
     @Test fun legacyConversationLoadsAndKeepsOriginalFile() = runBlocking {

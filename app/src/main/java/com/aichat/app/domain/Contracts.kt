@@ -166,7 +166,9 @@ interface RequestTransformer {
 interface PluginContext {
     fun notify(text: String)
 }
-data class MessageState(val dim: Boolean = false, val label: String? = null)   // dim=true：已冻结进章节，不可切版本/编辑
+/** dim=true：已冻结进章节，不可切版本/编辑；light=true：较浅的变暗（rp-plugin 445「超出预算暂不发送」，app.js 1381 用 .dim-light，约 .7 不透明度）。
+ *  契约变更 #p：light 是插件 messageState 的计算结果，JS 不落盘 */
+data class MessageState(val dim: Boolean = false, val label: String? = null, val light: Boolean = false)
 
 /**
  * 插件契约（逐一对应 www/plugins.js 的 hooks）。注册顺序固定 = 旧版脚本加载顺序：
