@@ -241,6 +241,119 @@ if (want('b-handoff')) {
   [[0, null], [-1, null], [null, null], ['300', null], [319, null], [320, null], [1e21, null], [500, { min: 600 }], [5000, { min: 0 }], [5000, { min: 1.9 }]].forEach(([a, o]) => rec('b-handoff', 'downgradeMaxTokens', [a, o], P.downgradeMaxTokens(a, o)));
 }
 
+// ───────── 角色卡（charcard.js）+ 世界书文本（rpcache.js parseLore / loreToText） ─────────
+// 字节一律十六进制；parseCard 的输入记成 [kind, value]，kind ∈ hex | str | obj。App 中 rpcache 先于 charcard 加载，故 globalThis.RPCache 已就位。
+if (want('charcard')) {
+  rnd = mulberry32(20261115);
+  const RP = require(WWW + '/rpcache.js'); globalThis.RPCache = RP;
+  const CC = require(WWW + '/charcard.js');
+  const hex = b => Buffer.from(b).toString('hex');
+  const unhex = h => new Uint8Array(Buffer.from(h, 'hex'));
+  const be32 = n => Buffer.from([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  const crcT = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1); crcT[n] = c >>> 0; }
+  const crc = b => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const body = Buffer.concat([Buffer.from(type, 'latin1'), Buffer.from(data)]); return Buffer.concat([be32(data.length), body, be32(crc(body))]); };
+  const base = Buffer.from(CC.minimalPng());
+  const withChunks = (...cs) => Buffer.concat([base.subarray(0, base.length - 12), ...cs, base.subarray(base.length - 12)]);
+  const LOGICS = [0, 1, 2, 3, '3', 'AND_ALL', 'NOT_ANY', 'XOR', null, undefined, true];
+  function entry() {
+    const e = {};
+    if (rnd() < 0.7) e.comment = rnd() < 0.1 ? '  ' : phrase(1 + ri(2)).trim();
+    if (rnd() < 0.3) e.name = phrase(1);
+    e.content = rnd() < 0.08 ? (rnd() < 0.5 ? '' : ' \r\n ') : phrase(1 + ri(8)) + (rnd() < 0.3 ? '\r\n\r\n\r\n\r\n\r\n\r\n' + phrase(2) + ' \t' : '');
+    const kk = [pick(WORDS), pick(WORDS), ' ' + pick(WORDS) + ' ', ''].slice(0, ri(4));
+    const r = rnd(); if (r < 0.5) e.keys = kk; else if (r < 0.7) e.key = rnd() < 0.5 ? kk : pick(WORDS); else if (r < 0.75) e.keys = [];
+    if (rnd() < 0.3) e[pick(['keysecondary', 'secondary_keys', 'secondaryKeys'])] = rnd() < 0.2 ? pick(WORDS) : [pick(WORDS), pick(WORDS)];
+    if (rnd() < 0.3) e.selectiveLogic = pick(LOGICS); else if (rnd() < 0.2) e.secondaryLogic = pick(LOGICS);
+    if (rnd() < 0.2) e.constant = true; if (rnd() < 0.05) e.forceConstant = 1;
+    if (rnd() < 0.1) e.enabled = rnd() < 0.7 ? false : 0;
+    if (rnd() < 0.4) e.priority = pick([10, 100, 3.7, -2.5, '7', null, 1e10]);
+    if (rnd() < 0.3) e.order = pick([0, 5, 99.9, '12']);
+    if (rnd() < 0.3) e.probability = pick([100, 50, 33.3, '100', '80', 0]);
+    if (rnd() < 0.2) e[rnd() < 0.5 ? 'scanDepth' : 'scan_depth'] = pick([4, 2.6, '3', 0]);
+    for (const f of ['sticky', 'cooldown', 'delay']) if (rnd() < 0.15) e[f] = pick([2, 0, 1.5, '3']);
+    for (const f of ['useRegex', 'regex', 'caseSensitive', 'matchWholeWords', 'wholeWord']) if (rnd() < 0.1) e[f] = pick([true, 1, 0]);
+    return e;
+  }
+  function card(v) {
+    const d = {};
+    for (const f of ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'creator_notes', 'system_prompt', 'post_history_instructions', 'creator', 'character_version'])
+      if (rnd() < 0.6) d[f] = rnd() < 0.1 ? '  ' : (rnd() < 0.3 ? '  ' : '') + phrase(1 + ri(10)) + (rnd() < 0.2 ? '\n😀\ud800' : '');
+    if (rnd() < 0.4) d.alternate_greetings = rnd() < 0.1 ? 'x' : [phrase(2), 7, null];
+    if (rnd() < 0.3) d.tags = [pick(WORDS)];
+    if (rnd() < 0.3) d.extensions = { depth_prompt: { depth: 4 }, aichat_system_prompt: 'old' };
+    if (rnd() < 0.7) { const es = []; for (let i = ri(6); i > 0; i--) es.push(entry()); d.character_book = rnd() < 0.15 ? es : { name: 'book', entries: es }; }
+    if (v === 1) return d;
+    if (v === 3) return { spec: 'chara_card_v3', spec_version: '3.0', data: d };
+    return { spec: 'chara_card_v2', spec_version: '2.0', data: d };
+  }
+  const cards = [];
+  for (let i = 0; i < 70; i++) cards.push(card(pick([1, 2, 2, 3])));
+  cards.push({ spec: 'x', data: { name: 'n' } }, { data: [] }, { name: '', description: 0, personality: 'p' }, { foo: 1 }, [], { spec: 'chara_card_v2' }, { spec: 'chara_card_v2', data: null });
+
+  // 世界书文本
+  const loreTexts = ['', null, '## 无头内容', '前导\n## A | *\n内容\n\n\n\n\n\n\n尾  \t', '## B | k1, k2，k3、k4 | priority=10;prob=80;sec=a,b;secLogic=and_all;depth=4\r\n正文\r\n',
+    '##C|x|prio=abc;order=7;prob=150;depth=0;regex=0;case=1;whole=false;sticky=-3;cooldown=2.9;delay=x;group=g1；logic=NOT_ALL;unknown=1;flag', '## D |\n\n', '## E | | order=100\n内容', '\uFEFF## F | k\n x \u00a0\n## G | *\n\ny'];
+  for (let i = 0; i < 40; i++) { let t = ''; for (let j = ri(5); j >= 0; j--) { t += '## ' + phrase(1).trim() + ' | ' + pick(['*', '', pick(WORDS) + ', ' + pick(WORDS), pick(WORDS) + ' | ' + pick(['priority=5', 'prob=33.5;sec=' + pick(WORDS), 'depth=2;sticky=1', 'order=3;group=g', 'order=100'])]) + '\n' + (rnd() < 0.1 ? '' : phrase(1 + ri(6))) + '\n'; } loreTexts.push(t); }
+  loreTexts.forEach(t => { const r = RP.parseLore(t); rec('charcard', 'parseLore', [t], r); rec('charcard', 'loreToText', [r], RP.loreToText(r)); });
+  rec('charcard', 'loreToText', [null], RP.loreToText(null));
+  rec('charcard', 'loreToText', [[{ name: 'x', mode: 'trigger', keys: ['a', null], content: 'c', priority: 5, order: 0, probability: 50, scanDepth: 0, secondaryKeys: ['s'], secondaryLogic: 'NOT_ANY', useRegex: 1, caseSensitive: true, matchWholeWords: true, sticky: 1, cooldown: 2, delay: 3, inclusionGroup: 'g' }, { mode: 'constant' }]], RP.loreToText([{ name: 'x', mode: 'trigger', keys: ['a', null], content: 'c', priority: 5, order: 0, probability: 50, scanDepth: 0, secondaryKeys: ['s'], secondaryLogic: 'NOT_ANY', useRegex: 1, caseSensitive: true, matchWholeWords: true, sticky: 1, cooldown: 2, delay: 3, inclusionGroup: 'g' }, { mode: 'constant' }]));
+
+  // 卡片对象 → persona → 卡片 → PNG → 解析
+  cards.forEach(c => {
+    rec('charcard', 'parseCardObject', [c], safe(() => CC.parseCardObject(clone(c))));
+    const d = c && c.data !== undefined ? c.data : c;
+    rec('charcard', 'bookToLoreText', [d && d.character_book !== undefined ? d.character_book : null], CC.bookToLoreText(d && d.character_book));
+    const opts = rnd() < 0.3 ? { emoji: '🐱' } : null;
+    const p = safe(() => CC.cardToPersona(clone(c), opts));
+    rec('charcard', 'cardToPersona', [c, opts], p);
+    if (p && !p.throws) {
+      if (rnd() < 0.2) p.loreText = '';
+      const back = CC.personaToCard(clone(p), null); rec('charcard', 'personaToCard', [p, null], back);
+      const png = CC.writeCardToPng(back, rnd() < 0.5 ? null : CC.writeCardToPng({ name: 'old' })); rec('charcard', 'writeCardToPng', [back, null], hex(png));
+      rec('charcard', 'parseCard', ['hex', hex(png)], safe(() => CC.parseCard(png)));
+    }
+  });
+  rec('charcard', 'personaToCard', [null, null], CC.personaToCard(null));
+  rec('charcard', 'personaToCard', [{ name: 'p', loreText: '## a | k\nx', systemPrompt: 'sp' }, [{ name: 'L', mode: 'constant', content: 'c', secondaryLogic: 'BAD', secondaryKeys: ['z'], sticky: 2, scanDepth: 0 }]], CC.personaToCard({ name: 'p', loreText: '## a | k\nx', systemPrompt: 'sp' }, [{ name: 'L', mode: 'constant', content: 'c', secondaryLogic: 'BAD', secondaryKeys: ['z'], sticky: 2, scanDepth: 0 }]));
+  rec('charcard', 'personaToCard', [{ name: 'p', desc: 'd', systemPrompt: 'd', cardRaw: { system_prompt: '' } }, []], CC.personaToCard({ name: 'p', desc: 'd', systemPrompt: 'd', cardRaw: { system_prompt: '' } }, []));
+  [[[], { name: 'm', extra: 1 }], [[{ keys: ['a'], content: 'x', secondaryKeys: [], secondaryLogic: 'AND_ALL', useRegex: true, delay: 1, cooldown: 2 }], null], [null, { name: '' }]]
+    .forEach(([es, m]) => rec('charcard', 'loreEntriesToBook', [es, m], CC.loreEntriesToBook(es, m)));
+
+  // 字节层：PNG 结构 / tEXt / zTXt / 坏输入
+  const b64 = s => Buffer.from(s, 'utf8').toString('base64');
+  const J = JSON.stringify({ spec: 'chara_card_v2', data: { name: '测试😀', description: 'd' } });
+  const tx = (k, v) => chunk('tEXt', Buffer.concat([Buffer.from(k, 'latin1'), Buffer.from([0]), Buffer.from(v, 'utf8')]));
+  const zt = (k, method, data) => chunk('zTXt', Buffer.concat([Buffer.from(k, 'latin1'), Buffer.from([0]), method == null ? Buffer.alloc(0) : Buffer.from([method]), data]));
+  const deflated = zlib.deflateSync(Buffer.from(b64(J)));
+  const pngs = [
+    base, withChunks(tx('chara', b64(J))), withChunks(tx('Comment', 'hi'), tx('chara', b64(J).replace(/(.{10})/g, '$1\n '))), withChunks(tx('chara', b64(J).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''))),
+    withChunks(tx('chara', b64('\uFEFF' + J))), withChunks(tx('chara', '')), withChunks(tx('chara', '!!!')), withChunks(tx('nokey', 'x')), withChunks(chunk('tEXt', Buffer.from('nonul'))),
+    withChunks(zt('chara', 0, deflated)), withChunks(zt('chara', 1, deflated)), withChunks(zt('chara', null, Buffer.alloc(0))), withChunks(zt('chara', 0, deflated.subarray(0, 5))), withChunks(zt('chara', 0, Buffer.from('garbage'))),
+    withChunks(tx('chara', b64(JSON.stringify({ foo: 1 })))), withChunks(tx('chara', b64('[1,2]'))), withChunks(tx('chara', b64(JSON.stringify({ name: 'flat' })) + '==QUJD')),
+    withChunks(tx('chara', b64(J)), tx('chara', b64(JSON.stringify({ name: 'second' })))), withChunks(tx('ch\u00e9ra', 'x'), tx('chara', b64(J) + '\u00ff')),
+    base.subarray(0, 20), base.subarray(0, 8), Buffer.concat([base, Buffer.from('trailing')]), Buffer.concat([base.subarray(0, 33), be32(0xfffffff0), Buffer.from('tEXtchara')]),
+    Buffer.from([137, 80, 78, 71]), Buffer.from(J), Buffer.from('\uFEFF' + J), Buffer.from('not json'), Buffer.from([0xff, 0xfe, 0x7b]), Buffer.from(JSON.stringify({ name: '\ud800x' }), 'utf8'),
+    Buffer.concat([Buffer.from('{"name":"'), Buffer.from([0xe4, 0xb8, 0xff, 0x80, 0xf0, 0x9f, 0x98]), Buffer.from('"}')]),
+  ];
+  pngs.forEach(b => {
+    const h = hex(b), u = unhex(h);
+    rec('charcard', 'isPng', [h], CC.isPng(u));
+    rec('charcard', 'listChunks', [h], safe(() => CC.listChunks(u).map(c => ({ type: c.type, data: hex(c.data), offset: c.offset, length: c.length }))));
+    rec('charcard', 'extractCharaRaw', [h], safe(() => CC.extractCharaRaw(u)));
+    rec('charcard', 'parseCard', ['hex', h], safe(() => CC.parseCard(u)));
+    rec('charcard', 'writeCardToPng', [{ name: 'w' }, h], safe(() => hex(CC.writeCardToPng({ name: 'w' }, u))));
+  });
+  rec('charcard', 'writeCardToPng', [{ spec: 'custom', data: { a: [1, null, '\u2028'] } }, null], hex(CC.writeCardToPng({ spec: 'custom', data: { a: [1, null, '\u2028'] } })));
+  rec('charcard', 'writeCardToPng', [{ name: '\ud83d' }, null], hex(CC.writeCardToPng({ name: '\ud83d' })));
+  // 字符串输入
+  const strs = ['', '  ', J, '  ' + J + '\n', '{bad', b64(J), b64(J).replace(/(.{8})/g, '$1 \n'), b64(J).replace(/=+$/, ''), '@@@', b64('{"foo":1}'), b64('\uFEFF' + J), b64(J) + '=', '=' + b64(J), b64('[]'), '\u3000' + b64(J)];
+  strs.forEach(s => rec('charcard', 'parseCard', ['str', s], safe(() => CC.parseCard(s))));
+  [null, { name: 'o' }, { spec: 'chara_card_v3', data: { name: 'v3' } }, [], { foo: 1 }].forEach(o => rec('charcard', 'parseCard', ['obj', o], safe(() => CC.parseCard(o))));
+  ['', 'abc', '中文😀', '\ud800', '\udc00a', 'x'.repeat(100)].forEach(s => rec('charcard', 'b64encode', [s], CC.b64encode(s)));
+  ['', 'YWJj', 'YWJ', 'YW', 'Y', '5Lit5paH8J+YgA==', '5Lit5paH8J-YgA', 'YW Jj\n', 'YWJj=YWJj', '##YW*Jj', '/w==', '7aCA', null, 123, '77u/YQ=='].forEach(s => rec('charcard', 'b64decode', [s], CC.b64decode(s)));
+}
+
 // ───────── 写出 ─────────
 if (!ONLY.length) writeCollation();
 let total = 0, nfiles = 0, bad = 0;

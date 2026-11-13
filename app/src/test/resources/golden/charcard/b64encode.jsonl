@@ -1,0 +1,6 @@
+{"in":[""],"out":""}
+{"in":["abc"],"out":"YWJj"}
+{"in":["中文😀"],"out":"5Lit5paH8J+YgA=="}
+{"in":["\ud800"],"out":"77+9"}
+{"in":["\udc00a"],"out":"77+9YQ=="}
+{"in":["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],"out":"eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA=="}
