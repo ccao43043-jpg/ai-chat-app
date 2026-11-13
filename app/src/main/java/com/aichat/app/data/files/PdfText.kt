@@ -89,6 +89,8 @@ object PdfText {
         return d
     }
 
+    private const val MAX_INFLATE = 32 * 1024 * 1024
+
     private fun inflate(d: ByteArray): ByteArray? {
         for (nowrap in listOf(false, true)) {
             val inf = Inflater(nowrap)
@@ -100,6 +102,8 @@ object PdfText {
                     val n = inf.inflate(buf)
                     if (n == 0) { if (inf.needsInput() || inf.needsDictionary()) break }
                     bos.write(buf, 0, n)
+                    // 解压炸弹保护：单个流解出超过上限就放弃（正常 PDF 内容流远小于此）
+                    if (bos.size() > MAX_INFLATE) return null
                 }
                 if (bos.size() > 0) return bos.toByteArray()
             } catch (_: Exception) { } finally { inf.end() }

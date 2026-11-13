@@ -48,7 +48,8 @@ private val sharedCache = MarkdownCache()
 
 @Composable
 fun MarkdownText(text: String, modifier: Modifier = Modifier, onCopy: (String) -> Unit = {}) {
-    val blocks = remember(text) { sharedCache.parse(text) }
+    // 解析异常（极端输入）时退回纯文本，不让一条消息拖垮整个列表
+    val blocks = remember(text) { runCatching { sharedCache.parse(text) }.getOrElse { listOf(MdBlock.Paragraph(text)) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { b -> MdBlockView(b, onCopy) }
     }

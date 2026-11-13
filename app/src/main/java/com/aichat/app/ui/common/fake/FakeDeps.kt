@@ -55,7 +55,7 @@ class FakePluginRegistry : PluginRegistry {
  * 假引擎，语义照协调者确认的契约：
  *  - send：流式前先存用户消息；流开始时创建助手消息并保存；结束时保存；取消时也保存并标 truncated=true；
  *  - 出错时把 error 写进助手消息（输入里含「#error」可演示）；
- *  - regenerate：UI 已整理好版本，这里在同一条助手消息上原位重写；continueGeneration：在同一条消息后追加。
+ *  - regenerate：UI 已整理好版本，这里在同一条助手消息上原位重写（单版本失败的最后一条：删旧建新，Started 带新 id）；continueGeneration：在同一条消息后追加。
  *  - 第一个事件是 Started(userMsgId, assistantMsgId)（契约 #c）；输入含「#notice」时演示 Notice。
  */
 class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs: Long = 35,
@@ -78,6 +78,15 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
         val idx = conv.messages.indexOfFirst { it.id == assistantMsgId }
         if (idx < 0) { emit(StreamEvent.Error(0, "消息不存在", "")); return@flow }
         val lastUser = conv.messages.take(idx).lastOrNull { it.role == Role.USER }?.content.orEmpty()
+        val m = conv.messages[idx]
+        // 照 app.js 写入顺序：最后一条、单版本、失败 / 中断且没有正文 → pop 掉旧消息，新建一条助手消息（新 id）
+        if (idx == conv.messages.size - 1 && m.versions.size <= 1 && m.content.isEmpty() && (m.error != null || m.truncated)) {
+            val bot = Message(fakeId("m"), Role.ASSISTANT, "", now())
+            repo.save(conv.copy(messages = conv.messages.dropLast(1) + bot))
+            emit(StreamEvent.Started(null, bot.id))
+            reply(convId, bot.id, demoReply(lastUser, 0), append = false)
+            return@flow
+        }
         emit(StreamEvent.Started(null, assistantMsgId))
         reply(convId, assistantMsgId, demoReply(lastUser, 0), append = false)
     }

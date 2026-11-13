@@ -183,34 +183,43 @@ fun ChatScreen(
                         Text("有什么可以帮你？", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.align(Alignment.Center))
                     } else {
-                        val rev = remember(messages) { messages.asReversed() }
+                        // 性能：流式增量只改 live 这一条；stable 列表实例在整个流期间不变，已有条目不重组。
+                        // 插件的 messageState / badges（RP 插件里是 O(n) 扫描）按消息 + 对话缓存，并且异常不外泄。
+                        val stable = remember(st.conv?.messages, st.streaming?.base, st.streaming?.pendingUser) { st.stable }
+                        val rev = remember(stable) { stable.asReversed() }
+                        val liveMsg = st.live
+                        val busy = st.isStreaming
+                        val lastId = liveMsg?.id ?: stable.lastOrNull()?.id
+                        val row: @Composable (com.aichat.app.domain.model.Message, Boolean) -> Unit = { m, live ->
+                            val isUser = m.role == com.aichat.app.domain.model.Role.USER
+                            val ms = remember(m, conv, settings, live) { if (conv != null && !live) runCatching { deps.plugins.messageState(m, settings, conv) }.getOrNull() else null }
+                            val badges = remember(m, conv, settings, live) { if (conv != null && !live) runCatching { deps.plugins.messageBadges(m, settings, conv) }.getOrDefault(emptyList()) else emptyList() }
+                            val isLast = lastId == m.id
+                            val headName = remember(m.extras, conv?.personaName, conv?.personaEmoji) { if (isUser) null else {
+                                val pn = (m.extras["personaName"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaName
+                                val pe = (m.extras["personaEmoji"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaEmoji
+                                val model = (m.extras["model"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                                listOfNotNull(pn?.let { listOfNotNull(pe, it).joinToString(" ") }, model).joinToString(" · ").ifEmpty { null }
+                            } }
+                            val canCont = !isUser && !live && controller.canContinue(m)
+                            val actions = remember(m, live, isUser, canCont) { if (live) MessageActions() else MessageActions(
+                                onEdit = if (isUser || m.content.isNotEmpty()) ({ editing = m.id }) else null,
+                                onRegenerate = if (isUser) null else ({ plan = controller.planRegenerate(m.id) }),
+                                onContinue = if (canCont) ({ controller.continueGeneration(m.id) }) else null,
+                                onVersion = { k -> plan = controller.planSwitch(m.id, k) },
+                                onVersionMenu = { if (controller.state.value.isStreaming) controller.toast("请先停止当前生成") else versionMenu = m.id },
+                                onDelete = { controller.deleteMessage(m.id) },
+                                onBadge = { b -> if (b.action != null) panel = b.action else b.detail?.let(controller::toast) },
+                            ) }
+                            MessageItem(m, streaming = live && !isUser, badges = badges,
+                                onToast = controller::toast, onImage = { viewing = it },
+                                view = MessageView(busy = busy, dim = ms?.dim == true, label = ms?.label, isLast = isLast, headName = headName),
+                                actions = actions)
+                        }
                         LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().testTag("messages"),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Bottom)) {
-                            items(rev, key = { it.id }, contentType = { it.role }) { m ->
-                                val live = st.streaming?.liveId == m.id || m.id == ChatController.PENDING_USER_ID
-                                val ms = if (conv != null && !live) deps.plugins.messageState(m, settings, conv) else null
-                                val badges = if (conv != null && !live) deps.plugins.messageBadges(m, settings, conv) else emptyList()
-                                val isUser = m.role == com.aichat.app.domain.model.Role.USER
-                                val isLast = messages.lastOrNull()?.id == m.id
-                                val headName = if (isUser) null else {
-                                    val pn = (m.extras["personaName"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaName
-                                    val pe = (m.extras["personaEmoji"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaEmoji
-                                    val model = (m.extras["model"] as? kotlinx.serialization.json.JsonPrimitive)?.content
-                                    listOfNotNull(pn?.let { listOfNotNull(pe, it).joinToString(" ") }, model).joinToString(" · ").ifEmpty { null }
-                                }
-                                MessageItem(m, streaming = live && !isUser, badges = badges,
-                                    onToast = controller::toast, onImage = { viewing = it },
-                                    view = MessageView(busy = st.isStreaming, dim = ms?.dim == true, label = ms?.label, isLast = isLast, headName = headName),
-                                    actions = if (live) MessageActions() else MessageActions(
-                                        onEdit = if (isUser || m.content.isNotEmpty()) ({ editing = m.id }) else null,
-                                        onRegenerate = if (isUser) null else ({ plan = controller.planRegenerate(m.id) }),
-                                        onContinue = if (!isUser && controller.canContinue(m)) ({ controller.continueGeneration(m.id) }) else null,
-                                        onVersion = { k -> plan = controller.planSwitch(m.id, k) },
-                                        onVersionMenu = { if (st.isStreaming) controller.toast("请先停止当前生成") else versionMenu = m.id },
-                                        onDelete = { controller.deleteMessage(m.id) },
-                                        onBadge = { b -> if (b.action != null) panel = b.action else b.detail?.let(controller::toast) },
-                                    ))
-                            }
+                            if (liveMsg != null) item(key = liveMsg.id, contentType = "live") { row(liveMsg, true) }
+                            items(rev, key = { it.id }, contentType = { it.role }) { m -> row(m, m.id == ChatController.PENDING_USER_ID) }
                         }
                     }
                 }

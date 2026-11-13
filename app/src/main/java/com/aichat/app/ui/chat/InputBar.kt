@@ -107,8 +107,11 @@ fun InputBar(
                     if (r.images.isNotEmpty()) onImages((cur.images + r.images).take(MAX_IMAGES))
                     r.file?.let { onFiles(cur.files + it) }
                     r.notice?.let(onToast)
-                } catch (e: Exception) {
-                    onToast("「${displayName(ctx, u) ?: "文件"}」读取失败：${e.message ?: "未知错误"}")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    // 含 OutOfMemoryError / StackOverflowError（超大或畸形文件）：只提示，不崩溃
+                    onToast("「${displayName(ctx, u) ?: "文件"}」读取失败：${if (e is OutOfMemoryError) "文件太大" else e.message ?: "未知错误"}")
                 } finally { reading -= 1 }
             }
         }

@@ -64,14 +64,22 @@ data class ChatUiState(
     val isStreaming: Boolean get() = streaming != null
 
     /** 消息列表 = 已落盘消息；流式中 = 目标之前的消息 + 乐观用户消息 + 正在生成的助手消息 */
-    val messages: List<Message> get() {
+    val messages: List<Message> get() = live?.let { stable + it } ?: stable
+
+    /** 不随流式增量变化的部分（流式中 = base + 乐观用户消息）。UI 据此 remember，增量到来时这些条目不重组 */
+    val stable: List<Message> get() {
         val s = streaming ?: return conv?.messages.orEmpty()
+        return s.pendingUser?.let { s.base + it } ?: s.base
+    }
+
+    /** 正在生成的助手消息；不在流式中为 null */
+    val live: Message? get() {
+        val s = streaming ?: return null
         val p = s.prefix
-        val live = (p ?: Message(s.liveId, Role.ASSISTANT, "", s.startedAt)).copy(
+        return (p ?: Message(s.liveId, Role.ASSISTANT, "", s.startedAt)).copy(
             id = s.liveId, content = (p?.content ?: "") + s.text,
             reasoning = ((p?.reasoning ?: "") + s.reasoning).ifEmpty { null },
             error = s.error, usage = s.usage ?: p?.usage, truncated = false)
-        return s.base + listOfNotNull(s.pendingUser) + live
     }
 
     companion object { const val STREAMING_ID = "__streaming__" }
@@ -85,7 +93,15 @@ data class ChatUiState(
  *  - 编辑并重发：UI 在用户消息上 addVersion，追加一条空助手消息并保存，再对它调 engine.regenerate；
  *  - 续写：直接 engine.continueGeneration，引擎在同一条消息后追加。
  */
-class ChatController(private val deps: UiDeps, private val scope: CoroutineScope, private val now: () -> Long = System::currentTimeMillis) {
+class ChatController(
+    private val deps: UiDeps,
+    private val scope: CoroutineScope,
+    private val now: () -> Long = System::currentTimeMillis,
+    /** 进程被杀后恢复：上次打开的对话 id（SavedStateHandle）；null = 打开最近的对话 */
+    restoredConvId: String? = null,
+    /** 当前对话变化时回调（ViewModel 写回 SavedStateHandle） */
+    private val onConvIdChange: (String?) -> Unit = {},
+) {
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
     private val jobs = HashMap<String, Job>()
@@ -95,10 +111,18 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
     val settings get() = deps.settings.settings
 
     init {
+        if (restoredConvId != null) select(restoredConvId, restoring = true)
         // 启动：打开最近一次的对话
-        scope.launch {
+        if (restoredConvId == null) scope.launch {
             val first = deps.chats.index.first { it.isNotEmpty() }.first()
             if (!touched && _state.value.convId == null) select(first.id)
+        }
+    }
+
+    init {
+        scope.launch {
+            var last: String? = "\u0000"
+            state.collect { st -> if (st.convId != last) { last = st.convId; onConvIdChange(st.convId) } }
         }
     }
 
@@ -108,12 +132,21 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
     fun consumeToast() = _state.update { it.copy(toast = null) }
     fun toast(msg: String) = _state.update { it.copy(toast = msg) }
 
-    fun select(id: String?) {
+    fun select(id: String?) = select(id, restoring = false)
+
+    private fun select(id: String?, restoring: Boolean) {
         touched = true
         if (id == null) { _state.update { it.copy(convId = null, conv = null) }; return }
         _state.update { it.copy(convId = id) }
         scope.launch {
-            val c = deps.chats.load(id)
+            val c = runCatching { deps.chats.load(id) }.getOrNull()
+            // 恢复的对话已不存在（被删 / 数据被替换）→ 退回打开最近的对话
+            if (c == null && restoring) {
+                val first = deps.chats.index.value.firstOrNull()
+                _state.update { if (it.convId == id) it.copy(convId = first?.id) else it }
+                if (first != null) select(first.id)
+                return@launch
+            }
             _state.update { if (it.convId == id) it.copy(conv = c) else it }
         }
     }
@@ -319,9 +352,20 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         val i = c.messages.indexOfFirst { it.id == assistantId }
         val m = c.messages.getOrNull(i) ?: return
         if (m.role != Role.ASSISTANT) return
-        // 失败 / 空的回复不保留为版本，直接在原位置重试（app.js：(error||stopped) && !content && 最后一条）。
-        // 差异：JS 单版本时 pop 后 runChat 新建助手消息；这里原位清空、沿用同一 id（引擎只有 regenerate(msgId) 入口）
+        // 失败 / 空的回复不保留为版本，直接重试（app.js：(error||stopped) && !content && 最后一条）。
         val failed = (m.error != null || stopped(m) || m.truncated) && m.content.isEmpty() && i == c.messages.size - 1
+        if (failed && Versions.count(m) == 1) {
+            // 单版本失败：JS pop 掉旧消息再 runChat 新建；引擎（B）照此删掉旧消息、新建一条，Started 带来新 id。
+            // UI 这里不改消息，流式期间旧消息不显示（base 只到它之前），收到 Started 后用新 id 显示正在生成的回复。
+            scope.launch {
+                if (markKind != null) save(c, touch = false)
+                startStream(c.id, Streaming(c.id, c.messages.take(i), null, liveId = m.id, prefix = null, startedAt = now())) {
+                    deps.engine.regenerate(c.id, m.id)
+                }
+            }
+            return
+        }
+        // 多版本时失败 / 空回复：JS applySnap(m, {}) 原位清空后重试；否则新开一个版本
         val path = if (failed) c.messages.take(i) + Versions.clearFields(m) else Versions.addVersion(c.messages, i)
         scope.launch {
             val nc = c.copy(messages = path)
@@ -490,21 +534,55 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         _state.update { if (it.convId == c.id) it.copy(conv = fresh) else it }
     }
 
+    /**
+     * 流式吞吐：Delta / Reasoning 先攒在缓冲里，最多每 [FLUSH_MS] 合并成一次状态更新（同 app.js 每帧最多一次 DOM 写入），
+     * 其余事件到来前先冲掉缓冲，保证顺序。一次 2000 token 的回复从 ~2000 次重组降到 ~几十次。
+     */
+    private class DeltaBuffer { val text = StringBuilder(); val reasoning = StringBuilder(); var last = 0L; var timer: Job? = null }
+
     private fun startStream(convId: String, s: Streaming, open: () -> Flow<StreamEvent>) {
         _state.update { it.copy(streams = it.streams + (convId to s)) }
+        val buf = DeltaBuffer()
+        fun flush() = synchronized(buf) {
+            buf.timer?.cancel(); buf.timer = null
+            if (buf.text.isEmpty() && buf.reasoning.isEmpty()) return@synchronized
+            val t = buf.text.toString(); val r = buf.reasoning.toString()
+            buf.text.setLength(0); buf.reasoning.setLength(0); buf.last = clock()
+            _state.update { st ->
+                val cur = st.streams[convId] ?: return@update st
+                st.copy(streams = st.streams + (convId to cur.copy(text = cur.text + t, reasoning = cur.reasoning + r)))
+            }
+        }
         val job = scope.launch {
             try {
-                open().collect { ev -> onEvent(convId, ev) }
+                open().collect { ev ->
+                    when (ev) {
+                        is StreamEvent.Delta, is StreamEvent.Reasoning -> {
+                            val due = synchronized(buf) {
+                                if (ev is StreamEvent.Delta) buf.text.append(ev.text) else buf.reasoning.append((ev as StreamEvent.Reasoning).text)
+                                val due = clock() - buf.last >= FLUSH_MS
+                                if (!due && buf.timer == null) buf.timer = scope.launch { kotlinx.coroutines.delay(FLUSH_MS); flush() }
+                                due
+                            }
+                            if (due) flush()
+                        }
+                        else -> { flush(); onEvent(convId, ev) }
+                    }
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                flush()
                 onEvent(convId, StreamEvent.Error(0, e.message ?: e.toString(), ""))
             } finally {
-                withContext(NonCancellable) { finish(convId) }
+                withContext(NonCancellable) { flush(); finish(convId) }
             }
         }
         jobs[convId] = job
     }
+
+    /** 节流用的单调时钟（与 [now] 的业务时间分开，测试里 now 可以是假的） */
+    private fun clock() = System.nanoTime() / 1_000_000
 
     private fun onEvent(convId: String, ev: StreamEvent) = _state.update { st ->
         val s = st.streams[convId] ?: return@update st
@@ -514,7 +592,9 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
             is StreamEvent.UsageUpdate -> s.copy(usage = ev.usage)
             is StreamEvent.Error -> s.copy(error = ev.message.ifEmpty { "HTTP ${ev.httpStatus}" })
             // 契约 #c：第一个事件给出真实 id（用户消息已落盘、助手消息为空占位），替换乐观显示用的临时 id
-            is StreamEvent.Started -> s.copy(pendingUser = s.pendingUser?.copy(id = ev.userMsgId ?: s.pendingUser.id), liveId = ev.assistantMsgId)
+            is StreamEvent.Started -> s.copy(pendingUser = s.pendingUser?.copy(id = ev.userMsgId ?: s.pendingUser.id), liveId = ev.assistantMsgId,
+                // 引擎换了助手消息（单版本失败重试时删旧建新）：旧消息的字段（版本 / 续写前缀）不再适用
+                prefix = if (s.prefix != null && s.prefix.id != ev.assistantMsgId && s.liveId != ChatUiState.STREAMING_ID) null else s.prefix)
             // 契约 #4：给用户的轻提示（如 402 降级重试），不影响正文
             is StreamEvent.Notice -> return@update st.copy(toast = ev.text)
             else -> s
@@ -556,6 +636,8 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
 
     companion object {
         const val PENDING_USER_ID = "__pending_user__"
+        /** 流式合并刷新间隔（ms） */
+        const val FLUSH_MS = 50L
         /** app.js 1678 */
         const val VER_RP_WARN = "本对话开启了 RP 缓存优化：切换较早回复的版本会改变对话历史，下一轮缓存命中率会下降一次。"
         /** app.js 4030 */

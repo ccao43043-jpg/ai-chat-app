@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -295,5 +296,82 @@ class ChatControllerTest {
         c.setSearchOn(true); until { c.settings.value.searchOn }
         assertFalse(c.send("搜一下", emptyList()))
         assertTrue(c.state.value.askSearchSetup)
+    }
+
+    // ---------------- M4 ----------------
+
+    /** 引擎照 JS 对齐后：单版本失败的最后一条回复重试 = 删旧建新，Started 带新 assistantMsgId */
+    @Test fun failedSingleVersionRegenerateFollowsNewIdFromStarted() = runBlocking {
+        val (c, repo) = make(delayMs = 5)
+        c.sendAndWait("问")
+        val base = c.state.value.conv!!
+        val conv = repo.create(base.providerId, base.model, "失败的对话")
+        val user = base.messages[0].copy(id = "u-fail")
+        val bad = com.aichat.app.domain.model.Message("a-fail", Role.ASSISTANT, "", 1L, error = "HTTP 500：演示错误")
+        repo.save(conv.copy(messages = listOf(user, bad)))
+        c.select(conv.id); until("载入失败对话") { c.state.value.conv?.messages?.lastOrNull()?.error != null }
+
+        val seenOldWhileStreaming = java.util.concurrent.atomic.AtomicBoolean(false)
+        val liveIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        val watch = CoroutineScope(Dispatchers.Default + Job().also { jobs += it }).launch {
+            c.state.collect { st -> st.streaming?.let { s ->
+                liveIds.add(s.liveId)
+                if (s.liveId != "a-fail" && st.messages.any { it.id == "a-fail" }) seenOldWhileStreaming.set(true)
+            } }
+        }
+        assertEquals(com.aichat.app.ui.chat.Plan.Done, c.planRegenerate("a-fail"))
+        until { c.state.value.isStreaming }
+        until("收到 Started 的新 id") { c.state.value.streaming?.liveId?.let { it != "a-fail" } ?: true }
+        val mid = c.state.value
+        if (mid.isStreaming) {
+            assertEquals(listOf("u-fail", mid.streaming!!.liveId), mid.messages.map { it.id })
+            assertNull("旧消息的字段不能带进新消息", mid.messages.last().error)
+        }
+        c.idle(); watch.cancel()
+        val saved = repo.load(conv.id)!!.messages
+        assertEquals(2, saved.size)
+        assertNotEquals("a-fail", saved[1].id)
+        assertTrue(saved[1].content.isNotEmpty()); assertNull(saved[1].error)
+        assertTrue(saved[1].id in liveIds)
+        assertFalse("流式中不应再显示被删掉的旧消息", seenOldWhileStreaming.get())
+        assertEquals(saved, c.state.value.messages)
+    }
+
+    /** 流式吞吐：Delta 按 FLUSH_MS 合并成一次状态更新；流期间已存在的条目（stable）引用不变 */
+    @Test fun deltasAreCoalescedAndStableListIsStable() = runBlocking {
+        val (c, _) = make(delayMs = 1)
+        c.sendAndWait("热身")
+        val texts = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val bases = java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>()))
+        val watch = CoroutineScope(Dispatchers.Default + Job().also { jobs += it }).launch {
+            c.state.collect { st -> st.streaming?.let { s -> if (texts.lastOrNull() != s.text) texts += s.text; if (s.liveId != ChatUiState.STREAMING_ID) bases.add(s.base) } }
+        }
+        val t0 = System.currentTimeMillis()
+        assertTrue(c.send("写一段长一点的", emptyList()))
+        until { c.state.value.isStreaming }; c.idle(); watch.cancel()
+        val elapsed = System.currentTimeMillis() - t0
+        val final = c.state.value.conv!!.messages.last().content
+        assertTrue(final.isNotEmpty())
+        assertTrue("文本更新 ${texts.size} 次，用时 ${elapsed}ms", texts.size <= elapsed / ChatController.FLUSH_MS + 4)
+        assertEquals("整个流期间 base 是同一个列表实例", 1, bases.size)
+    }
+
+    /** 进程被杀后恢复：用 SavedStateHandle 记住的对话 id 打开同一对话；id 已不存在时退回最近对话 */
+    @Test fun restoresConversationAfterProcessDeath() = runBlocking {
+        val deps = FakeDeps.create(DataGraph.inMemory(), engineDelayMs = 1)
+        val scope = CoroutineScope(Dispatchers.Default + Job().also { jobs += it })
+        val saved = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val c1 = ChatController(deps, scope, onConvIdChange = { saved.set(it) })
+        c1.sendAndWait("第一个")
+        val firstId = c1.state.value.convId!!
+        c1.newConversation(); c1.sendAndWait("第二个")
+        assertNotEquals(firstId, c1.state.value.convId)
+        c1.select(firstId); until { saved.get() == firstId }
+
+        val c2 = ChatController(deps, scope, restoredConvId = saved.get())
+        until("恢复到同一对话") { c2.state.value.conv?.id == firstId }
+        val c3 = ChatController(deps, scope, restoredConvId = "gone")
+        until("不存在则打开最近") { c3.state.value.conv != null }
+        assertNotEquals("gone", c3.state.value.convId)
     }
 }
