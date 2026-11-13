@@ -18,13 +18,19 @@ import kotlin.random.Random
 /** 工作流 B · M1：Kotlin 实现 vs providers.js（Node 导出的 golden） */
 class ProvidersGoldenTest {
 
-    @Test fun buildChatRequestOpenAiMatchesJsByteForByte() {
-        val cases = Golden.load("buildChatRequest.openai.jsonl")
-        assertTrue(cases.size >= 30)
+    private val builder = DefaultProviderClient(AuthInjector(null) { null })
+
+    @Test fun buildChatRequestOpenAiMatchesJsByteForByte() = checkBuild("buildChatRequest.openai.jsonl", 40)
+    @Test fun buildChatRequestAnthropicMatchesJsByteForByte() = checkBuild("buildChatRequest.anthropic.jsonl", 10)
+    @Test fun buildChatRequestGeminiMatchesJsByteForByte() = checkBuild("buildChatRequest.gemini.jsonl", 5)
+
+    private fun checkBuild(file: String, minCases: Int) {
+        val cases = Golden.load(file)
+        assertTrue(cases.size >= minCases)
         for (c in cases) {
             val (p, model, msgs, sys, opts) = c.input
-            val r = OpenAiCompat.build(Golden.provider(p), (model as JsonPrimitive).content, Golden.messages(msgs),
-                (sys as JsonPrimitive).content, Golden.opts(opts))
+            val r = builder.buildChatRequest(Golden.provider(p), (model as JsonPrimitive).content, Golden.messages(msgs),
+                (sys as JsonPrimitive).content, Golden.opts(opts), JsonObject(emptyMap()), Golden.ext(opts))
             val exp = c.out as JsonObject
             assertEquals("${c.name} url", (exp["url"] as JsonPrimitive).content, r.url)
             assertEquals("${c.name} method", (exp["method"] as JsonPrimitive).content, r.method)
@@ -34,6 +40,41 @@ class ProvidersGoldenTest {
             // 缓存前缀稳定性：整串逐字一致（键序、转义、数字格式）
             assertEquals("${c.name} body(bytes)", expBody, r.body)
         }
+    }
+
+    @Test fun mergePatchRfc7386() {
+        fun j(s: String) = Js.json.parseToJsonElement(s)
+        // RFC 7386 附录 A 的示例
+        val cases = listOf(
+            Triple("""{"a":"b"}""", """{"a":"c"}""", """{"a":"c"}"""),
+            Triple("""{"a":"b"}""", """{"b":"c"}""", """{"a":"b","b":"c"}"""),
+            Triple("""{"a":"b"}""", """{"a":null}""", """{}"""),
+            Triple("""{"a":"b","b":"c"}""", """{"a":null}""", """{"b":"c"}"""),
+            Triple("""{"a":["b"]}""", """{"a":"c"}""", """{"a":"c"}"""),
+            Triple("""{"a":"c"}""", """{"a":["b"]}""", """{"a":["b"]}"""),
+            Triple("""{"a":{"b":"c"}}""", """{"a":{"b":"d","c":null}}""", """{"a":{"b":"d"}}"""),
+            Triple("""{"a":[{"b":"c"}]}""", """{"a":[1]}""", """{"a":[1]}"""),
+            Triple("""["a","b"]""", """["c","d"]""", """["c","d"]"""),
+            Triple("""{"a":"b"}""", """["c"]""", """["c"]"""),
+            Triple("""{"a":"foo"}""", "null", "null"),
+            Triple("""{"a":"foo"}""", "\"bar\"", "\"bar\""),
+            Triple("""{"e":null}""", """{"a":1}""", """{"e":null,"a":1}"""),
+            Triple("""[1,2]""", """{"a":"b","c":null}""", """{"a":"b"}"""),
+            Triple("""{}""", """{"a":{"bb":{"ccc":null}}}""", """{"a":{"bb":{}}}"""),
+        )
+        for ((t, p, r) in cases) assertEquals("$t + $p", Js.stringify(j(r)), Js.stringify(JsonMergePatch.apply(j(t), j(p))))
+    }
+
+    @Test fun bodyPatchDeepMergesAndDeletes() {
+        val c = Golden.load("buildChatRequest.openai.jsonl").first { it.name == "openrouter-sort-price" }
+        val (p, model, msgs, sys, opts) = c.input
+        val patch = Js.json.parseToJsonElement("""{"provider":{"only":["x"],"sort":null},"stream_options":null,"usage":{"include":true}}""") as JsonObject
+        val body = OpenAiCompat.buildBody(Golden.provider(p), (model as JsonPrimitive).content, Golden.messages(msgs),
+            (sys as JsonPrimitive).content, Golden.opts(opts), patch)
+        assertEquals("""{"only":["x"]}""", Js.stringify(body["provider"]))
+        assertTrue(body["stream_options"] == null)
+        assertEquals("""{"include":true}""", Js.stringify(body["usage"]))
+        assertEquals(listOf("model", "messages", "stream", "stream_options").filter { it != "stream_options" }, body.keys.take(3))
     }
 
     @Test fun bodyPatchOverridesSessionIdInPlace() {
@@ -104,7 +145,7 @@ class ProvidersGoldenTest {
     }
 
     @Test fun parseFullResponse() {
-        for (c in Golden.load("parseFullResponse.openai.jsonl")) {
+        for (c in Golden.load("parseFullResponse.openai.jsonl") + Golden.load("parseFullResponse.other.jsonl")) {
             val got = Deltas.parseFullResponse((c.input[0] as JsonPrimitive).content, (c.input[1] as JsonPrimitive).content)
             Golden.assertSemantic("parseFullResponse", c.out, JsonArray(got.map { it.toJson() }))
         }

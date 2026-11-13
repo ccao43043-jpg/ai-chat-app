@@ -84,4 +84,10 @@ object Golden {
             routeSlug = str(o["routeSlug"]),
         )
     }
+    /** JS opts 里 ChatOptions 尚未建模的字段（D 契约 #2 落地前走 NetOptions） */
+    fun ext(e: JsonElement?): NetOptions {
+        val o = e as? JsonObject ?: JsonObject(emptyMap())
+        return NetOptions(cacheSystem = bool(o["cacheSystem"]) != false, cacheAffinity = bool(o["cacheAffinity"]) != false,
+            orSort = str(o["orSort"]), orGemini = Js.truthy(o["orGemini"]), orMiniMax = Js.truthy(o["orMiniMax"]))
+    }
 }

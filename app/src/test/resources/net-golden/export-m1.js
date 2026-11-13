@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * 工作流 B · M1 golden 导出器（OpenAI 兼容请求体 + SSE 解析 + usage）。
+ * 工作流 B · M1/M2 golden 导出器（openai 兼容 / anthropic / gemini 请求体 + SSE 解析 + usage）。
  * 直接 require 旧版 JS 参考实现，写出 {"in":[…],"out":…} 每行一条的 jsonl（格式同 spec §6，D 可原样搬进 golden/）。
  * 用法：node app/src/test/resources/net-golden/export-m1.js [--check]
  *   --check：只比对，不写文件；有差异时退出码 1。
@@ -76,12 +76,43 @@ const chatCases = [
   ['openrouter-affinity-off', prov('openrouter', { cacheAffinity: false, orSort: 'throughput' }), 'deepseek/deepseek-v4', convo, SYS, { convId: 'c3', providerOrder: ['novita'] }],
   ['openrouter-by-host', prov('custom', { baseUrl: 'https://OpenRouter.ai/api/v1/' }), 'x/y', convo, SYS, { convId: 42 }],
   ['openrouter-jsonmode-nostream', prov('openrouter'), 'openai/gpt-6-astra', convo, '', { stream: false, jsonMode: true, convId: 'c4' }],
+  ['openrouter-orgemini-no-session', prov('openrouter'), 'google/gemini-3.8-flash', convo, SYS, { convId: 'c6', orGemini: true }],
+  ['openrouter-orminimax-no-session', prov('openrouter'), 'minimax/minimax-m3', convo, SYS, { convId: 'c6', orMiniMax: true, orSort: 'price' }],
+  ['openrouter-opts-sort-overrides', prov('openrouter', { orSort: 'price' }), 'x/y', convo, SYS, { convId: 'c7', orSort: 'throughput' }],
+  ['openrouter-opts-sort-balanced', prov('openrouter', { orSort: 'price' }), 'x/y', convo, SYS, { convId: 'c7', orSort: 'balanced' }],
+  ['openrouter-opts-affinity-off', prov('openrouter'), 'x/y', convo, SYS, { convId: 'c7', cacheAffinity: false, providerOrder: ['novita'], orSort: 'price' }],
+  ['qwen-cache-nosystem', prov('qwen'), 'qwen3.7-plus', cacheMsgs, SYS, { cacheControl: true, cacheSystem: false, cacheSystemSplit: 3 }],
   ['openrouter-images-cache', prov('openrouter'), 'anthropic/claude-opus-5.5', cacheMsgs, SYS, { cacheControl: true, convId: 'c5' }],
 ];
+// ---------------- buildChatRequest（anthropic / gemini） ----------------
+const longHist = [];
+for (let i = 0; i < 12; i++) {
+  longHist.push({ role: 'user', content: '问题 ' + i, images: i % 4 === 0 ? [IMG, IMG] : undefined, _cache: true });
+  longHist.push({ role: 'assistant', content: '回答 ' + i, _cache: true });
+}
+longHist.push({ role: 'user', content: '最新问题' });
+const imgOnlyTail = [{ role: 'user', content: '前文', _cache: true }, { role: 'assistant', content: '好', _cache: true }, { role: 'user', content: '', images: [IMG], _cache: true }, { role: 'user', content: '现在' }];
+chatCases.push(
+  ['anthropic-plain', prov('anthropic'), 'claude-opus-5-5', convo, SYS, {}],
+  ['anthropic-nostream-temp', prov('anthropic'), 'claude-sonnet-5-5', convo, '', { stream: false, temperature: 0.2, maxTokens: 1024, jsonMode: true, thinking: true }],
+  ['anthropic-images', prov('anthropic'), 'claude-opus-5-5', imgMsgs.concat([{ role: 'user', content: '外链', images: ['https://example.com/x.jpg'] }]), SYS, {}],
+  ['anthropic-cache-sys', prov('anthropic'), 'claude-opus-5-5', cacheMsgs, SYS, { cacheControl: true }],
+  ['anthropic-cache-nosys', prov('anthropic'), 'claude-opus-5-5', cacheMsgs, '', { cacheControl: true }],
+  ['anthropic-cache-anchors-long', prov('anthropic'), 'claude-opus-5-5', longHist, SYS, { cacheControl: true, maxTokens: 8192 }],
+  ['anthropic-cache-anchors-long-nosys', prov('anthropic'), 'claude-opus-5-5', longHist, '', { cacheControl: true }],
+  ['anthropic-cache-imgonly-tail', prov('anthropic'), 'claude-opus-5-5', imgOnlyTail, SYS, { cacheControl: true }],
+  ['anthropic-cache-none-marked', prov('anthropic'), 'claude-opus-5-5', convo, SYS, { cacheControl: true }],
+  ['anthropic-custom-base', prov('anthropic', { baseUrl: 'https://proxy.example.com/claude/' }), 'claude-haiku-4-5', convo, SYS, { temperature: 1 }],
+  ['gemini-plain', prov('gemini'), 'gemini-3.8-flash', convo, SYS, {}],
+  ['gemini-nostream-gc', prov('gemini'), 'gemini-3.1-pro-preview', convo, '', { stream: false, temperature: 0.4, maxTokens: 2048, jsonMode: true, thinking: true }],
+  ['gemini-images', prov('gemini'), 'gemini-3.8-flash', imgMsgs, SYS, { temperature: 0 }],
+  ['gemini-model-encode', prov('gemini', { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/' }), 'tunedModels/我的 模型+v1?x', convo, SYS, {}],
+  ['gemini-cache-ignored', prov('gemini'), 'gemini-3.5-flash-lite', cacheMsgs, SYS, { cacheControl: true, convId: 'c1' }],
+);
 // 输入的 JS 原样序列化（NaN → null，交给 Kotlin 侧按「未设」处理，与 JS isNaN 分支同义）
 const chatLines = chatCases.map(([name, p, model, msgs, sys, opts]) => {
   const r = P.buildChatRequest(p, model, msgs, sys, opts);
-  const headers = Object.assign({}, r.headers); delete headers.Authorization; // 认证头由 AuthInjector 注入，不进 golden
+  const headers = Object.assign({}, r.headers); ['Authorization', 'x-api-key', 'x-goog-api-key'].forEach(k => delete headers[k]); // 认证头由 AuthInjector 注入，不进 golden
   return { name, in: [p, model, msgs, sys, opts], out: { url: r.url, method: r.method, headers, body: r.body } };
 });
 
@@ -180,17 +211,38 @@ const otherStreams = [
     ev('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '你好' } }) +
     ev('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 42 } }) +
     ev('message_stop', { type: 'message_stop' })],
+  ['anthropic-cache-write-tool', 'anthropic',
+    ': ping\n\n' +
+    ev('message_start', { type: 'message_start', message: { id: 'm2', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 5, cache_creation_input_tokens: 3000, cache_read_input_tokens: 0, output_tokens: 1 } } }) +
+    ev('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
+    ev('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '多行\n文本 "引号"' } }) +
+    ev('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta' } }) +
+    ev('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"a":' } }) +
+    ev('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+    ev('message_delta', { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 4096, input_tokens: 5, cache_creation_input_tokens: 3000, cache_read_input_tokens: 0 } }) +
+    ev('message_stop', { type: 'message_stop' })],
   ['anthropic-error', 'anthropic', ev('error', { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }) + ev('error', { type: 'error' })],
   ['gemini-basic', 'gemini',
     'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: '想', thought: true }, { text: '答' }] } }], usageMetadata: { promptTokenCount: 4000, candidatesTokenCount: 2, thoughtsTokenCount: 1, cachedContentTokenCount: 3000 } }) + '\r\n\r\n' +
     'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: '' }, { inlineData: {} }] }, finishReason: 'STOP' }] }) + '\r\n\r\n' +
     'data: ' + JSON.stringify({ error: { message: 'quota' } }) + '\r\n\r\n'],
+  ['gemini-multi-usage', 'gemini',
+    'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: '第一段' }] }, index: 0 }], usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 3, totalTokenCount: 5003 }, modelVersion: 'gemini-3.8-flash' }) + '\n\n' +
+    'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: '，第二段😀' }] }, index: 0 }], usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 9, cachedContentTokenCount: 4096, thoughtsTokenCount: 20 } }) + '\n\n' +
+    'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: '' }] }, finishReason: 'MAX_TOKENS', index: 0 }], usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 12, cachedContentTokenCount: 4096, thoughtsTokenCount: 20 } }) + '\n\n'],
+  ['gemini-error-string', 'gemini', 'data: ' + JSON.stringify({ error: 'bad' }) + '\n\n' + 'data: ' + JSON.stringify({ candidates: [] }) + '\n\n'],
 ];
 const otherSseLines = otherStreams.map(([name, type, text]) => {
   const parser = P.createStreamParser(type);
   const out = parser.push(text).concat(parser.end());
   return { name, in: [type, text], out: { deltas: out, done: parser.done } };
 });
+const otherFullLines = [
+  ['anthropic', JSON.stringify({ id: 'm', type: 'message', content: [{ type: 'thinking', thinking: '想' }, { type: 'text', text: '整包回答' }, { type: 'tool_use', id: 't' }], usage: { input_tokens: 10, cache_read_input_tokens: 90, output_tokens: 5 } })],
+  ['anthropic', JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'bad' } })],
+  ['gemini', JSON.stringify({ candidates: [{ content: { parts: [{ text: '整包', thought: false }] } }], usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2 } })],
+  ['gemini', '[' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'a' }] } }] }) + ',' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'b' }] } }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, cachedContentTokenCount: 1 } }) + ']'],
+].map(([t, x]) => ({ in: [t, x], out: P.parseFullResponse(t, x) }));
 const fullLines = [streams['full-json'], '[' + streams['full-json'] + ',{"choices":[{"delta":{"content":"二"}}]}]', 'not json at all'].map(t => ({ in: ['openai', t], out: P.parseFullResponse('openai', t) }));
 
 // ---------------- parseError / resolveMaxTokens / parseAffordTokens / downgradeMaxTokens ----------------
@@ -214,13 +266,16 @@ const affordLines = ['can only afford 12345.', 'Can Only Afford   77 tokens', 'c
 const downLines = [[12345], [100], [0], [null], [1000, { min: 512 }], [400.9]].map(a => ({ in: a, out: P.downgradeMaxTokens.apply(null, a) }));
 
 const files = {
-  'buildChatRequest.openai.jsonl': chatLines,
+  'buildChatRequest.openai.jsonl': chatLines.filter(l => l.in[0].type === 'openai'),
+  'buildChatRequest.anthropic.jsonl': chatLines.filter(l => l.in[0].type === 'anthropic'),
+  'buildChatRequest.gemini.jsonl': chatLines.filter(l => l.in[0].type === 'gemini'),
   'orSessionIdFor.jsonl': sidLines,
   'normalizeUsage.jsonl': usageLines,
   'mergeUsage.jsonl': mergeLines,
   'createStreamParser.openai.jsonl': sseLines,
   'createStreamParser.other.jsonl': otherSseLines,
   'parseFullResponse.openai.jsonl': fullLines,
+  'parseFullResponse.other.jsonl': otherFullLines,
   'parseError.jsonl': errLines,
   'resolveMaxTokens.jsonl': maxLines,
   'parseAffordTokens.jsonl': affordLines,
