@@ -16,6 +16,25 @@ import kotlinx.serialization.json.doubleOrNull
 object Js {
     val json = Json { ignoreUnknownKeys = true; isLenient = false }
 
+    private val JSON_NUM = Regex("^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$")
+    /**
+     * JSON.parse 语义：kotlinx 非 lenient 模式仍会把裸词（如 `<h1>x</h1>`、`abc`）读成非字符串字面量，
+     * JS 会抛 SyntaxError；这里逐个检查非字符串字面量只能是 true / false / null / 合法数字，否则抛 IllegalArgumentException。
+     */
+    fun parse(text: String): JsonElement {
+        val e = json.parseToJsonElement(text)
+        fun check(x: JsonElement) {
+            when (x) {
+                is JsonObject -> x.values.forEach(::check)
+                is JsonArray -> x.forEach(::check)
+                is JsonPrimitive -> if (!x.isString && x !is JsonNull && x.content != "true" && x.content != "false" && !JSON_NUM.matches(x.content))
+                    throw IllegalArgumentException("Unexpected token in JSON: " + x.content.take(20))
+            }
+        }
+        check(e)
+        return e
+    }
+
     /** String.prototype.trim 的空白集合（含 BOM、全角空格、NBSP），与 Kotlin 的 isWhitespace 不完全相同 */
     fun isJsSpace(c: Char): Boolean = when (c) {
         '\t', '\n', '\u000B', '\u000C', '\r', ' ', '\u00A0', '\u1680', '\u2028', '\u2029', '\u202F', '\u205F', '\u3000', '\uFEFF' -> true

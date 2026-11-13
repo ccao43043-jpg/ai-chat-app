@@ -235,6 +235,101 @@ class ChatEngineTest {
         assertTrue(body, body.contains("用户上传了以下文件，请基于文件内容回答：") && body.contains("【文件：a.txt】") && body.contains("文件正文"))
     }
 
+    // ---------------- M4：NetRetry ----------------
+    private fun fail(status: Int) = TinySseServer.Handler { _, ex -> ex.head(status, "application/json"); ex.text("{\"error\":{\"message\":\"busy\"}}") }
+
+    @Test fun netRetryBacksOffThenSucceeds() = runBlocking {
+        val conv = setup()
+        val waits = mutableListOf<Long>()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins(), sleep = { waits += it }, rnd = { 0.5 })
+        server.handlers += fail(503); server.handlers += fail(503); server.handlers += ok("终于")
+        val ev = engine.send(conv.id, "hi", emptyList()).toList()
+        assertEquals(listOf(800L, 1600L), waits)                                  // backoff(0/1, server, 0.5)
+        assertTrue(ev.contains(StreamEvent.Notice("服务端暂时不可用（503），0.8 秒后重试（1/2）")))
+        assertTrue(ev.contains(StreamEvent.Notice("服务端暂时不可用（503），1.6 秒后重试（2/2）")))
+        assertFalse(ev.any { it is StreamEvent.Error })
+        val bot = g.chats.load(conv.id)!!.messages.last()
+        assertEquals("终于", bot.content); assertNull(bot.error); assertNull(bot.extras["retries"])
+        assertEquals(3, server.requests.size)
+    }
+
+    @Test fun netRetryGivesUpAfterTwoAndRecordsRetries() = runBlocking {
+        val conv = setup()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins(), sleep = { }, rnd = { 0.0 })
+        repeat(3) { server.handlers += fail(429) }
+        val ev = engine.send(conv.id, "hi", emptyList()).toList()
+        assertTrue(ev.contains(StreamEvent.Notice("请求过于频繁（429），1.6 秒后重试（1/2）")))
+        assertEquals(1, ev.count { it is StreamEvent.Error })
+        val bot = g.chats.load(conv.id)!!.messages.last()
+        assertTrue(bot.error!!, bot.error!!.endsWith("（已重试 2 次）")); assertEquals("2", bot.extras["retries"].toString())
+    }
+
+    @Test fun netRetrySkipsAuthErrors() = runBlocking {
+        val conv = setup()
+        val waits = mutableListOf<Long>()
+        server.handlers += fail(401)
+        DefaultChatEngine(g.chats, g.settings, client, Plugins(), sleep = { waits += it }).send(conv.id, "hi", emptyList()).toList()
+            .let { assertTrue(it.any { e -> e is StreamEvent.Error }) }
+        assertTrue(waits.isEmpty()); assertEquals(1, server.requests.size)
+        assertFalse(g.chats.load(conv.id)!!.messages.last().error!!.contains("已重试"))
+    }
+
+    // ---------------- M4：联网搜索 ----------------
+    private fun searchOn(rewrite: Boolean) = runBlocking {
+        g.settings.update { it.copy(searchOn = true, search = Js.json.parseToJsonElement(
+            """{"provider":"searxng","urls":{"searxng":"${server.baseUrl}/sx"},"count":3,"rewrite":$rewrite}""") as JsonObject) }
+    }
+    private val sx = TinySseServer.Handler { _, ex ->
+        ex.head(200, "application/json")
+        ex.text("""{"results":[{"title":"<b>标题</b>","url":"https://www.example.com/a","content":"摘要 正文","publishedDate":"2026-11-01"}]}""")
+    }
+
+    @Test fun searchRewritesQueryInjectsResultsAndPersists() = runBlocking {
+        val conv = setup(); searchOn(true)
+        server.handlers += TinySseServer.Handler { _, ex -> ex.head(200, "application/json"); ex.text("""{"choices":[{"message":{"content":"改写后的查询"}}]}""") }
+        server.handlers += sx
+        server.handlers += ok("答")
+        val ev = DefaultChatEngine(g.chats, g.settings, client, Plugins(), search = com.aichat.app.net.DefaultSearchClient(AuthInjector(keys), http))
+            .send(conv.id, "今天有什么新闻", emptyList()).toList()
+        assertTrue(ev.first() is StreamEvent.Started)
+        assertTrue(ev.contains(StreamEvent.Notice("正在联网搜索：改写后的查询")))
+        val rw = server.requests.poll(1, TimeUnit.SECONDS)!!
+        assertTrue(rw.body, rw.body.contains("\"temperature\":0") && rw.body.contains("\"max_tokens\":256") && rw.body.contains("\"stream\":false"))
+        val sr = server.requests.poll(1, TimeUnit.SECONDS)!!
+        assertEquals("/sx/search?q=" + com.aichat.app.net.SearchCore.encodeURIComponent("改写后的查询") + "&format=json", sr.path)
+        val chat = server.requests.poll(1, TimeUnit.SECONDS)!!.body
+        assertTrue(chat, chat.contains("example.com") && chat.contains("今天有什么新闻"))
+        val saved = g.chats.load(conv.id)!!
+        val user = saved.messages.first { it.role == Role.USER }; val bot = saved.messages.last()
+        assertEquals("\"改写后的查询\"", (user.extras["search"] as JsonObject)["query"].toString())
+        assertEquals(1, (bot.extras["sources"] as kotlinx.serialization.json.JsonArray).size)
+        assertEquals("\"改写后的查询\"", bot.extras["searchQuery"].toString())
+        assertFalse(Js.truthy(bot.extras["searching"])); assertEquals("答", bot.content)
+    }
+
+    @Test fun searchFailureFallsBackToDirectAnswer() = runBlocking {
+        val conv = setup(); searchOn(false)
+        server.handlers += TinySseServer.Handler { _, ex -> ex.head(500, "text/html"); ex.text("<h1>Internal</h1>") }
+        server.handlers += ok("直接答")
+        DefaultChatEngine(g.chats, g.settings, client, Plugins(), search = com.aichat.app.net.DefaultSearchClient(AuthInjector(keys), http))
+            .send(conv.id, "问题", emptyList()).toList()
+        val bot = g.chats.load(conv.id)!!.messages.last()
+        assertEquals("联网搜索失败：HTTP 500：Internal。以下为模型直接回答。", Js.str(bot.extras["searchError"]))
+        assertEquals("直接答", bot.content)
+        assertFalse(Js.truthy(g.chats.load(conv.id)!!.messages.first().extras["search"]))
+    }
+
+    @Test fun continueDoesNotSearch() = runBlocking {
+        val conv = setup()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins(), search = com.aichat.app.net.DefaultSearchClient(AuthInjector(keys), http))
+        server.handlers += ok("前"); engine.send(conv.id, "hi", emptyList()).toList()
+        searchOn(false); server.requests.clear()
+        server.handlers += ok("后")
+        engine.continueGeneration(conv.id, g.chats.load(conv.id)!!.messages.last().id).toList()
+        assertEquals(1, server.requests.size)
+        assertEquals("前后", g.chats.load(conv.id)!!.messages.last().content)
+    }
+
     @Test fun injectNowLineOnlyWithMarker() {
         val e = DefaultChatEngine(g.chats, g.settings, client, Plugins())
         val msgs = listOf(WireMessage(Role.USER, "问"))

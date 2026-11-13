@@ -79,7 +79,7 @@ object BalanceCore {
         if (status == 0) return "网络错误，请检查连接"
         var msg = ""
         try {
-            val o = Js.json.parseToJsonElement(text?.ifEmpty { null } ?: "{}")
+            val o = Js.parse(text?.ifEmpty { null } ?: "{}")
             if (o is JsonNull) throw IllegalStateException()
             fun p(e: JsonElement?, k: String) = (e as? JsonObject)?.get(k)
             fun or(a: JsonElement?, b: JsonElement?) = if (Js.truthy(a)) a else b
@@ -103,7 +103,7 @@ object BalanceCore {
         val info = supportInfo(presetId)
         if (!info.supported) return fail(info.hint, info.consoleUrl, true)
         if (status < 200 || status >= 300) return fail(errOf(status, text), info.consoleUrl, false)
-        val o = try { Js.json.parseToJsonElement(text?.ifEmpty { null } ?: "{}") } catch (e: Exception) { return fail("响应不是合法 JSON", info.consoleUrl) }
+        val o = try { Js.parse(text?.ifEmpty { null } ?: "{}") } catch (e: Exception) { return fail("响应不是合法 JSON", info.consoleUrl) }
         return try {
             when (presetId) {
                 "deepseek" -> parseDeepSeek(o, info); "siliconflow" -> parseSiliconFlow(o, info)
