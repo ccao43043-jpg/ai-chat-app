@@ -43,7 +43,7 @@ import java.util.concurrent.ConcurrentHashMap
  * → runAfterResponse → 用量回调 → Router.afterResponse（observeRoute / markFail）→ ChatRepository.save。
  * 持久化：发送前存用户消息；流式中只改内存；结束 / 取消（truncated=true）/ 出错（error 字段）各存一次。
  *
- * 尚未移植（B 后续里程碑）：联网搜索与改写查询（search.js）、文件内容展开（files.js buildFileContext）、NetRetry 退避重试、
+ * 已接：files 展开（toRequestMsg）。尚未接入引擎（核心已移植 + golden）：联网搜索与改写查询（search.js）、NetRetry 退避重试、
  * UsageStats.makeEntry（这里先把 (conv, provider, model, msg, usage) 交给 [onUsage]）、calib 校准（beforeSend 传 null）。
  */
 class DefaultChatEngine(
@@ -63,30 +63,49 @@ class DefaultChatEngine(
 
     override fun send(convId: String, userText: String, images: List<String>, files: List<com.aichat.app.domain.model.FileAttachment>): Flow<StreamEvent> = channelFlow {
         val conv = chats.load(convId) ?: return@channelFlow fail("对话不存在")
-        val user = Message(uid(), Role.USER, userText, now(), images)
-        val conv1 = conv.copy(messages = conv.messages + user, updatedAt = now())
+        // app.js send()：只收读成功的文件（有文字或扫描版）；files[] 键名键序同 JS（AttachmentCodec）
+        val okDocs = files.filter { it.text.isNotEmpty() || it.scanned }
+        val text = Js.trim(userText)
+        if (text.isEmpty() && images.isEmpty() && okDocs.isEmpty()) return@channelFlow fail("消息不能为空")
+        val user = Message(uid(), Role.USER, text, now(), images, okDocs.map { FileContext.encode(it) })
+        var title = conv.title
+        if (title == "新对话") {
+            val t = text.ifEmpty { okDocs.firstOrNull()?.let { "📄 " + it.name } ?: "" }
+            if (t.isNotEmpty()) title = titleOf(conv.personaEmoji, text, t)
+        }
+        val conv1 = conv.copy(title = title, messages = conv.messages + user, updatedAt = now())
         chats.save(conv1)                                   // #b.1：流式前先存用户消息
         turn(conv1, botIndex = null, continuing = false)
     }
 
+    /**
+     * 重新生成（与 UI 的写入分工，对齐 app.js regenerate）：
+     *  - 目标消息只有一个版本：引擎先删掉旧消息（存盘），再新建一条助手消息（新 id，经 Started 发出）——失败 / 空回复同样走这条；
+     *  - 多版本（UI 已用 Versions.addVersion 建好新版本并保存）：就地写进这条消息。
+     */
     override fun regenerate(convId: String, assistantMsgId: String): Flow<StreamEvent> = channelFlow {
         val conv = chats.load(convId) ?: return@channelFlow fail("对话不存在")
         val i = conv.messages.indexOfFirst { it.id == assistantMsgId && it.role == Role.ASSISTANT }
         if (i < 0) return@channelFlow fail("找不到要重新生成的回复")
         val m = conv.messages[i]
-        // 失败 / 空的末条回复不留版本，原位重试（app.js regenerate）
-        val msgs = if ((m.error != null || Js.truthy(m.extras["stopped"])) && m.content.isEmpty() && i == conv.messages.lastIndex) {
-            if (m.versions.size < 2) conv.messages.dropLast(1) else conv.messages.dropLast(1) + Versions.clearCurrent(m)
-        } else Versions.addVersion(conv.messages, i)
-        val conv1 = conv.copy(messages = msgs)
-        turn(conv1, botIndex = if (msgs.size == i + 1 && msgs.last().id == m.id) i else null, continuing = false)
+        if (m.versions.size < 2) {
+            if (i != conv.messages.lastIndex) return@channelFlow fail("较早的回复请先建新版本再重新生成")
+            val conv1 = conv.copy(messages = conv.messages.dropLast(1), updatedAt = now())
+            chats.save(conv1)                               // 旧消息先删并落盘，再走与 send 相同的流程（新 id）
+            turn(conv1, botIndex = null, continuing = false)
+        } else turn(conv, botIndex = i, continuing = false)
     }
 
+    /** 续写：发送前清掉 error / stopped / truncated / finishReason 并存盘（D5：删除的键写 null），再追加到同一条消息 */
     override fun continueGeneration(convId: String, assistantMsgId: String): Flow<StreamEvent> = channelFlow {
         val conv = chats.load(convId) ?: return@channelFlow fail("对话不存在")
         val i = conv.messages.indexOfFirst { it.id == assistantMsgId && it.role == Role.ASSISTANT }
         if (i < 0 || conv.messages[i].content.isEmpty()) return@channelFlow fail("这条回复不能继续生成")
-        turn(conv, botIndex = i, continuing = true)
+        val m = conv.messages[i]
+        val cleared = m.copy(error = null, truncated = false, finishReason = null, extras = JsonObject(m.extras - "stopped"))
+        val conv1 = conv.copy(messages = conv.messages.map { if (it.id == m.id) cleared else it })
+        chats.save(conv1)
+        turn(conv1, botIndex = i, continuing = true)
     }
 
     private suspend fun ProducerScope<StreamEvent>.fail(msg: String) { send(StreamEvent.Error(0, msg, "")) }
@@ -116,7 +135,7 @@ class DefaultChatEngine(
 
         // ---- 请求上下文（toRequestMsg：文件展开 / 搜索注入待移植） ----
         val wire = conv.messages.filter { it.id != bot.id && it.error == null && !Js.truthy(it.extras["imageGen"]) && !Js.truthy(it.extras["pending"]) }
-            .map { WireMessage(it.role, it.content, it.images, srcId = it.id) }
+            .map { WireMessage(it.role, FileContext.requestContent(it, it === lastUser, TimeLine.localDateStr(now())), it.images, srcId = it.id) }
         var sys = conv.systemPrompt ?: ""
         var msgs = wire
         if (continuing && prior.isNotEmpty()) {
@@ -232,3 +251,8 @@ object Versions {
     /** applySnap(m, {})：清空当前版本字段，保留 id / role / versions / vi */
     fun clearCurrent(m: Message): Message = Message(m.id, m.role, "", versions = m.versions, vi = m.vi)
 }
+
+/** app.js send() 的新对话标题：有正文时加人设 emoji 前缀；空白折叠为一个空格，截 24 个 UTF-16 单元 */
+internal fun titleOf(personaEmoji: String?, text: String, t: String): String =
+    (if (!personaEmoji.isNullOrEmpty() && text.isNotEmpty()) "$personaEmoji " else "") +
+        t.replace(Regex("[\\s\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+"), " ").let { if (it.length > 24) it.substring(0, 24) else it }

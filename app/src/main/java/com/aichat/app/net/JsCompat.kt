@@ -154,6 +154,13 @@ object Js {
         cmpLevel(ea, eb) { it.t }.let { if (it != 0) return Integer.signum(it) }
         return 0
     }
+    private val zhCollator: java.text.Collator by lazy { java.text.Collator.getInstance(java.util.Locale.CHINESE) }
+    /**
+     * 规格 D6：用户可见排序（模型 id）用 Collator(Locale.CHINESE) 对齐 localeCompare。
+     * 纯拉丁（< U+0250）两侧沿用上面的 ICU 近似（已由 golden 与 Node 逐条核对，标点 / 大小写位次与 java Collator 不同）；含中文等其他文字时交给 Collator。
+     */
+    fun localeCompareZh(a: String, b: String): Int =
+        if (a.all { it.code < 0x250 } && b.all { it.code < 0x250 }) localeCompare(a, b) else Integer.signum(zhCollator.compare(a, b))
     fun number(n: Long): JsonPrimitive = JsonPrimitive(n)
 
     /** x | 0（undefined / NaN → 0） */

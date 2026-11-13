@@ -137,16 +137,102 @@ class ChatEngineTest {
         assertEquals("1", ((st["upstreams"] as JsonObject)["deepinfra"] as JsonObject)["obs"].toString())
     }
 
-    @Test fun regenerateKeepsOldReplyAsVersion() = runBlocking {
+    /** C1：只有一个版本 → 引擎先删旧消息再建新消息（新 id 经 Started 发出），同 app.js regenerate 的 pop + runChat */
+    @Test fun regenerateSingleVersionReplacesMessageWithNewId() = runBlocking {
         val conv = setup()
         val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins())
         server.handlers += ok("一"); engine.send(conv.id, "hi", emptyList()).toList()
         val first = g.chats.load(conv.id)!!.messages.last()
-        server.handlers += ok("二"); engine.regenerate(conv.id, first.id).toList()
+        var oldGoneBeforeStream = false
+        server.handlers += TinySseServer.Handler { r, ex ->
+            oldGoneBeforeStream = runBlocking { g.chats.load(conv.id)!!.messages.none { it.id == first.id } }
+            ok("二").handle(r, ex)
+        }
+        val ev = engine.regenerate(conv.id, first.id).toList()
+        val started = ev.first() as StreamEvent.Started
+        assertNotEquals(first.id, started.assistantMsgId)
+        assertTrue(oldGoneBeforeStream)
+        val msgs = g.chats.load(conv.id)!!.messages
+        assertEquals(2, msgs.size); assertEquals(started.assistantMsgId, msgs.last().id)
+        assertEquals("二", msgs.last().content); assertTrue(msgs.last().versions.isEmpty())
+    }
+
+    /** C1：失败回复（单版本）同样删旧建新；新消息上不带旧 error */
+    @Test fun regenerateFailedSingleVersionAlsoReplaces() = runBlocking {
+        val conv = setup()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins())
+        server.handlers += TinySseServer.Handler { _, ex -> ex.head(500, "application/json"); ex.text("{\"error\":{\"message\":\"boom\"}}") }
+        engine.send(conv.id, "hi", emptyList()).toList()
+        val bad = g.chats.load(conv.id)!!.messages.last(); assertNotNull(bad.error)
+        server.handlers += ok("好了")
+        val started = engine.regenerate(conv.id, bad.id).toList().first() as StreamEvent.Started
+        val msgs = g.chats.load(conv.id)!!.messages
+        assertEquals(2, msgs.size); assertEquals(started.assistantMsgId, msgs.last().id); assertNotEquals(bad.id, msgs.last().id)
+        assertNull(msgs.last().error); assertEquals("好了", msgs.last().content)
+    }
+
+    /** C1：多版本（UI 已 addVersion 并保存）→ 就地写进同一条消息 */
+    @Test fun regenerateMultiVersionWritesInPlace() = runBlocking {
+        val conv = setup()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins())
+        server.handlers += ok("一"); engine.send(conv.id, "hi", emptyList()).toList()
+        val c1 = g.chats.load(conv.id)!!
+        val first = c1.messages.last()
+        g.chats.save(c1.copy(messages = Versions.addVersion(c1.messages, c1.messages.lastIndex)))   // UI 的一步
+        server.handlers += ok("二")
+        val started = engine.regenerate(conv.id, first.id).toList().first() as StreamEvent.Started
+        assertEquals(first.id, started.assistantMsgId)
         val m = g.chats.load(conv.id)!!.messages.last()
         assertEquals(first.id, m.id); assertEquals("二", m.content)
         assertEquals(2, m.versions.size); assertEquals(1, m.vi)
         assertEquals("一", (m.versions[0]!!["content"] as JsonPrimitive).content)
+    }
+
+    /** C2：续写发送前清掉 error / stopped / truncated / finishReason 并落盘，再追加 */
+    @Test fun continueClearsFlagsBeforeSendingAndAppends() = runBlocking {
+        val conv = setup()
+        val engine = DefaultChatEngine(g.chats, g.settings, client, Plugins())
+        server.handlers += ok("前半"); engine.send(conv.id, "hi", emptyList()).toList()
+        val c1 = g.chats.load(conv.id)!!
+        val m0 = c1.messages.last().copy(error = "网络错误", truncated = true, finishReason = "length",
+            extras = JsonObject(c1.messages.last().extras + ("stopped" to JsonPrimitive(true))))
+        g.chats.save(c1.copy(messages = c1.messages.dropLast(1) + m0))
+        var seen: Message? = null
+        server.handlers += TinySseServer.Handler { r, ex ->
+            seen = runBlocking { g.chats.load(conv.id)!!.messages.last() }
+            ok("后半").handle(r, ex)
+        }
+        engine.continueGeneration(conv.id, m0.id).toList()
+        seen!!.let { assertNull(it.error); assertFalse(it.truncated); assertNull(it.finishReason); assertFalse(Js.truthy(it.extras["stopped"])) }
+        val m = g.chats.load(conv.id)!!.messages.last()
+        assertEquals(m0.id, m.id); assertEquals("前半后半", m.content); assertNull(m.error); assertFalse(Js.truthy(m.extras["stopped"]))
+    }
+
+    /** C3：新对话标题加助手 emoji 前缀（app.js send：有正文才加；空白折叠、截 24） */
+    @Test fun newConversationTitleGetsPersonaEmoji() = runBlocking {
+        val conv = setup()
+        g.chats.save(g.chats.load(conv.id)!!.copy(personaEmoji = "🐱"))
+        server.handlers += ok()
+        DefaultChatEngine(g.chats, g.settings, client, Plugins()).send(conv.id, "  你好\n  世界  ", emptyList()).toList()
+        assertEquals("🐱 你好 世界", g.chats.load(conv.id)!!.title)
+        assertEquals("🐱 " + "a".repeat(24), titleOf("🐱", "x", "a".repeat(30)))
+        assertEquals("📄 a.pdf", titleOf("🐱", "", "📄 a.pdf"))
+        assertEquals("你好", titleOf(null, "你好", "你好"))
+    }
+
+    /** B：files 按旧 JS 存进 user.files[] 并在请求里展开成文件上下文；只发文件时标题用 📄 文件名 */
+    @Test fun filesAreStoredAndExpandedInRequest() = runBlocking {
+        val conv = setup()
+        server.handlers += ok()
+        val f = FileAttachment("a.txt", 12, "text", "文件正文", 4, pages = null)
+        val bad = FileAttachment("b.pdf", 9, "pdf", "", 0)
+        DefaultChatEngine(g.chats, g.settings, client, Plugins()).send(conv.id, "", emptyList(), listOf(f, bad)).toList()
+        val c = g.chats.load(conv.id)!!
+        val user = c.messages.first { it.role == Role.USER }
+        assertEquals(1, user.files.size); assertEquals("a.txt", Js.str(user.files[0]["name"]))
+        assertEquals("📄 a.txt", c.title)
+        val body = server.requests.poll(1, TimeUnit.SECONDS)!!.body
+        assertTrue(body, body.contains("用户上传了以下文件，请基于文件内容回答：") && body.contains("【文件：a.txt】") && body.contains("文件正文"))
     }
 
     @Test fun injectNowLineOnlyWithMarker() {

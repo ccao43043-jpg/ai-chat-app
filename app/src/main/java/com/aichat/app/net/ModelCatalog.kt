@@ -103,7 +103,7 @@ object ModelCatalog {
         }
         val out = ArrayList<String>()
         for (v in ids) if (v.isNotEmpty() && v !in out) out += v
-        return out.sortedWith { a, b -> Js.localeCompare(a, b) }
+        return out.sortedWith { a, b -> Js.localeCompareZh(a, b) }
     }
 
     private fun firstTruthy(vararg es: JsonElement?): JsonElement? = es.firstOrNull { Js.truthy(it) }
