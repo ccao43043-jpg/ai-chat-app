@@ -1,0 +1,176 @@
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"google/gemini-2.5-flash"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"google/gemini-2.5-flash"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"google/gemini-2.5-flash"],"out":false}
+{"in":[{},"google/gemini-2.5-flash"],"out":true}
+{"in":[null,"google/gemini-2.5-flash"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"~google/gemini-pro"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"~google/gemini-pro"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"~google/gemini-pro"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"~google/gemini-pro"],"out":false}
+{"in":[{},"~google/gemini-pro"],"out":true}
+{"in":[null,"~google/gemini-pro"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"google/gemini-2.5-flash-lite"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"google/gemini-2.5-flash-lite"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"google/gemini-2.5-flash-lite"],"out":false}
+{"in":[{},"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[null,"google/gemini-2.5-flash-lite"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"gemini-2.5"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"gemini-2.5"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"gemini-2.5"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"gemini-2.5"],"out":false}
+{"in":[{},"gemini-2.5"],"out":true}
+{"in":[null,"gemini-2.5"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"vendor/gemini-3-pro-preview"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"vendor/gemini-3-pro-preview"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"vendor/gemini-3-pro-preview"],"out":false}
+{"in":[{},"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[null,"vendor/gemini-3-pro-preview"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"google/gemini-3.8-flash-lite:free"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"google/gemini-3.8-flash-lite:free"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"google/gemini-3.8-flash-lite:free"],"out":false}
+{"in":[{},"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[null,"google/gemini-3.8-flash-lite:free"],"out":true}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{},"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[null,"minimax/minimax-m3.1-flash"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"~minimax/minimax-m3"],"out":false}
+{"in":[{},"~minimax/minimax-m3"],"out":false}
+{"in":[null,"~minimax/minimax-m3"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{},"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[null,"MiniMax/minimax-m2.5-preview"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{},"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[null,"minimax/minimax-m2.7:nitro"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"minimax/abab"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"minimax/abab"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"minimax/abab"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"minimax/abab"],"out":false}
+{"in":[{},"minimax/abab"],"out":false}
+{"in":[null,"minimax/abab"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"deepseek/deepseek-chat"],"out":false}
+{"in":[{},"deepseek/deepseek-chat"],"out":false}
+{"in":[null,"deepseek/deepseek-chat"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{},"anthropic/claude-sonnet-4"],"out":false}
+{"in":[null,"anthropic/claude-sonnet-4"],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},""],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},""],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},""],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},""],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},""],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},""],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},""],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},""],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},""],"out":false}
+{"in":[{},""],"out":false}
+{"in":[null,""],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},null],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},null],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},null],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},null],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},null],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},null],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},null],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},null],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},null],"out":false}
+{"in":[{},null],"out":false}
+{"in":[null,null],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","baseUrl":"https://x.com"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"},"  minimax/minimax-m3 "],"out":false}
+{"in":[{},"  minimax/minimax-m3 "],"out":false}
+{"in":[null,"  minimax/minimax-m3 "],"out":false}

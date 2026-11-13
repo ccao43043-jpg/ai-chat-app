@@ -1,0 +1,16 @@
+{"in":["google/gemini-2.5-flash"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["~google/gemini-pro"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["google/gemini-2.5-flash-lite"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["gemini-2.5"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["vendor/gemini-3-pro-preview"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["google/gemini-3.8-flash-lite:free"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["minimax/minimax-m3.1-flash"],"out":{"read":0.1,"write":1,"known":true}}
+{"in":["~minimax/minimax-m3"],"out":{"read":0.2,"write":1,"known":true}}
+{"in":["MiniMax/minimax-m2.5-preview"],"out":{"read":0.11,"write":1,"known":true}}
+{"in":["minimax/minimax-m2.7:nitro"],"out":{"read":0.2,"write":1,"known":true}}
+{"in":["minimax/abab"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["deepseek/deepseek-chat"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["anthropic/claude-sonnet-4"],"out":{"read":0.2,"write":1,"known":false}}
+{"in":[""],"out":{"read":0.2,"write":1,"known":false}}
+{"in":[null],"out":{"read":0.2,"write":1,"known":false}}
+{"in":["  minimax/minimax-m3 "],"out":{"read":0.2,"write":1,"known":false}}

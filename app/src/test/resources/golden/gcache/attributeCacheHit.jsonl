@@ -1,0 +1,30 @@
+{"in":[{"expected":null,"actual":0.8309841533191502,"gapSec":null,"compressed":false,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.5193539352621883,"gapSec":250,"compressed":false,"ttlEff":300}],"out":{"code":"expect_hit","text":null,"shouldHit":true}}
+{"in":[{"expected":0.95,"actual":0.12243329267948866,"gapSec":999.6,"compressed":false}],"out":{"code":"ttl_expired","text":"TTL 过期（正常：间隔 1000s ≥ TTL_eff 240s）","shouldHit":false}}
+{"in":[{"expected":null,"actual":0.1,"gapSec":30,"compressed":false}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":null,"actual":0.6791983835864812,"gapSec":250,"compressed":false,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.75,"actual":0.1,"gapSec":null,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 75% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.3,"actual":null,"gapSec":250,"compressed":false}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.75,"actual":0.05644832598045468,"gapSec":250,"compressed":true,"ttlEff":240}],"out":{"code":"observe","text":null,"shouldHit":false}}
+{"in":[{"expected":0.6000103002879769,"actual":0.1,"gapSec":999.6,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 60% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.1,"gapSec":250,"compressed":false,"ttlEff":300}],"out":{"code":"provider_miss","text":"服务商侧未命中（路由/驱逐/门槛；LCP≥90% 且间隔在 TTL 内，实际命中 10%）","shouldHit":true}}
+{"in":[{"expected":null,"actual":0.1,"gapSec":30,"compressed":false,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.3,"actual":0.809661001432687,"gapSec":30,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 30% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.3247199645265937,"actual":0.26300731068477035,"gapSec":999.6,"compressed":true}],"out":{"code":"normal_compress","text":"正常（压缩轮预期 miss：LCP 占比 32%）","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":null,"gapSec":null,"compressed":false}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.75,"actual":0.7803962677717209,"gapSec":999.6,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 75% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.07639943878166378,"gapSec":250,"compressed":false,"ttlEff":300}],"out":{"code":"provider_miss","text":"服务商侧未命中（路由/驱逐/门槛；LCP≥90% 且间隔在 TTL 内，实际命中 8%）","shouldHit":true}}
+{"in":[{"expected":0.75,"actual":0.15388542274013162,"gapSec":999.6,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 75% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.14177907933481038,"gapSec":30,"compressed":false,"ttlEff":300}],"out":{"code":"provider_miss","text":"服务商侧未命中（路由/驱逐/门槛；LCP≥90% 且间隔在 TTL 内，实际命中 14%）","shouldHit":true}}
+{"in":[{"expected":0.75,"actual":0.5005619493313134,"gapSec":30,"compressed":false,"ttlEff":240}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 75% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":null,"gapSec":null,"compressed":false}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":null,"actual":null,"gapSec":null,"compressed":false,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.6664218422956765,"actual":null,"gapSec":30,"compressed":true,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.75,"actual":0.36271053459495306,"gapSec":250,"compressed":false}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 75% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.3,"actual":0.1,"gapSec":null,"compressed":true,"ttlEff":240}],"out":{"code":"normal_compress","text":"正常（压缩轮预期 miss：LCP 占比 30%）","shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.3508686104323715,"gapSec":999.6,"compressed":false}],"out":{"code":"observe","text":null,"shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.6276413195300847,"gapSec":null,"compressed":false,"ttlEff":240}],"out":{"code":"expect_hit","text":null,"shouldHit":true}}
+{"in":[{"expected":null,"actual":0.5085922279395163,"gapSec":999.6,"compressed":false,"ttlEff":240}],"out":{"code":"unknown","text":null,"shouldHit":false}}
+{"in":[{"expected":0.95,"actual":0.1,"gapSec":999.6,"compressed":false}],"out":{"code":"ttl_expired","text":"TTL 过期（正常：间隔 1000s ≥ TTL_eff 240s）","shouldHit":false}}
+{"in":[{"expected":0.3,"actual":0.1,"gapSec":30,"compressed":false,"ttlEff":240}],"out":{"code":"prefix_broken","text":"客户端前缀被破坏（LCP 占比 30% < 80%）：请用 firstDiff 定位第 k 条消息 / 哪一层","shouldHit":false}}
+{"in":[{"expected":0.3,"actual":0.1,"gapSec":null,"compressed":true,"ttlEff":240}],"out":{"code":"normal_compress","text":"正常（压缩轮预期 miss：LCP 占比 30%）","shouldHit":false}}

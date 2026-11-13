@@ -1,0 +1,16 @@
+{"in":["google/gemini-2.5-flash"],"out":1024}
+{"in":["~google/gemini-pro"],"out":4096}
+{"in":["google/gemini-2.5-flash-lite"],"out":2048}
+{"in":["gemini-2.5"],"out":1024}
+{"in":["vendor/gemini-3-pro-preview"],"out":4096}
+{"in":["google/gemini-3.8-flash-lite:free"],"out":2048}
+{"in":["minimax/minimax-m3.1-flash"],"out":1024}
+{"in":["~minimax/minimax-m3"],"out":1024}
+{"in":["MiniMax/minimax-m2.5-preview"],"out":1024}
+{"in":["minimax/minimax-m2.7:nitro"],"out":1024}
+{"in":["minimax/abab"],"out":1024}
+{"in":["deepseek/deepseek-chat"],"out":1024}
+{"in":["anthropic/claude-sonnet-4"],"out":1024}
+{"in":[""],"out":1024}
+{"in":[null],"out":1024}
+{"in":["  minimax/minimax-m3 "],"out":1024}

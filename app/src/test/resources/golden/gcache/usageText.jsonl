@@ -1,0 +1,30 @@
+{"in":[{"prompt":4701,"hit":698,"write":839,"pct":15}],"out":"Gemini 缓存命中 698/4701 Token（15%），写入 839"}
+{"in":[{"prompt":2179,"hit":3293,"write":0,"pct":151}],"out":"Gemini 缓存命中 3293/2179 Token（151%）"}
+{"in":[{"prompt":2189,"hit":0,"write":304,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 2189 Token）"}
+{"in":[{"prompt":6105,"hit":4884,"write":0,"pct":80}],"out":"Gemini 缓存命中 4884/6105 Token（80%）"}
+{"in":[{"prompt":6196,"hit":4296,"write":806,"pct":69}],"out":"Gemini 缓存命中 4296/6196 Token（69%），写入 806"}
+{"in":[{"prompt":4892,"hit":0,"write":0,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 4892 Token）"}
+{"in":[{"prompt":8808,"hit":4156,"write":0,"pct":47}],"out":"Gemini 缓存命中 4156/8808 Token（47%）"}
+{"in":[{"prompt":7124,"hit":2116,"write":0,"pct":30}],"out":"Gemini 缓存命中 2116/7124 Token（30%）"}
+{"in":[{"prompt":6813,"hit":3135,"write":335,"pct":46}],"out":"Gemini 缓存命中 3135/6813 Token（46%），写入 335"}
+{"in":[{"prompt":2008,"hit":4596,"write":0,"pct":229}],"out":"Gemini 缓存命中 4596/2008 Token（229%）"}
+{"in":[{"prompt":8972,"hit":1379,"write":0,"pct":15}],"out":"Gemini 缓存命中 1379/8972 Token（15%）"}
+{"in":[{"prompt":3175,"hit":0,"write":800,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 3175 Token）"}
+{"in":[{"prompt":7503,"hit":2249,"write":0,"pct":30}],"out":"Gemini 缓存命中 2249/7503 Token（30%）"}
+{"in":[{"prompt":8574,"hit":4996,"write":0,"pct":58}],"out":"Gemini 缓存命中 4996/8574 Token（58%）"}
+{"in":[{"prompt":7839,"hit":1021,"write":0,"pct":13}],"out":"Gemini 缓存命中 1021/7839 Token（13%）"}
+{"in":[{"prompt":7435,"hit":3832,"write":745,"pct":52}],"out":"Gemini 缓存命中 3832/7435 Token（52%），写入 745"}
+{"in":[{"prompt":1948,"hit":0,"write":0,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 1948 Token）"}
+{"in":[{"prompt":2180,"hit":548,"write":0,"pct":25}],"out":"Gemini 缓存命中 548/2180 Token（25%）"}
+{"in":[{"prompt":6715,"hit":996,"write":111,"pct":15}],"out":"Gemini 缓存命中 996/6715 Token（15%），写入 111"}
+{"in":[{"prompt":4459,"hit":1994,"write":0,"pct":45}],"out":"Gemini 缓存命中 1994/4459 Token（45%）"}
+{"in":[{"prompt":58,"hit":2090,"write":0,"pct":3603}],"out":"Gemini 缓存命中 2090/58 Token（3603%）"}
+{"in":[{"prompt":177,"hit":1914,"write":0,"pct":1081}],"out":"Gemini 缓存命中 1914/177 Token（1081%）"}
+{"in":[{"prompt":1906,"hit":918,"write":0,"pct":48}],"out":"Gemini 缓存命中 918/1906 Token（48%）"}
+{"in":[{"prompt":1487,"hit":4374,"write":0,"pct":294}],"out":"Gemini 缓存命中 4374/1487 Token（294%）"}
+{"in":[{"prompt":7166,"hit":3173,"write":0,"pct":44}],"out":"Gemini 缓存命中 3173/7166 Token（44%）"}
+{"in":[{"prompt":384,"hit":0,"write":0,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 384 Token）"}
+{"in":[{"prompt":5717,"hit":948,"write":336,"pct":17}],"out":"Gemini 缓存命中 948/5717 Token（17%），写入 336"}
+{"in":[{"prompt":3576,"hit":4774,"write":0,"pct":134}],"out":"Gemini 缓存命中 4774/3576 Token（134%）"}
+{"in":[{"prompt":8656,"hit":4380,"write":32,"pct":51}],"out":"Gemini 缓存命中 4380/8656 Token（51%），写入 32"}
+{"in":[{"prompt":2192,"hit":0,"write":0,"pct":null,"known":false}],"out":"Gemini 缓存命中未知（服务商未返回 cached_tokens；输入 2192 Token）"}

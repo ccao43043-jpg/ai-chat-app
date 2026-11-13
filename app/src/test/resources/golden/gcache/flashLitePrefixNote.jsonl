@@ -1,0 +1,64 @@
+{"in":["google/gemini-2.5-flash",100],"out":null}
+{"in":["google/gemini-2.5-flash",2999],"out":null}
+{"in":["google/gemini-2.5-flash",3000],"out":null}
+{"in":["google/gemini-2.5-flash","2500"],"out":null}
+{"in":["~google/gemini-pro",100],"out":null}
+{"in":["~google/gemini-pro",2999],"out":null}
+{"in":["~google/gemini-pro",3000],"out":null}
+{"in":["~google/gemini-pro","2500"],"out":null}
+{"in":["google/gemini-2.5-flash-lite",100],"out":"Flash-Lite 系统/固定前缀约 100 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["google/gemini-2.5-flash-lite",2999],"out":"Flash-Lite 系统/固定前缀约 2999 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["google/gemini-2.5-flash-lite",3000],"out":null}
+{"in":["google/gemini-2.5-flash-lite","2500"],"out":"Flash-Lite 系统/固定前缀约 2500 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["gemini-2.5",100],"out":null}
+{"in":["gemini-2.5",2999],"out":null}
+{"in":["gemini-2.5",3000],"out":null}
+{"in":["gemini-2.5","2500"],"out":null}
+{"in":["vendor/gemini-3-pro-preview",100],"out":null}
+{"in":["vendor/gemini-3-pro-preview",2999],"out":null}
+{"in":["vendor/gemini-3-pro-preview",3000],"out":null}
+{"in":["vendor/gemini-3-pro-preview","2500"],"out":null}
+{"in":["google/gemini-3.8-flash-lite:free",100],"out":"Flash-Lite 系统/固定前缀约 100 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["google/gemini-3.8-flash-lite:free",2999],"out":"Flash-Lite 系统/固定前缀约 2999 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["google/gemini-3.8-flash-lite:free",3000],"out":null}
+{"in":["google/gemini-3.8-flash-lite:free","2500"],"out":"Flash-Lite 系统/固定前缀约 2500 Token < ~3k，隐式命中可能不稳；请以真实 cached_tokens 为准，勿用估计命中率"}
+{"in":["minimax/minimax-m3.1-flash",100],"out":null}
+{"in":["minimax/minimax-m3.1-flash",2999],"out":null}
+{"in":["minimax/minimax-m3.1-flash",3000],"out":null}
+{"in":["minimax/minimax-m3.1-flash","2500"],"out":null}
+{"in":["~minimax/minimax-m3",100],"out":null}
+{"in":["~minimax/minimax-m3",2999],"out":null}
+{"in":["~minimax/minimax-m3",3000],"out":null}
+{"in":["~minimax/minimax-m3","2500"],"out":null}
+{"in":["MiniMax/minimax-m2.5-preview",100],"out":null}
+{"in":["MiniMax/minimax-m2.5-preview",2999],"out":null}
+{"in":["MiniMax/minimax-m2.5-preview",3000],"out":null}
+{"in":["MiniMax/minimax-m2.5-preview","2500"],"out":null}
+{"in":["minimax/minimax-m2.7:nitro",100],"out":null}
+{"in":["minimax/minimax-m2.7:nitro",2999],"out":null}
+{"in":["minimax/minimax-m2.7:nitro",3000],"out":null}
+{"in":["minimax/minimax-m2.7:nitro","2500"],"out":null}
+{"in":["minimax/abab",100],"out":null}
+{"in":["minimax/abab",2999],"out":null}
+{"in":["minimax/abab",3000],"out":null}
+{"in":["minimax/abab","2500"],"out":null}
+{"in":["deepseek/deepseek-chat",100],"out":null}
+{"in":["deepseek/deepseek-chat",2999],"out":null}
+{"in":["deepseek/deepseek-chat",3000],"out":null}
+{"in":["deepseek/deepseek-chat","2500"],"out":null}
+{"in":["anthropic/claude-sonnet-4",100],"out":null}
+{"in":["anthropic/claude-sonnet-4",2999],"out":null}
+{"in":["anthropic/claude-sonnet-4",3000],"out":null}
+{"in":["anthropic/claude-sonnet-4","2500"],"out":null}
+{"in":["",100],"out":null}
+{"in":["",2999],"out":null}
+{"in":["",3000],"out":null}
+{"in":["","2500"],"out":null}
+{"in":[null,100],"out":null}
+{"in":[null,2999],"out":null}
+{"in":[null,3000],"out":null}
+{"in":[null,"2500"],"out":null}
+{"in":["  minimax/minimax-m3 ",100],"out":null}
+{"in":["  minimax/minimax-m3 ",2999],"out":null}
+{"in":["  minimax/minimax-m3 ",3000],"out":null}
+{"in":["  minimax/minimax-m3 ","2500"],"out":null}

@@ -1,0 +1,30 @@
+{"in":[{"prompt":1121,"hit":21,"write":0,"pct":2}],"out":"MiniMax 缓存命中 21/1121 Token（2%）"}
+{"in":[{"prompt":2112,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 2112 Token）"}
+{"in":[{"prompt":2738,"hit":1238,"write":0,"pct":45}],"out":"MiniMax 缓存命中 1238/2738 Token（45%）"}
+{"in":[{"prompt":1115,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 1115 Token）"}
+{"in":[{"prompt":2891,"hit":669,"write":0,"pct":23}],"out":"MiniMax 缓存命中 669/2891 Token（23%）"}
+{"in":[{"prompt":661,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 661 Token）"}
+{"in":[{"prompt":2076,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 2076 Token）"}
+{"in":[{"prompt":569,"hit":1436,"write":0,"pct":252}],"out":"MiniMax 缓存命中 1436/569 Token（252%）"}
+{"in":[{"prompt":1672,"hit":381,"write":0,"pct":23}],"out":"MiniMax 缓存命中 381/1672 Token（23%）"}
+{"in":[{"prompt":1057,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 1057 Token）"}
+{"in":[{"prompt":800,"hit":1710,"write":0,"pct":214}],"out":"MiniMax 缓存命中 1710/800 Token（214%）"}
+{"in":[{"prompt":1627,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 1627 Token）"}
+{"in":[{"prompt":2153,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 2153 Token）"}
+{"in":[{"prompt":1240,"hit":523,"write":0,"pct":42}],"out":"MiniMax 缓存命中 523/1240 Token（42%）"}
+{"in":[{"prompt":2107,"hit":1121,"write":0,"pct":53}],"out":"MiniMax 缓存命中 1121/2107 Token（53%）"}
+{"in":[{"prompt":1483,"hit":881,"write":0,"pct":59}],"out":"MiniMax 缓存命中 881/1483 Token（59%）"}
+{"in":[{"prompt":935,"hit":1031,"write":0,"pct":110}],"out":"MiniMax 缓存命中 1031/935 Token（110%）"}
+{"in":[{"prompt":2650,"hit":1280,"write":0,"pct":48}],"out":"MiniMax 缓存命中 1280/2650 Token（48%）"}
+{"in":[{"prompt":2556,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 2556 Token）"}
+{"in":[{"prompt":2984,"hit":1287,"write":0,"pct":43}],"out":"MiniMax 缓存命中 1287/2984 Token（43%）"}
+{"in":[{"prompt":2774,"hit":1867,"write":0,"pct":67}],"out":"MiniMax 缓存命中 1867/2774 Token（67%）"}
+{"in":[{"prompt":1324,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 1324 Token）"}
+{"in":[{"prompt":761,"hit":640,"write":0,"pct":84}],"out":"MiniMax 缓存命中 640/761 Token（84%）"}
+{"in":[{"prompt":1865,"hit":1846,"write":0,"pct":99}],"out":"MiniMax 缓存命中 1846/1865 Token（99%）"}
+{"in":[{"prompt":273,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 273 Token）"}
+{"in":[{"prompt":2534,"hit":1995,"write":0,"pct":79}],"out":"MiniMax 缓存命中 1995/2534 Token（79%）"}
+{"in":[{"prompt":379,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 379 Token）"}
+{"in":[{"prompt":1040,"hit":0,"write":0,"pct":null,"known":false}],"out":"MiniMax 缓存命中未知（未返回 cached_tokens；输入 1040 Token）"}
+{"in":[{"prompt":524,"hit":1425,"write":0,"pct":272}],"out":"MiniMax 缓存命中 1425/524 Token（272%）"}
+{"in":[{"prompt":970,"hit":350,"write":0,"pct":36}],"out":"MiniMax 缓存命中 350/970 Token（36%）"}

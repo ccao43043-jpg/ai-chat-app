@@ -1,0 +1,7 @@
+{"in":["s"],"out":"s"}
+{"in":[""],"out":""}
+{"in":[[{"type":"text","text":"A"},{"type":"image_url","image_url":{"url":"x"}},{"type":"text"},{},null]],"out":"A[image_url][?][?]"}
+{"in":[[]],"out":""}
+{"in":[{"a":1}],"out":"{\"a\":1}"}
+{"in":[null],"out":"\"\""}
+{"in":[3],"out":"3"}

@@ -1,0 +1,11 @@
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1"}],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://OpenRouter.AI/api/v1"}],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com","cacheAdapter":"openrouter"}],"out":true}
+{"in":[{"type":"openai","baseUrl":"https://x.com"}],"out":false}
+{"in":[{"type":"openai","presetId":"deepseek","baseUrl":"https://api.deepseek.com"}],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":"none"}],"out":false}
+{"in":[{"type":"openai","presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","cacheAdapter":" OpenAI-Compat "}],"out":false}
+{"in":[{"type":"anthropic","presetId":"openrouter"}],"out":false}
+{"in":[{"type":"gemini","baseUrl":"https://generativelanguage.googleapis.com"}],"out":false}
+{"in":[{}],"out":false}
+{"in":[null],"out":false}
