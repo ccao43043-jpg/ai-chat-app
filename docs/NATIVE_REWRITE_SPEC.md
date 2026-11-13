@@ -148,6 +148,41 @@ com.aichat.app
 4. **取消**：取消协程 = 断开 OkHttp call，效果等同于旧版 `cancel(id)`；已收到的正文保留，并设 `truncated=true`。
 5. **认证**：只有 `net.AuthInjector` 可以调 `KeyVault.keyFor(providerId, url)`；请求地址的源和登记的 baseUrl 源不一致时直接拒绝；调用方传进来的认证头一律丢掉；带 Key 的请求 `followRedirects=false`。
 
+### 3.4 契约变更记录（整合者裁定，2026-11-13，native/D 落地；A/B/C 请 rebase）
+| # | 变更 | 位置 |
+|---|---|---|
+| 1 | `Usage` 新增 `upstreamCost: Double?`、`cacheSaved: Double?`、`raw: JsonObject?`（服务商原始 usage JSON） | `domain/model/Models.kt` |
+| 2 | `ChatOptions` 新增 `cacheSystem: Boolean?`、`cacheAffinity: Boolean?`、`orSort: String?`、`orGemini`、`orMiniMax`（Boolean，默认 false）、`routePrices: List<JsonObject>`，与 `providers.js` 的 opts 同义。**orGemini 或 orMiniMax 为真时，OpenRouter 请求体不得写 `session_id`** | `domain/Contracts.kt` |
+| 3 | `RequestContext.bodyPatch` 合并语义 = **RFC 7386 JSON Merge Patch**：对象递归合并；值为 `null` 表示删除该键；数组与标量整体替换。ProviderClient 负责应用（`buildChatRequest(..., bodyPatch)`） | `domain/Contracts.kt` |
+| 4 | `StreamEvent.Notice(text)`：用户可见提示（如 402「额度不足，已将最大输出降至 N 并重试」） | `domain/Contracts.kt` |
+| 5 | `KeyVault.registration(providerId): ProviderRegistration?`（baseUrl、origin、authType）。未登记时 ProviderClient 必须失败并报旧版文案「服务商未登记」，绝不无 Key 发出 | `domain/Contracts.kt`、`data/secret/SecretKeyVault.kt` |
+| 6 | 测试 HTTP 服务器继续用 B 手写的 `TinySseServer`，**不引入 mockwebserver** | — |
+| 7 | golden 目录：B 的向量暂留 `app/src/test/resources/net-golden/`（导出脚本同目录），D 的框架在 `tests/golden-export/` + `app/src/test/resources/golden/`，后续由 D 统一 | §6 |
+| a | `AppGraph` 暴露 `chats` / `settings` / `library` / `keys` / `engine` / `plugins` / `migration`，另有 `usage`、`convLog`、`knowledgeStore`、`rpLogStore`、`routerStateStore`、`balanceCacheStore`、`rpMemoryStore`、`migrationReport`。`engine`/`plugins` 合并前是占位（`UnwiredChatEngine` / `EmptyPluginRegistry`）。纯 JVM 组装在 `data/DataGraph`（测试用 `DataGraph.inMemory()`） | `AiChatApp.kt`、`data/DataGraph.kt` |
+| b | `ChatEngine.send` 语义同 JS：流式前先存用户消息；流开始建助手消息；结束时存；取消时 `truncated=true` 存；出错把文案写进助手消息 `error` 字段再存 | `domain/Contracts.kt`（注释） |
+| c | `StreamEvent.Started(userMsgId, assistantMsgId)` 为事件流第一个事件 | `domain/Contracts.kt` |
+| d | `AppSettings` / `ProviderConfig` 结构归 D。所有键与 JS settings.json 同名同位置；新增建模字段 `removedPresets`、`removedPersonas`、`removedTemplates`、`autoCharMode`、`autoCharV084`（顶层键）。未建模键经 Codec 原样往返（extras + 影子规则，见 `data/codec/Codecs.kt`）。`PromptSnippet` / `PromptTemplate` 补 `extras`（默认空，源码兼容） | `domain/model/Models.kt` |
+| e | `app/build.gradle` 加 `androidTestImplementation` ui-test-junit4 / androidx.test.ext:junit / androidx.test:runner，`debugImplementation` ui-test-manifest | `app/build.gradle` |
+| f | `.gitignore` 加 `.kotlin/` | `.gitignore` |
+| g | `RequestTransformer.transformRequest(req, ctx)`：`PluginRegistry` 实现（默认原样），`ChatPlugin.transformRequest` 默认原样。ChatEngine 在 `buildChatRequest` 之后、发送之前调用；`bodyPatch` 仍用于构造前补丁 | `domain/Contracts.kt` |
+| h | 插件写的 `ctx.meta["orGemini"]` / `ctx.meta["orMiniMax"]` 由 ChatEngine 复制进 `ChatOptions.orGemini` / `orMiniMax` | `domain/Contracts.kt`（注释） |
+| i | `Badge.action: String?`（点击打开的面板 id）；`PluginContext.notify(text)`，`PluginRegistry.attach(context)`，ChatEngine 把 notify 转成 `StreamEvent.Notice` | `domain/Contracts.kt` |
+| j | C 的 golden 放 `tests/golden-export/` + `app/src/test/resources/golden/` 为正式布局；B 的 `net-golden/` 之后由 D 迁入 | §6 |
+| k | 缓存适配器配置与 JS 同键同位置：JS 放在 provider 对象上（如 `cacheAdapter`），原生读 `ProviderConfig.extras`，Codec 保证往返 | `data/codec/Codecs.kt`（测试 `CodecRoundTripTest`） |
+
+
+### 3.5 行为对齐政策与有意差异（契约变更 #l）
+**v1.0.0 = 与 JS v0.28.7 行为对齐（parity）。** 任何有意偏离都必须登记在下表，并附测试或理由；没登记的差异一律按 bug 处理。
+
+| # | 有意差异 | 原因 | 所在 |
+|---|---|---|---|
+| D1 | OpenRouter 402「can only afford N」重试时，只把已构造请求体里的 `max_tokens` 改成 80%（最低 256），不重新走 runBeforeRequest / buildChatRequest | JS 整体重建会让插件统计（rpcache/gcache/usage）重复计数一次 | B `net/` |
+| D2 | conv-log 章节 `contentZ`：Kotlin 用 java.util.zip.Deflater(6)，JS 用 fflate；字节可能不同，互相可解；「压缩后不短于原文就不压」的判定因此个别不同 | 平台无 fflate；replay 结果不受影响（golden 双向验证） | D `data/convlog/JsConvLog.kt` |
+| D4 | `Personas.mergeBuiltins` 的 normalize：基本字段与 JS 一致，但未知字段保留在 extras（JS 会丢） | 无损约定（§3.3-1）；JS 读到多余字段无害 | D `data/repo/Repositories.kt` |
+| D3 | conv-log 在 JS 会抛 TypeError 的畸形数据上（如快照缺 tombstones.msg），Kotlin 按「缺失 = 空对象」继续 | 不让坏数据阻塞启动；正常数据行为一致 | D 同上 |
+
+**v1 之后再议（不在 v1.0.0 做）**：① 续写时【续写】后缀从 system 末尾移到追加的 user 消息（保住缓存前缀，属于行为变更）；② OpenRouter `provider.order` 钉住上游与 session_id 粘滞的冲突诊断（mmcache 诊断降级或缓存插件生效时不钉住）。
+
 ---
 
 ## 4. JS 算法：移植到 Kotlin，还是嵌入 JS 引擎？

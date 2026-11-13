@@ -61,6 +61,12 @@ data class AppSettings(
     val search: JsonObject = EmptyJson,   // { provider, hasKeys, urls, count, rewrite }
     val plugins: JsonObject = EmptyJson,  // { rpcache:{…}, gcache:{…}, mmcache:{…}, knowledge:{…} } 由 C 的 ChatPlugin 解释
     val showTopCost: Boolean = true,
+    // ---- D 补充（与 JS settings.json 同名同位置的顶层键；默认值不影响现有调用） ----
+    val removedPresets: List<String> = emptyList(),   // app.js 3787：删掉的预设服务商，不再自动补回
+    val removedPersonas: List<String> = emptyList(),  // Personas.mergeBuiltins 的 removedIds
+    val removedTemplates: List<String> = emptyList(), // Templates.mergeBuiltins 的 removedIds
+    val autoCharMode: String = "auto",                // auto | ask | off
+    val autoCharV084: Boolean = false,                // v0.8.4 一次性迁移标记
     val extras: JsonObject = EmptyJson,
 )
 
@@ -89,6 +95,11 @@ data class Usage(
     val cacheSupported: Boolean? = null,
     val source: String? = null,
     val costUsd: Double? = null,
+    /** v1 契约变更 #1：上游实际费用（OpenRouter usage.cost_details.upstream_inference_cost 等）与缓存节省额 */
+    val upstreamCost: Double? = null,
+    val cacheSaved: Double? = null,
+    /** 服务商返回的原始 usage JSON（未归一化），供插件 / 用量页读取未建模字段 */
+    val raw: JsonObject? = null,
 )
 
 /**
@@ -133,9 +144,11 @@ data class Conversation(
 data class Persona(val id: String, val emoji: String, val name: String, val desc: String, val systemPrompt: String,
                    val providerId: String, val model: String, val temperature: Double?, val builtin: Boolean,
                    val extras: JsonObject = EmptyJson)
-data class PromptSnippet(val id: String, val title: String, val content: String, val builtin: Boolean)
+data class PromptSnippet(val id: String, val title: String, val content: String, val builtin: Boolean,
+                         val extras: JsonObject = EmptyJson)   // D：补 extras（无损往返，默认值不影响现有调用）
 data class PromptTemplate(val id: String, val name: String, val emoji: String, val content: String, val tags: List<String>,
-                          val pinned: Boolean, val builtin: Boolean, val skill: Boolean)
+                          val pinned: Boolean, val builtin: Boolean, val skill: Boolean,
+                          val extras: JsonObject = EmptyJson)  // D：同上
 
 /** worlds.json 元素；blocks 的键集合 = worlds.js BLOCK_IDS */
 data class World(

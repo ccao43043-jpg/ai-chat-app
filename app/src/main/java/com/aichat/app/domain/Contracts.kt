@@ -46,7 +46,13 @@ interface KeyVault {
     /** 仅 net.AuthInjector 可调用；返回 null 表示无 Key 或源不匹配（bound origin ≠ 当前 baseUrl origin） */
     fun keyFor(providerId: String, requestUrl: String): String?
     fun authType(providerId: String): AuthType
+    /** v1 契约变更 #5：SecretStore 登记信息（r:<id> = baseUrl\nauthType）。null = 未登记：
+     *  ProviderClient 必须直接失败并报旧版文案「服务商未登记」，绝不在无 Key 的情况下发出请求。 */
+    fun registration(providerId: String): ProviderRegistration?
 }
+
+/** KeyVault.registration 的返回：登记的 baseUrl、其源（secure.js originOf，非法时为 null）与认证方式 */
+data class ProviderRegistration(val baseUrl: String, val origin: String?, val authType: AuthType)
 
 interface UsageRepository {                 // usage-stats.jsonl + usage-stats-meta.json + balance-cache.json
     suspend fun append(record: JsonObject)
@@ -58,6 +64,8 @@ interface UsageRepository {                 // usage-stats.jsonl + usage-stats-m
 
 /** 流式事件：createStreamParser(type) 的 Kotlin 版输出 */
 sealed interface StreamEvent {
+    /** v1 契约变更 #c：ChatEngine 事件流的第一个事件；两条消息此时已建好（用户消息已落盘，助手消息为空占位） */
+    data class Started(val userMsgId: String?, val assistantMsgId: String) : StreamEvent
     data class Status(val httpStatus: Int) : StreamEvent
     data class Delta(val text: String) : StreamEvent
     data class Reasoning(val text: String) : StreamEvent
@@ -65,6 +73,8 @@ sealed interface StreamEvent {
     data class Finish(val reason: String?) : StreamEvent
     data class RouteChosen(val slug: String) : StreamEvent        // OpenRouter 实际上游（用于 observeRoute）
     data class Error(val httpStatus: Int, val message: String, val raw: String) : StreamEvent
+    /** v1 契约变更 #4：给用户看的提示（如 402「额度不足，已将最大输出降至 N 并重试」），不影响正文 */
+    data class Notice(val text: String) : StreamEvent
 }
 
 data class ChatOptions(
@@ -78,6 +88,18 @@ data class ChatOptions(
     val cacheSystemSplit: Int = 0,
     val providerOrder: List<String> = emptyList(),
     val routeSlug: String? = null,
+    // ---- v1 契约变更 #2：与 providers.js buildChatRequest 的 opts 一一对应 ----
+    /** opts.cacheSystem：false = 不给 system 打 cache_control（JS 默认 undefined ≙ true） */
+    val cacheSystem: Boolean? = null,
+    /** opts.cacheAffinity：false = 本次不做 OpenRouter 上游钉住（与 provider.cacheAffinity 同时为非 false 才钉） */
+    val cacheAffinity: Boolean? = null,
+    /** opts.orSort：balanced | price | throughput；null 时回退 provider.orSort */
+    val orSort: String? = null,
+    /** opts.orGemini / opts.orMiniMax：为 true 时 OpenRouter 请求体**不得**写 session_id（缓存由 gcache/mmcache 插件接管） */
+    val orGemini: Boolean = false,
+    val orMiniMax: Boolean = false,
+    /** opts.routePrices：Router.chooseUpstream 的候选上游价目（endpointRoutePrices 的输出，元素原样 JsonObject） */
+    val routePrices: List<JsonObject> = emptyList(),
 )
 
 /** 发给模型的消息（由 PluginRegistry 组装；srcId = 来源 Message.id，插件内部用） */
@@ -119,7 +141,8 @@ data class RequestContext(
     val opts: ChatOptions,
     val settings: AppSettings,
     val lastUserId: String?,
-    /** 额外请求体字段，由插件写入并被 ProviderClient 合并进 body（gcache: cachedContent/session_id；mmcache: session_id 等） */
+    /** 额外请求体字段，由插件写入并被 ProviderClient 合并进 body（gcache: cachedContent/session_id；mmcache: session_id 等）。
+     *  v1 契约变更 #3：合并语义 = RFC 7386 JSON Merge Patch（对象递归合并；值为 null 表示删除该键；数组/标量整体替换）。 */
     val bodyPatch: JsonObject = EmptyJson,
     val meta: JsonObject = EmptyJson,
     val activePlugins: List<String> = emptyList(),
@@ -128,7 +151,21 @@ data class RequestContext(
 /** 回合结果（runAfterResponse 的 result） */
 data class TurnResult(val ok: Boolean, val httpStatus: Int, val usage: Usage?, val assistant: Message)
 
-data class Badge(val plugin: String, val text: String, val tone: String = "info", val detail: String? = null)
+/** action（契约变更 #i）：点击徽章时要打开的面板 id（如 "rpcache.diag"），null = 不可点 */
+data class Badge(val plugin: String, val text: String, val tone: String = "info", val detail: String? = null, val action: String? = null)
+
+/**
+ * 契约变更 #g：请求体构造之后的改写钩子（gcache/mmcache 需要读 B 已构造好的请求体再合并 system、加 cache_control、替换历史、写 session_id）。
+ * ChatEngine 顺序：runBeforeRequest → buildChatRequest(+bodyPatch，构造前补丁) → **PluginRegistry.transformRequest** → 发送。
+ */
+interface RequestTransformer {
+    fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest
+}
+
+/** 契约变更 #i：插件宿主能力。notify = 给用户的轻提示（toast），由 ChatEngine 转成 StreamEvent.Notice 发给 UI */
+interface PluginContext {
+    fun notify(text: String)
+}
 data class MessageState(val dim: Boolean = false, val label: String? = null)   // dim=true：已冻结进章节，不可切版本/编辑
 
 /**
@@ -151,9 +188,15 @@ interface ChatPlugin {
     fun messageBadges(msg: Message, conv: Conversation): List<Badge> = emptyList()
     fun headerBadges(conv: Conversation): List<Badge> = emptyList()
     fun messageState(msg: Message, conv: Conversation): MessageState? = null
+    /** 契约变更 #g：构造后改写（按注册顺序依次调用，默认原样返回） */
+    fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest = req
 }
 
-interface PluginRegistry {
+interface PluginRegistry : RequestTransformer {
+    /** 按注册顺序调用各激活插件的 ChatPlugin.transformRequest */
+    override fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest = req
+    /** ChatEngine 每轮发送前绑定宿主上下文；插件 notify 的文字经它变成 StreamEvent.Notice */
+    fun attach(context: PluginContext) {}
     val plugins: List<ChatPlugin>
     fun isActive(id: String, settings: AppSettings, conv: Conversation?): Boolean
     suspend fun runBeforeRequest(ctx: RequestContext, status: (String?) -> Unit): RequestContext
@@ -164,8 +207,20 @@ interface PluginRegistry {
     val errors: StateFlow<List<JsonObject>>
 }
 
+/*
+ * 契约变更 #h：插件在 RequestContext.meta 里置的 "orGemini" / "orMiniMax"（布尔）由 ChatEngine 复制到
+ * ChatOptions.orGemini / orMiniMax，再交给 buildChatRequest（为真时不写 session_id，避免与插件写的冲突）。
+ */
 /** 会话引擎（A 的 ViewModel 唯一依赖入口，B 实现）：联网搜索 → PluginRegistry.runBeforeRequest → injectNowLine → ProviderClient.stream
  *  → (402 降级重试) → runAfterResponse → UsageRepository.record → ModelRouter.observe → ChatRepository.save */
+/*
+ * v1 契约变更 #b（与 app.js send/regenerate 一致）：
+ *  1. send：先把用户消息写进对话并 ChatRepository.save（流式开始前落盘）；
+ *  2. 流开始时创建助手消息（空正文）并发 Started(userMsgId, assistantMsgId)；流式中只更新内存；
+ *  3. 正常结束：写入正文/reasoning/usage/finishReason/routeSlug 后 save；
+ *  4. 取消（stop 或协程取消）：保留已收到正文，truncated=true，save；
+ *  5. 出错：错误文案写进助手消息的 error 字段（与 JS 相同；已收到的正文保留），save，并发 StreamEvent.Error。
+ */
 interface ChatEngine {
     fun send(convId: String, userText: String, images: List<String>): Flow<StreamEvent>
     fun regenerate(convId: String, assistantMsgId: String): Flow<StreamEvent>

@@ -24,3 +24,5 @@ npm-debug.log*
 desktop/web/
 desktop/dist/
 desktop/node_modules/
+# Kotlin 2.x 编译缓存
+.kotlin/

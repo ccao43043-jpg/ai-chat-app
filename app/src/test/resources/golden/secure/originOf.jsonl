@@ -1,0 +1,20 @@
+{"in":["https://OpenRouter.ai:443/api/v1"],"out":"https://openrouter.ai"}
+{"in":["http://10.0.2.2:8080/v1"],"out":"http://10.0.2.2:8080"}
+{"in":["https://user@host/x"],"out":""}
+{"in":["file:///x"],"out":""}
+{"in":["https://api.deepseek.com"],"out":"https://api.deepseek.com"}
+{"in":["https://api.deepseek.com/"],"out":"https://api.deepseek.com"}
+{"in":["HTTPS://API.X.COM:8443/a?b#c"],"out":"https://api.x.com:8443"}
+{"in":["http://a.com:80"],"out":"http://a.com"}
+{"in":["https://a.com?x=1"],"out":"https://a.com"}
+{"in":["https://a.com#f"],"out":"https://a.com"}
+{"in":[" https://a.com/v1 "],"out":"https://a.com"}
+{"in":["https://"],"out":""}
+{"in":["ftp://a.com"],"out":""}
+{"in":[""],"out":""}
+{"in":["https://[::1]:8080/x"],"out":"https://[::1]:8080"}
+{"in":["https://a_b.com/x"],"out":""}
+{"in":["https://a.com:abc/"],"out":"https://a.com:abc"}
+{"in":["https://xn--fiq228c.com/v1"],"out":"https://xn--fiq228c.com"}
+{"in":["http://localhost:11434/v1"],"out":"http://localhost:11434"}
+{"in":["https://a.com\\@b.com/"],"out":""}

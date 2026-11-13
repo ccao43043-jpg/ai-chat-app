@@ -2,6 +2,7 @@ package com.aichat.app.data.secret
 
 import com.aichat.app.SecretStore
 import com.aichat.app.domain.KeyVault
+import com.aichat.app.domain.ProviderRegistration
 import com.aichat.app.domain.model.AuthType
 import java.net.URI
 import java.util.Locale
@@ -11,7 +12,7 @@ import java.util.Locale
  * 同包名 + 同签名覆盖安装后，Keystore 条目与 prefs 都还在，无需迁移、明文不落地。
  * 键名：s:provider_key:<id> / o:provider_key:<id>（绑定源）/ r:<id>（baseUrl\nauthType）；搜索用 search:<id>。
  */
-class SecretKeyVault(private val store: SecretStore) : KeyVault {
+class SecretKeyVault(private val store: SecretStore) : KeyVaultAdmin {
     private fun name(id: String) = if (id.startsWith("search:")) "search_key:" + id.removePrefix("search:") else "provider_key:$id"
 
     override fun has(providerId: String) = store.has(name(providerId))
@@ -31,18 +32,36 @@ class SecretKeyVault(private val store: SecretStore) : KeyVault {
         return if (bound == null || bound == allowed) store.get(name(providerId)) else null
     }
     override fun authType(providerId: String) = AuthType.of(store.reg(providerId)?.getOrNull(1))
+    /** 与 NativeBridge.registerProvider 逐行一致 */
+    override fun register(id: String, baseUrl: String, auth: AuthType): String {
+        if (id.isEmpty()) return "error"
+        store.putReg(id, baseUrl, auth.wire)
+        val n = name(id)
+        val bound = store.origin(n); val now = originOf(baseUrl)
+        if (store.has(n) && bound != null && bound != now) { store.remove(n); return "cleared" }
+        return "ok"
+    }
+    override fun canDecrypt(providerId: String): Boolean = store.has(name(providerId)) && store.get(name(providerId)) != null
+    override fun registration(providerId: String): ProviderRegistration? {
+        val r = store.reg(providerId) ?: return null
+        val base = r.getOrNull(0) ?: return null
+        return ProviderRegistration(base, originOf(base), AuthType.of(r.getOrNull(1)))
+    }
 
     companion object {
         /** 与 NativeBridge.originOf / secure.js originOf 一致 */
-        fun originOf(u: String?): String? = try {
-            val x = URI(u!!.trim())
-            val scheme = x.scheme?.lowercase(Locale.ROOT); val host = x.host
-            if (scheme == null || host == null || x.rawUserInfo != null || (scheme != "http" && scheme != "https")) null
-            else {
-                var port = x.port
-                if ((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) port = -1
-                scheme + "://" + host.lowercase(Locale.ROOT) + (if (port > 0) ":$port" else "")
-            }
-        } catch (e: Exception) { null }
+        /** secure.js originOf 逐行移植（正则，不用 URI：两端要对同一输入给出同一结果）；非法返回 null（JS 为 ''） */
+        fun originOf(u: String?): String? {
+            val m = ORIGIN_RE.find((u ?: "").trim()) ?: return null
+            val scheme = m.groupValues[1].lowercase(Locale.ROOT)
+            val pm = PORT_RE.matchEntire(m.groupValues[2].lowercase(Locale.ROOT))!!
+            val host = pm.groupValues[1]; var port = pm.groupValues[2]
+            if (host.isEmpty() || HOST_BAD.containsMatchIn(host)) return null
+            if ((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) port = ""
+            return scheme + "://" + host + (if (port.isNotEmpty()) ":$port" else "")
+        }
+        private val ORIGIN_RE = Regex("""^(https?)://([^/?#@\\\s]+)(?=[/?#]|$)""", RegexOption.IGNORE_CASE)
+        private val PORT_RE = Regex("""^(.*?)(?::(\d+))?$""", RegexOption.DOT_MATCHES_ALL)
+        private val HOST_BAD = Regex("""[^a-z0-9.\-\[\]:]""")
     }
 }
