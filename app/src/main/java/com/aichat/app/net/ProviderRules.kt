@@ -97,18 +97,23 @@ object ProviderRules {
     fun resolveMaxTokens(provider: ProviderConfig?, model: String?, userMax: Int?): Int =
         resolveMaxTokens(provider?.modelMeta, model, userMax?.let { JsonPrimitive(it) }).let { if (it >= Int.MAX_VALUE) Int.MAX_VALUE else it.toInt() }
 
-    private val AFFORD = Regex("can only afford\\s+(\\d+)", RegexOption.IGNORE_CASE)
-    /** OpenRouter 402 文案中的 can only afford N */
-    fun parseAffordTokens(text: String?): Long? {
-        val m = AFFORD.find(text ?: "null") ?: return null
-        val n = m.groupValues[1].toBigInteger()
-        return if (n.signum() > 0) (if (n.bitLength() < 63) n.toLong() else Long.MAX_VALUE) else null
+    /** JS 正则的 \s（含 NBSP、全角空格、U+2028/2029、BOM 等 Unicode 空白；Java 的 \s 只有 ASCII） */
+    private const val JS_SPACE = "[\\t\\n\\u000B\\u000C\\r \\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]"
+    private val AFFORD = Regex("can only afford$JS_SPACE+([0-9]+)", RegexOption.IGNORE_CASE)
+    /**
+     * OpenRouter 402 文案中的 can only afford N（同 JS：String(text || '') / parseInt / n > 0 ? n : null）。
+     * 返回 JS number（Double）：超大数不截到 Long 上限（1e20 就是 1e20，400 位数字 → Infinity，同 parseInt）。
+     */
+    fun parseAffordTokens(text: String?): Double? {
+        val m = AFFORD.find(text ?: "") ?: return null
+        val n = m.groupValues[1].toDouble()          // 十进制串 → 最近 double，同 parseInt(…, 10)
+        return if (n > 0) n else null
     }
-    /** 402 降级：floor(afford*0.8)，至少 256 */
-    fun downgradeMaxTokens(afford: Double?, min: Int? = null): Long {
-        val lo = if (min != null && min > 0) min.toLong() else MIN_DOWNGRADE_MAX_TOKENS.toLong()
+    /** 402 降级：Math.max(min, Math.floor(afford * 0.8))，min 默认 256；返回 JS number */
+    fun downgradeMaxTokens(afford: Double?, min: Int? = null): Double {
+        val lo = if (min != null && min > 0) min.toDouble() else MIN_DOWNGRADE_MAX_TOKENS.toDouble()
         val a = afford ?: 0.0
         if (!(a > 0)) return lo
-        return maxOf(lo, Math.floor(a * 0.8).toLong())
+        return maxOf(lo, Math.floor(a * 0.8))
     }
 }

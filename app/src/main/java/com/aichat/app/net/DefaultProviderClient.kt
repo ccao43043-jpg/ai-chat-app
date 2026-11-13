@@ -12,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -28,7 +30,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * ProviderClient 实现（工作流 B）。三种请求格式（openai 兼容 / anthropic / gemini）的构造 + 流式；模型列表、endpoints 待做。
+ * ProviderClient 实现（工作流 B）。三种请求格式（openai 兼容 / anthropic / gemini）的构造 + 流式；模型列表 / OpenRouter endpoints；RouteChosen。
  * 流式语义对照 app.js 2236–2320：
  *  - 只有 2xx 且为流式时才逐块喂 SSE 解析器；非 2xx 读完整个错误体 → Error(status, parseError, raw)
  *  - 流结束后若一个内容增量都没收到而 raw 非空 → 按整包 JSON 兜底解析（parseFullResponse）
@@ -113,7 +115,7 @@ class DefaultProviderClient(
                                 val afford = ProviderRules.parseAffordTokens(rawS)
                                 if (afford != null) {
                                     downgraded = true
-                                    val next = ProviderRules.downgradeMaxTokens(afford.toDouble())
+                                    val next = ProviderRules.downgradeMaxTokens(afford)
                                     req = withMaxTokens(req, provider.type, next)
                                     notices?.invoke(downgradeNotice(next))   // TODO(D 契约 #4)：send(StreamEvent.Notice(...))
                                     retry = true
@@ -143,12 +145,48 @@ class DefaultProviderClient(
         awaitClose { current.get()?.cancel() }
     }
 
-    override suspend fun listModels(provider: ProviderConfig): Pair<List<String>, JsonObject> = TODO("M2：buildModelsRequest / parseModelsMeta")
-    override suspend fun openRouterEndpoints(provider: ProviderConfig, modelId: String): JsonObject = TODO("M2：buildEndpointsRequest")
+    /**
+     * 带路由结果的流：先发 RouteChosen(slug)（ChatEngine 用它在 afterResponse 里 observeRoute / markFail），再照常流式。
+     * slug 来自 AffinityRouter.beforeSend（或 buildChatRequest 的 routePrices 分支 onRouteChosen）。
+     */
+    fun stream(provider: ProviderConfig, request: BuiltRequest, routeSlug: String?): Flow<StreamEvent> =
+        if (routeSlug.isNullOrEmpty()) stream(provider, request)
+        else kotlinx.coroutines.flow.flow { emit(StreamEvent.RouteChosen(routeSlug)); emitAll(stream(provider, request)) }
+
+    /** 已认证 GET → (status, body)；未登记 / 跨源抛 AuthInjector.Rejected */
+    private suspend fun getText(provider: ProviderConfig, req: BuiltRequest): Pair<Int, String> = withContext(Dispatchers.IO) {
+        val authed = auth.authorize(provider.id, req)
+        val call = client.newCall(toOkHttp(authed))
+        kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion { if (it != null) call.cancel() }
+        call.execute().use { resp -> resp.code to (resp.body?.string() ?: "") }
+    }
+
+    /**
+     * 获取模型列表：ids（去重 + localeCompare 排序）+ modelMeta（context / maxOutput / modality / price）。
+     * 非 2xx 抛 IOException(parseError 文案)；空列表原样返回（「接口没有返回任何模型」提示归 UI）。
+     */
+    override suspend fun listModels(provider: ProviderConfig): Pair<List<String>, JsonObject> {
+        val (status, text) = getText(provider, ModelCatalog.buildModelsRequest(provider))
+        if (status >= 400 || status == 0) throw IOException(Deltas.parseError(status, text))
+        val ids = try { ModelCatalog.parseModelsResponse(provider.type, text) } catch (e: Exception) { throw IOException("模型列表不是合法 JSON：" + (e.message ?: ""), e) }
+        return ids to ModelCatalog.parseModelsMeta(provider.type, text)
+    }
+
+    /**
+     * OpenRouter GET /models/{id}/endpoints → { "floor": 最低价 $/M | null, "endpoints": [...] }（app.js doFetchOpenRouterFloor）。
+     * 非 2xx 抛 IOException。floor 用 pricingFromRaw(pr, 1)：endpoints 已是折后价，不再乘 (1 − discount)。
+     * 调用方随后：ModelCatalog.applyFloorToMeta + FloorPrices.syncUsagePricesFromEndpoints（非 null 才保存）。
+     */
+    override suspend fun openRouterEndpoints(provider: ProviderConfig, modelId: String): JsonObject {
+        val (status, text) = getText(provider, ModelCatalog.buildEndpointsRequest(provider, modelId))
+        if (status >= 400 || status == 0) throw IOException(Deltas.parseError(status, text))
+        val eps = ModelCatalog.parseEndpointsResponse(text)
+        return JsonObject(linkedMapOf("floor" to (ModelCatalog.floorPricingFromEndpoints(eps) ?: kotlinx.serialization.json.JsonNull), "endpoints" to eps))
+    }
 
     companion object {
         /** 与 app.js 2285 行逐字一致 */
-        fun downgradeNotice(next: Long) = "额度不足，已将最大输出降至 $next 并重试…"
+        fun downgradeNotice(next: Double) = "额度不足，已将最大输出降至 ${Js.numberToString(next)} 并重试…"
         private val RE_402 = Regex("can only afford|max_tokens", RegexOption.IGNORE_CASE)
         private val JSON_MT = "application/json; charset=utf-8".toMediaType()
 
@@ -163,13 +201,13 @@ class DefaultProviderClient(
         }
 
         /** 402 降级：只改 max_tokens（openai / anthropic）或 generationConfig.maxOutputTokens（gemini），其余逐字不变 */
-        fun withMaxTokens(r: BuiltRequest, type: ProviderType, maxTokens: Long): BuiltRequest {
+        fun withMaxTokens(r: BuiltRequest, type: ProviderType, maxTokens: Double): BuiltRequest {
             val body = Js.json.parseToJsonElement(r.body) as? JsonObject ?: return r
             val m = LinkedHashMap<String, JsonElement>(body)
             if (type == ProviderType.GEMINI) {
                 val gc = LinkedHashMap<String, JsonElement>((m["generationConfig"] as? JsonObject) ?: JsonObject(emptyMap()))
-                gc["maxOutputTokens"] = JsonPrimitive(maxTokens); m["generationConfig"] = JsonObject(gc)
-            } else m["max_tokens"] = JsonPrimitive(maxTokens)
+                gc["maxOutputTokens"] = Js.number(maxTokens); m["generationConfig"] = JsonObject(gc)
+            } else m["max_tokens"] = Js.number(maxTokens)
             return r.copy(body = Js.stringify(JsonObject(m)))
         }
     }

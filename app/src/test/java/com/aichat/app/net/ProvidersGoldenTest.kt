@@ -167,12 +167,12 @@ class ProvidersGoldenTest {
         for (c in Golden.load("parseAffordTokens.jsonl")) {
             val t = (c.input[0] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
             val got = ProviderRules.parseAffordTokens(t)
-            Golden.assertSemantic("parseAffordTokens $t", c.out, got?.let { JsonPrimitive(it) } ?: JsonNull)
+            Golden.assertSemantic("parseAffordTokens $t", c.out, got?.let { Js.number(it) } ?: JsonNull)
         }
         for (c in Golden.load("downgradeMaxTokens.jsonl")) {
             val a = (c.input[0] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.doubleOrNull
             val min = ((c.input.getOrNull(1) as? JsonObject)?.get("min") as? JsonPrimitive)?.intOrNull
-            Golden.assertSemantic("downgradeMaxTokens ${Js.stringify(c.input)}", c.out, JsonPrimitive(ProviderRules.downgradeMaxTokens(a, min)))
+            Golden.assertSemantic("downgradeMaxTokens ${Js.stringify(c.input)}", c.out, Js.number(ProviderRules.downgradeMaxTokens(a, min)))
         }
         val meta = Js.json.parseToJsonElement("""{"m":{"maxOutput":4096}}""") as JsonObject
         val p = com.aichat.app.domain.model.ProviderConfig("p", "openrouter", "OR", com.aichat.app.domain.model.ProviderType.OPENAI, "https://openrouter.ai/api/v1", listOf("m"), modelMeta = meta)

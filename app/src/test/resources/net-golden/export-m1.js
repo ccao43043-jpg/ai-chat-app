@@ -263,6 +263,16 @@ const maxLines = [
   [metaProv, 'unknown', 0], [metaProv, 'small', -5], [{}, 'x', '12.5'], [null, 'x', 'abc'],
 ].map(a => ({ in: a, out: P.resolveMaxTokens.apply(null, a) }));
 const affordLines = ['can only afford 12345.', 'Can Only Afford   77 tokens', 'can only afford 0', 'nothing', '', null].map(t => ({ in: [t], out: P.parseAffordTokens(t) }));
+// 402 极端情况（Grok Bot 审查 f）：null、Unicode 空白、超大数（不截 Long）；body 逐字比对 JSON.stringify
+const affordEdge = [null, undefined, '', 'can only afford\u00a012', 'can only afford\u3000\u300034', 'can only afford\u2028 56', 'can only afford\ufeff7',
+  'CAN ONLY AFFORD\t\n9', 'can only afford\u200b5', 'can only afford 99999999999999999999', 'can only afford 9007199254740993',
+  'can only afford ' + '9'.repeat(400), 'can only afford 000', 'can only afford 300 tokens'].map(t => {
+  const n = P.parseAffordTokens(t);
+  const next = P.downgradeMaxTokens(n);
+  return { in: [t === undefined ? null : t], out: { afford: n == null ? null : String(n), next: String(next), notice: '额度不足，已将最大输出降至 ' + next + ' 并重试…', body: JSON.stringify({ max_tokens: next }) } };
+});
+const numLines = [0, -0, 1, -1, 0.1, 1e-7, 1.5e-7, 123e-20, 1e21, 1e20, 8e19, 2 ** 53, 2 ** 53 + 2, 1 / 3, 123456.789, 5e-324, 1.7976931348623157e308, 0.000001, 1e-6 * 3, 1.25e15, 4.35, 0.1 + 0.2]
+  .map(x => ({ in: [x], out: [String(x), JSON.stringify({ v: x })] }));
 const downLines = [[12345], [100], [0], [null], [1000, { min: 512 }], [400.9]].map(a => ({ in: a, out: P.downgradeMaxTokens.apply(null, a) }));
 
 const files = {
@@ -280,6 +290,8 @@ const files = {
   'resolveMaxTokens.jsonl': maxLines,
   'parseAffordTokens.jsonl': affordLines,
   'downgradeMaxTokens.jsonl': downLines,
+  'afford402.jsonl': affordEdge,
+  'numberToString.jsonl': numLines,
 };
 let diff = 0;
 for (const [f, lines] of Object.entries(files)) {

@@ -51,9 +51,90 @@ object Js {
     }
     fun isNumber(e: JsonElement?) = num(e) != null
 
-    /** 以 JS Number→String 的方式生成数字（整数不带 .0） */
-    fun number(d: Double): JsonPrimitive =
-        if (d.isFinite() && d == Math.floor(d) && Math.abs(d) < 1e15) JsonPrimitive(d.toLong()) else JsonPrimitive(d)
+    /** 以 JS Number→String 的方式生成数字（整数不带 .0）；NaN / ±Infinity → null（同 JSON.stringify） */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    fun number(d: Double): JsonPrimitive = when {
+        !d.isFinite() -> JsonNull
+        d == Math.floor(d) && Math.abs(d) < 1e15 -> JsonPrimitive(d.toLong())
+        else -> kotlinx.serialization.json.JsonUnquotedLiteral(numberToString(d))
+    }
+    /** Number.prototype.toString()（ECMAScript Number::toString，基数 10）：1e21 → "1e+21"，1e-7 → "1e-7"，8e19 → "80000000000000000000" */
+    fun numberToString(d: Double): String {
+        if (d.isNaN()) return "NaN"
+        if (d == Double.POSITIVE_INFINITY) return "Infinity"
+        if (d == Double.NEGATIVE_INFINITY) return "-Infinity"
+        if (d == 0.0) return "0"
+        if (d < 0) return "-" + numberToString(-d)
+        val bd = java.math.BigDecimal(java.lang.Double.toString(d)).stripTrailingZeros()
+        val digits = bd.unscaledValue().toString()
+        val k = digits.length
+        val n = k - bd.scale()
+        return when {
+            n in k..21 -> digits + "0".repeat(n - k)
+            n in 1..21 -> digits.substring(0, n) + "." + digits.substring(n)
+            n in -5..0 -> "0." + "0".repeat(-n) + digits
+            else -> {
+                val e = n - 1
+                (if (k == 1) digits else digits[0] + "." + digits.substring(1)) + "e" + (if (e >= 0) "+" else "-") + Math.abs(e)
+            }
+        }
+    }
+    /** JS 的 x | 0（ToInt32） */
+    fun toInt32(d: Double): Int {
+        if (!d.isFinite()) return 0
+        val t = if (d < 0) Math.ceil(d) else Math.floor(d)
+        return java.math.BigDecimal(t).toBigInteger().toInt()
+    }
+    /** JS Math.round：最近整数，.5 向 +∞ */
+    fun round(d: Double): Double = if (!d.isFinite() || Math.abs(d) >= 4.5e15) d else Math.floor(d + 0.5).let { f ->
+        // floor(d+0.5) 在 d = 0.49999999999999994 之类处会因加法进位出错；与 JS 对齐需再核一次
+        if (f - d > 0.5) f - 1 else f
+    }
+
+    // ---------------- String.prototype.localeCompare（ICU 根排序的近似，Node / WebView 一致） ----------------
+    /** Node（ICU）对可打印 ASCII 的一级排序；同组只差大小写（三级） */
+    private val ASCII_GROUPS = listOf(" ", "_", "-", ",", ";", ":", "!", "?", ".", "'", "\"", "(", ")", "[", "]", "{", "}", "@", "*", "/", "\\",
+        "&", "#", "%", "`", "^", "+", "<", "=", ">", "|", "~", "$", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9") +
+        ('a'..'z').map { "$it${it.uppercaseChar()}" }
+    private val PRIMARY = IntArray(128) { -1 }.also { t ->
+        "\t\n\u000B\u000C\r".forEachIndexed { i, c -> t[c.code] = i + 1 }
+        ASCII_GROUPS.forEachIndexed { i, g -> g.forEach { c -> t[c.code] = 10 + i } }
+    }
+    private data class CE(val p: Int, val s: Int, val t: Int)
+    private fun elements(str: String): List<CE> {
+        val out = ArrayList<CE>()
+        val nfd = java.text.Normalizer.normalize(str, java.text.Normalizer.Form.NFD)
+        var i = 0
+        while (i < nfd.length) {
+            val cp = nfd.codePointAt(i); i += Character.charCount(cp)
+            val type = Character.getType(cp)
+            if (type == Character.NON_SPACING_MARK.toInt() || type == Character.ENCLOSING_MARK.toInt()) {
+                if (out.isNotEmpty()) { val l = out.removeAt(out.lastIndex); out += l.copy(s = l.s * 31 + 1 + (cp and 0xffff)) }
+                continue
+            }
+            if (cp < 128) {
+                val p = PRIMARY[cp]; if (p < 0) continue                       // 控制字符：完全可忽略
+                out += CE(p, 0, if (cp in 'A'.code..'Z'.code) 1 else 0)
+            } else {
+                val lower = Character.toLowerCase(cp)
+                out += CE(1000 + lower, 0, if (lower != cp) 1 else 0)
+            }
+        }
+        return out
+    }
+    private fun cmpLevel(a: List<CE>, b: List<CE>, f: (CE) -> Int): Int {
+        val n = minOf(a.size, b.size)
+        for (k in 0 until n) { val c = f(a[k]).compareTo(f(b[k])); if (c != 0) return c }
+        return a.size.compareTo(b.size)
+    }
+    /** a.localeCompare(b) 的符号（-1 / 0 / 1）。ASCII 与带重音拉丁字母和 ICU 一致；其他脚本按码位近似（中文不是拼音序）。 */
+    fun localeCompare(a: String, b: String): Int {
+        val ea = elements(a); val eb = elements(b)
+        cmpLevel(ea, eb) { it.p }.let { if (it != 0) return Integer.signum(it) }
+        cmpLevel(ea, eb) { it.s }.let { if (it != 0) return Integer.signum(it) }
+        cmpLevel(ea, eb) { it.t }.let { if (it != 0) return Integer.signum(it) }
+        return 0
+    }
     fun number(n: Long): JsonPrimitive = JsonPrimitive(n)
 
     /** String(x)：给 JSON 值做字符串拼接时的 JS 表现（够用：string / number / bool / null） */
