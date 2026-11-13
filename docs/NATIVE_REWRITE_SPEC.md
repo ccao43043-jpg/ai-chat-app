@@ -3,6 +3,7 @@
 > 基线：`origin/main` f6bdd62（v0.28.7，versionCode 89）· 分支 `feat/native-v1` · 工作树 `/workspace/ai-chat-native`
 > **用户决定（最终）：一步到位全原生。v1.0.0 不保留任何内置网页入口，所有功能都用 Kotlin/Compose 重写。**
 > 旧前端 `app/src/main/assets/www/` 留在仓库里，只作为**参考实现和 golden 对照的数据源**，已在 Gradle 里排除，不打进 APK（`sourceSets.main.assets.srcDirs = []`）。
+> 进度快照（2026-11-14）：[NATIVE_REWRITE_STATUS.md](./NATIVE_REWRITE_STATUS.md)
 
 ---
 
