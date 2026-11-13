@@ -1,0 +1,31 @@
+{"name":"formatModelPrice","in":[null],"out":"—"}
+{"name":"formatModelPrice","in":[{}],"out":"—"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0.5,"completion":3}}],"out":"输入 $0.50 / 输出 $3.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0,"completion":3}}],"out":"输入 — / 输出 $3.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0.15,"completion":0}}],"out":"输入 $0.15 / 输出 — · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":150,"completion":600.5}}],"out":"输入 $150 / 输出 $601 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0.001234,"completion":0.00995}}],"out":"输入 $0.0012 / 输出 $0.01 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"imageOut":40}}],"out":"图片输出 $40.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"image":0.04}}],"out":"约 $0.04/张"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":1,"image":0.04}}],"out":"输入 $1.00 / 输出 — · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"imageOut":30,"image":0.02}}],"out":"图片输出 $30.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"priceFloor":{"prompt":0.1,"completion":0.2},"price":{"prompt":1,"completion":2}}],"out":"最低 输入 $0.10 / 输出 $0.20 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0.3,"completion":1},"priceIsFloor":true}],"out":"最低 输入 $0.30 / 输出 $1.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{}}],"out":"—"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":0.0049999,"completion":99.995}}],"out":"输入 $0.005 / 输出 $100.00 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":100,"completion":0.01}}],"out":"输入 $100 / 输出 $0.01 · 百万Token"}
+{"name":"formatModelPrice","in":[{"price":{"prompt":1e-9,"completion":2.5e-7}}],"out":"输入 $1e-9 / 输出 $2.5e-7 · 百万Token"}
+{"name":"formatContext","in":[0],"out":"0"}
+{"name":"formatContext","in":[1],"out":"1"}
+{"name":"formatContext","in":[999],"out":"999"}
+{"name":"formatContext","in":[1000],"out":"1K"}
+{"name":"formatContext","in":[1499],"out":"1K"}
+{"name":"formatContext","in":[1500],"out":"2K"}
+{"name":"formatContext","in":[128000],"out":"128K"}
+{"name":"formatContext","in":[999999],"out":"1000K"}
+{"name":"formatContext","in":[1000000],"out":"1M"}
+{"name":"formatContext","in":[1048576],"out":"1M"}
+{"name":"formatContext","in":[2000000],"out":"2M"}
+{"name":"formatContext","in":[1250000],"out":"1.3M"}
+{"name":"formatContext","in":[1000000000],"out":"1000M"}
+{"name":"formatContext","in":[32768],"out":"33K"}

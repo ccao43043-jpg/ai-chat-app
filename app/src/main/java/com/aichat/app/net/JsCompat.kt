@@ -156,6 +156,30 @@ object Js {
     }
     fun number(n: Long): JsonPrimitive = JsonPrimitive(n)
 
+    /** x | 0（undefined / NaN → 0） */
+    fun i32(e: JsonElement?): Int = toInt32(toNumber(e))
+
+    /** Number.prototype.toFixed(digits)：按 double 的精确十进制值四舍五入（两个候选等距时取大者）；|x| ≥ 1e21 走 String(x) */
+    fun toFixed(x: Double, digits: Int): String {
+        if (x.isNaN()) return "NaN"
+        if (Math.abs(x) >= 1e21 || x.isInfinite()) return numberToString(x)
+        val neg = x < 0
+        val bd = java.math.BigDecimal(Math.abs(x)).setScale(digits, java.math.RoundingMode.HALF_UP)
+        val s = bd.toPlainString()
+        return if (neg) "-$s" else s
+    }
+
+    /** Number(x.toPrecision(p))：按精确十进制值保留 p 位有效数字（等距取大者）后再转回 double */
+    fun toPrecisionNumber(x: Double, p: Int): Double {
+        if (!x.isFinite() || x == 0.0) return x
+        val neg = x < 0
+        val r = java.math.BigDecimal(Math.abs(x)).round(java.math.MathContext(p, java.math.RoundingMode.HALF_UP)).toDouble()
+        return if (neg) -r else r
+    }
+
+    /** String(x) 用于数值：JS 的 Number→String */
+    fun numStr(d: Double): String = numberToString(d)
+
     /** String(x)：给 JSON 值做字符串拼接时的 JS 表现（够用：string / number / bool / null） */
     fun str(e: JsonElement?): String = when {
         e == null -> "undefined"

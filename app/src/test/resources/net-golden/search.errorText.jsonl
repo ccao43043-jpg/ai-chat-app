@@ -1,0 +1,16 @@
+{"in":[401,"{\"detail\":{\"error\":\"Unauthorized: missing key\"}}"],"out":"HTTP 401（API Key 无效或没有权限）：Unauthorized: missing key"}
+{"in":[403,"{\"error\":\"forbidden\"}"],"out":"HTTP 403（API Key 无效或没有权限）：forbidden"}
+{"in":[429,"{\"message\":\"rate\"}"],"out":"HTTP 429（请求太频繁或额度已用完）：rate"}
+{"in":[432,"{\"msg\":\"plan\"}"],"out":"HTTP 432（额度不足或超出套餐限制）：plan"}
+{"in":[402,"{\"error\":{\"message\":\"pay\"}}"],"out":"HTTP 402（额度不足或超出套餐限制）：pay"}
+{"in":[500,"<html><body><h1>Internal</h1>  Server   Error</body></html>"],"out":"HTTP 500：Internal Server Error"}
+{"in":[0,""],"out":"HTTP 0（没有收到响应）"}
+{"in":[418,"{\"detail\":\"teapot\"}"],"out":"HTTP 418：teapot"}
+{"in":[400,"{\"detail\":{\"detail\":{\"message\":\"nested\"}}}"],"out":"HTTP 400：nested"}
+{"in":[400,"{\"error\":{\"code\":1}}"],"out":"HTTP 400"}
+{"in":[400,"{\"a\":1}"],"out":"HTTP 400"}
+{"in":[502,"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],"out":"HTTP 502：xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+{"in":[400,"\"str\""],"out":"HTTP 400：str"}
+{"in":[400,"null"],"out":"HTTP 400：null"}
+{"in":[400,"[1,2]"],"out":"HTTP 400"}
+{"in":[400,"{\"detail\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"}"],"out":"HTTP 400：dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}

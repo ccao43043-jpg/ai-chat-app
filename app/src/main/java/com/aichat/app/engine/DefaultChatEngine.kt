@@ -61,7 +61,7 @@ class DefaultChatEngine(
 
     override fun stop(convId: String) { running[convId]?.cancel() }
 
-    override fun send(convId: String, userText: String, images: List<String>): Flow<StreamEvent> = channelFlow {
+    override fun send(convId: String, userText: String, images: List<String>, files: List<com.aichat.app.domain.model.FileAttachment>): Flow<StreamEvent> = channelFlow {
         val conv = chats.load(convId) ?: return@channelFlow fail("对话不存在")
         val user = Message(uid(), Role.USER, userText, now(), images)
         val conv1 = conv.copy(messages = conv.messages + user, updatedAt = now())
@@ -193,6 +193,11 @@ class DefaultChatEngine(
 /** timeutil.js 的 nowLine / NOW_MARKER（本地时区） */
 object TimeLine {
     const val NOW_MARKER = "本轮动态信息"
+    /** timeutil.js localDateStr：本地 YYYY-MM-DD */
+    fun localDateStr(nowMs: Long, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+        val d = java.time.Instant.ofEpochMilli(nowMs).atZone(zone.toZoneId())
+        return String.format("%04d-%02d-%02d", d.year, d.monthValue, d.dayOfMonth)
+    }
     fun nowLine(nowMs: Long, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
         val cal = java.util.Calendar.getInstance(zone).apply { timeInMillis = nowMs }
         val date = String.format("%04d-%02d-%02d", cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))

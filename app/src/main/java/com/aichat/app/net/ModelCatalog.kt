@@ -252,4 +252,33 @@ object ModelCatalog {
         m[modelId] = JsonObject(e)
         return JsonObject(m)
     }
+
+    // ---------------- M4：价格 / 上下文显示（providers.js fmtUsd / formatModelPrice / formatContext） ----------------
+    fun fmtUsd(n: Double): String = when {
+        n >= 100 -> "$" + Js.toFixed(n, 0)
+        n >= 0.01 -> "$" + Js.toFixed(n, 2)
+        else -> "$" + Js.numberToString(Js.toPrecisionNumber(n, 2))
+    }
+    /** meta → 「输入 $0.50 / 输出 $3.00 · 百万Token」/「约 $0.01/张」/「—」；最低价时前缀「最低 」 */
+    fun formatModelPrice(meta: JsonObject?): String {
+        val pf = meta?.get("priceFloor")
+        val p = (if (Js.truthy(pf)) pf else meta?.get("price"))?.takeIf { Js.truthy(it) } ?: return "—"
+        fun f(k: String) = (p as? JsonObject)?.get(k)
+        fun usd(e: JsonElement?) = fmtUsd(Js.toNumber(e))
+        val parts = ArrayList<String>()
+        if (Js.truthy(f("prompt")) || Js.truthy(f("completion"))) {
+            parts += (if (Js.truthy(f("prompt"))) "输入 " + usd(f("prompt")) else "输入 —") + " / " + (if (Js.truthy(f("completion"))) "输出 " + usd(f("completion")) else "输出 —") + " · 百万Token"
+        } else if (Js.truthy(f("imageOut"))) parts += "图片输出 " + usd(f("imageOut")) + " · 百万Token"
+        if (Js.truthy(f("image")) && parts.isEmpty()) parts += "约 " + usd(f("image")) + "/张"
+        if (parts.isEmpty()) return "—"
+        val body = parts.joinToString(" · ")
+        val isFloor = Js.truthy(meta?.get("priceIsFloor")) || Js.truthy(pf)
+        return if (isFloor) "最低 $body" else body
+    }
+    /** n ≥ 1e6 → 「1.3M」；≥ 1000 → 「128K」；否则原数 */
+    fun formatContext(n: Double): String = when {
+        n >= 1e6 -> Js.numberToString(Js.toFixed(n / 1e6, 1).toDouble()) + "M"
+        n >= 1000 -> Js.numberToString(Js.round(n / 1000)) + "K"
+        else -> Js.numberToString(n)
+    }
 }

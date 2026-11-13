@@ -1,0 +1,58 @@
+{"name":"supportInfo","in":["deepseek"],"out":{"supported":true,"consoleUrl":"https://platform.deepseek.com/usage","hint":""}}
+{"name":"supportInfo","in":["siliconflow"],"out":{"supported":true,"consoleUrl":"https://cloud.siliconflow.cn/account/ak","hint":""}}
+{"name":"supportInfo","in":["moonshot"],"out":{"supported":true,"consoleUrl":"https://platform.moonshot.cn/console/account","hint":""}}
+{"name":"supportInfo","in":["openrouter"],"out":{"supported":true,"consoleUrl":"https://openrouter.ai/settings/credits","hint":""}}
+{"name":"supportInfo","in":["openai"],"out":{"supported":false,"consoleUrl":"https://platform.openai.com/settings/organization/billing","hint":"此服务商未提供可用的余额查询接口，请到官网控制台查看。"}}
+{"name":"supportInfo","in":["custom"],"out":{"supported":false,"consoleUrl":"","hint":"此服务商未提供可用的余额查询接口，请到官网控制台查看。"}}
+{"name":"supportInfo","in":[""],"out":{"supported":false,"consoleUrl":"","hint":"此服务商未提供可用的余额查询接口，请到官网控制台查看。"}}
+{"name":"supportInfo","in":[null],"out":{"supported":false,"consoleUrl":"","hint":"此服务商未提供可用的余额查询接口，请到官网控制台查看。"}}
+{"name":"supportInfo","in":["xiaomi"],"out":{"supported":false,"consoleUrl":"https://platform.xiaomimimo.com/","hint":"此服务商未提供可用的余额查询接口，请到官网控制台查看。"}}
+{"name":"buildBalanceRequest","in":[{"presetId":"deepseek","baseUrl":"https://api.deepseek.com/v1","hasKey":true}],"out":{"url":"https://api.deepseek.com/user/balance","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"deepseek","baseUrl":"https://proxy.example.com/v1/","hasKey":true}],"out":{"url":"https://proxy.example.com/user/balance","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"deepseek","baseUrl":"","hasKey":true}],"out":{"url":"https://api.deepseek.com/user/balance","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"siliconflow","baseUrl":"https://api.siliconflow.cn/v1/","hasKey":true}],"out":{"url":"https://api.siliconflow.cn/v1/user/info","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"moonshot","baseUrl":"https://api.moonshot.cn/v1","hasKey":true}],"out":{"url":"https://api.moonshot.cn/v1/users/me/balance","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"openrouter","baseUrl":"https://openrouter.ai/api/v1","hasKey":true}],"out":{"url":"https://openrouter.ai/api/v1/key","method":"GET","headers":{"Authorization":"Bearer ","Accept":"application/json"}}}
+{"name":"buildBalanceRequest","in":[{"presetId":"openai","baseUrl":"https://api.openai.com/v1","hasKey":true}],"out":null}
+{"name":"buildBalanceRequest","in":[{"presetId":"deepseek","baseUrl":"https://api.deepseek.com","hasKey":false}],"out":null}
+{"name":"buildBalanceRequest","in":[{"presetId":"deepseek","baseUrl":"https://api.deepseek.com","apiKey":"  "}],"out":null}
+{"name":"buildBalanceRequest","in":[null],"out":null}
+{"name":"money","in":[null,""],"out":"—"}
+{"name":"money","in":["","CNY"],"out":"—"}
+{"name":"money","in":[0,"CNY"],"out":"¥0.0000"}
+{"name":"money","in":[0.12345,"USD"],"out":"$0.1235"}
+{"name":"money","in":[1.005,"¥"],"out":"¥1.00"}
+{"name":"money","in":[123.456,"$"],"out":"$123.46"}
+{"name":"money","in":[-5.5,"EUR"],"out":"EUR -5.50"}
+{"name":"money","in":["12.3",""],"out":"12.30"}
+{"name":"money","in":["abc","USD"],"out":"abc"}
+{"name":"money","in":[1e+21,"USD"],"out":"$1e+21"}
+{"name":"money","in":[99.995,"CNY"],"out":"¥100.00"}
+{"name":"money","in":[0.00005,""],"out":"0.0001"}
+{"name":"parseBalanceResponse","in":["deepseek",200,"{\"is_available\":true,\"balance_infos\":[{\"currency\":\"CNY\",\"total_balance\":\"110.00\",\"granted_balance\":\"10.00\",\"topped_up_balance\":\"100.00\"},{\"currency\":\"USD\",\"total_balance\":\"1.5\"}]}"],"out":{"ok":true,"primary":{"label":"总余额","text":"¥110.00"},"details":[{"label":"CNY 余额","text":"¥110.00"},{"label":"USD 余额","text":"$1.50"},{"label":"CNY 赠送","text":"¥10.00"},{"label":"CNY 充值","text":"¥100.00"},{"label":"可用状态","text":"充足"}],"currency":"CNY","consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["deepseek",200,"{\"balance_infos\":[]}"],"out":{"ok":false,"error":"未返回余额信息","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["deepseek",200,"{\"is_available\":false,\"balance_infos\":[{\"total_balance\":3}]}"],"out":{"ok":true,"primary":{"label":"总余额","text":"¥3.00"},"details":[{"label":" 余额","text":"3.00"},{"label":"可用状态","text":"不足"}],"currency":"CNY","consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["siliconflow",200,"{\"code\":20000,\"data\":{\"balance\":\"0.88\",\"chargeBalance\":\"10\",\"totalBalance\":\"10.88\",\"status\":\"normal\"}}"],"out":{"ok":true,"primary":{"label":"总余额","text":"¥10.88"},"details":[{"label":"总余额","text":"¥10.88"},{"label":"余额","text":"¥0.8800"},{"label":"充值余额","text":"¥10.00"},{"label":"账户状态","text":"normal"}],"currency":"CNY","consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["siliconflow",200,"{\"balance\":5}"],"out":{"ok":true,"primary":{"label":"总余额","text":"¥5.00"},"details":[{"label":"总余额","text":"¥5.00"}],"currency":"CNY","consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["siliconflow",200,"{\"data\":{}}"],"out":{"ok":false,"error":"未返回余额字段","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["moonshot",200,"{\"code\":0,\"data\":{\"available_balance\":49.58,\"voucher_balance\":46.58,\"cash_balance\":3}}"],"out":{"ok":true,"primary":{"label":"可用余额","text":"¥49.58"},"details":[{"label":"可用余额","text":"¥49.58"},{"label":"代金券","text":"¥46.58"},{"label":"现金","text":"¥3.00"}],"currency":"CNY","consoleUrl":"https://platform.moonshot.cn/console/account"}}
+{"name":"parseBalanceResponse","in":["moonshot",200,"{\"data\":{}}"],"out":{"ok":false,"error":"未返回 available_balance","primary":null,"details":[],"consoleUrl":"https://platform.moonshot.cn/console/account"}}
+{"name":"parseBalanceResponse","in":["moonshot",200,"{\"data\":{\"available_balance\":0}}"],"out":{"ok":true,"primary":{"label":"可用余额","text":"¥0.0000"},"details":[{"label":"可用余额","text":"¥0.0000"},{"label":"代金券","text":"—"},{"label":"现金","text":"—"}],"currency":"CNY","consoleUrl":"https://platform.moonshot.cn/console/account"}}
+{"name":"parseBalanceResponse","in":["openrouter",200,"{\"data\":{\"label\":\"k\",\"limit\":null,\"limit_remaining\":null,\"usage\":1.23,\"usage_daily\":0.1,\"usage_monthly\":1,\"is_free_tier\":false}}"],"out":{"ok":true,"primary":{"label":"本 Key 已用","text":"$1.23"},"details":[{"label":"本 Key 已用","text":"$1.23"},{"label":"今日用量","text":"$0.1000"},{"label":"本月用量","text":"$1.00"},{"label":"免费档","text":"否"},{"label":"说明","text":"账户总余额需管理密钥访问 /credits；此处为当前 Key 的额度与用量"}],"currency":"USD","consoleUrl":"https://openrouter.ai/settings/credits"}}
+{"name":"parseBalanceResponse","in":["openrouter",200,"{\"data\":{\"limit\":10,\"limit_remaining\":8.7654,\"usage\":1.2346}}"],"out":{"ok":true,"primary":{"label":"Key 剩余额度","text":"$8.77"},"details":[{"label":"Key 额度上限","text":"$10.00"},{"label":"Key 剩余","text":"$8.77"},{"label":"本 Key 已用","text":"$1.23"},{"label":"说明","text":"账户总余额需管理密钥访问 /credits；此处为当前 Key 的额度与用量"}],"currency":"USD","consoleUrl":"https://openrouter.ai/settings/credits"}}
+{"name":"parseBalanceResponse","in":["openrouter",200,"{\"data\":{}}"],"out":{"ok":false,"error":"未返回额度字段","primary":null,"details":[],"consoleUrl":"https://openrouter.ai/settings/credits"}}
+{"name":"parseBalanceResponse","in":["openrouter",200,"{\"usage\":0}"],"out":{"ok":true,"primary":{"label":"本 Key 已用","text":"$0.0000"},"details":[{"label":"本 Key 已用","text":"$0.0000"},{"label":"说明","text":"账户总余额需管理密钥访问 /credits；此处为当前 Key 的额度与用量"}],"currency":"USD","consoleUrl":"https://openrouter.ai/settings/credits"}}
+{"name":"parseBalanceResponse","in":["deepseek",401,"{\"error\":{\"message\":\"bad\"}}"],"out":{"ok":false,"unsupported":false,"error":"API Key 无效或无权限（HTTP 401）","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["deepseek",404,""],"out":{"ok":false,"unsupported":false,"error":"接口不存在（HTTP 404）","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["moonshot",429,""],"out":{"ok":false,"unsupported":false,"error":"请求过于频繁（HTTP 429）","primary":null,"details":[],"consoleUrl":"https://platform.moonshot.cn/console/account"}}
+{"name":"parseBalanceResponse","in":["moonshot",0,""],"out":{"ok":false,"unsupported":false,"error":"网络错误，请检查连接","primary":null,"details":[],"consoleUrl":"https://platform.moonshot.cn/console/account"}}
+{"name":"parseBalanceResponse","in":["siliconflow",500,"{\"error\":{\"message\":\"boom\"}}"],"out":{"ok":false,"unsupported":false,"error":"boom · HTTP 500","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["siliconflow",500,"{\"message\":\"m\"}"],"out":{"ok":false,"unsupported":false,"error":"m · HTTP 500","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["siliconflow",500,"{\"error\":{\"code\":5}}"],"out":{"ok":false,"unsupported":false,"error":"{\"code\":5} · HTTP 500","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["siliconflow",503,"not json at all xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],"out":{"ok":false,"unsupported":false,"error":"not json at all xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx · HTTP 503","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
+{"name":"parseBalanceResponse","in":["openrouter",502,"{}"],"out":{"ok":false,"unsupported":false,"error":"HTTP 502","primary":null,"details":[],"consoleUrl":"https://openrouter.ai/settings/credits"}}
+{"name":"parseBalanceResponse","in":["openai",200,"{}"],"out":{"ok":false,"unsupported":true,"error":"此服务商未提供可用的余额查询接口，请到官网控制台查看。","primary":null,"details":[],"consoleUrl":"https://platform.openai.com/settings/organization/billing"}}
+{"name":"parseBalanceResponse","in":["deepseek",200,"not json"],"out":{"ok":false,"error":"响应不是合法 JSON","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["deepseek",200,""],"out":{"ok":false,"error":"未返回余额信息","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["deepseek",200,"null"],"out":{"ok":false,"error":"解析失败：Cannot read properties of null (reading 'balance_infos')","primary":null,"details":[],"consoleUrl":"https://platform.deepseek.com/usage"}}
+{"name":"parseBalanceResponse","in":["siliconflow",200,"[]"],"out":{"ok":false,"error":"未返回余额字段","primary":null,"details":[],"consoleUrl":"https://cloud.siliconflow.cn/account/ak"}}
