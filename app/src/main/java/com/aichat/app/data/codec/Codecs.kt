@@ -166,24 +166,26 @@ object ConvMetaCodec : Codec<ConversationMeta> {
 
 // ---------------------------------------------------------------- 消息 / 对话
 /** Message.usage 的存储 Codec：raw = 存储里的整个 usage 对象（含未建模键），编码时若建模字段未变则原样写回 raw */
+/**
+ * 落盘的 msg.usage = providers.js normalizeUsage 的输出（键：prompt/completion/hit/miss/cacheSupported/source/cacheWrite/cost/upstreamCost/cacheSaved）。
+ * JS 的键是 `cost`（Kotlin 字段名 costUsd）。[Usage.raw]（服务商原始 usage）不落盘；未建模的键进 [Usage.extras] 原样写回。
+ */
 object UsageStoreCodec {
-    private val KEYS = listOf("prompt", "completion", "hit", "miss", "cacheWrite", "cacheSupported", "source", "costUsd", "upstreamCost", "cacheSaved")
+    private val KEYS = listOf("prompt", "completion", "hit", "miss", "cacheSupported", "source", "cacheWrite", "cost", "upstreamCost", "cacheSaved")
     fun decode(o: JsonObject): Usage {
         fun l(k: String) = Fields.numOf(o[k])?.toLong()
         fun d(k: String) = Fields.numOf(o[k])
         return Usage(l("prompt"), l("completion"), l("hit"), l("miss"), l("cacheWrite"), Fields.boolOf(o["cacheSupported"]), Fields.strOf(o["source"]),
-            d("costUsd"), d("upstreamCost"), d("cacheSaved"), o)
+            d("cost"), d("upstreamCost"), d("cacheSaved"), raw = null, extras = JsonObject(o.filterKeys { it !in KEYS }))
     }
     fun encode(u: Usage): JsonObject {
-        val raw = u.raw
-        if (raw != null && decode(raw).copy(raw = raw) == u) return raw
         val m = LinkedHashMap<String, JsonElement>()
-        raw?.forEach { (k, v) -> if (k !in KEYS) m[k] = v }
         u.prompt?.let { m["prompt"] = Fields.num(it.toDouble()) }; u.completion?.let { m["completion"] = Fields.num(it.toDouble()) }
         u.hit?.let { m["hit"] = Fields.num(it.toDouble()) }; u.miss?.let { m["miss"] = Fields.num(it.toDouble()) }
-        u.cacheWrite?.let { m["cacheWrite"] = Fields.num(it.toDouble()) }; u.cacheSupported?.let { m["cacheSupported"] = JsonPrimitive(it) }
-        u.source?.let { m["source"] = JsonPrimitive(it) }; u.costUsd?.let { m["costUsd"] = Fields.num(it) }
+        u.cacheSupported?.let { m["cacheSupported"] = JsonPrimitive(it) }; u.source?.let { m["source"] = JsonPrimitive(it) }
+        u.cacheWrite?.let { m["cacheWrite"] = Fields.num(it.toDouble()) }; u.costUsd?.let { m["cost"] = Fields.num(it) }
         u.upstreamCost?.let { m["upstreamCost"] = Fields.num(it) }; u.cacheSaved?.let { m["cacheSaved"] = Fields.num(it) }
+        u.extras.forEach { (k, v) -> if (k !in m) m[k] = v }
         return JsonObject(m)
     }
 }

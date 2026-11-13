@@ -101,8 +101,10 @@ data class Usage(
     /** v1 契约变更 #1：上游实际费用（OpenRouter usage.cost_details.upstream_inference_cost 等）与缓存节省额 */
     val upstreamCost: Double? = null,
     val cacheSaved: Double? = null,
-    /** 服务商返回的原始 usage JSON（未归一化），供插件 / 用量页读取未建模字段 */
+    /** 服务商返回的原始 usage JSON（未归一化，B 填），供插件 / 用量页读取未建模字段。**不落盘**（同 JS：msg.usage 只存 normalizeUsage 的结果） */
     val raw: JsonObject? = null,
+    /** 契约 #s：落盘的 msg.usage 里未建模的键（旧数据无损往返；D 的 UsageStoreCodec 读写）。B 不用填 */
+    val extras: JsonObject = EmptyJson,
 )
 
 /**

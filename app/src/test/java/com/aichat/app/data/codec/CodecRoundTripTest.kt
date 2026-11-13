@@ -56,14 +56,14 @@ class CodecRoundTripTest {
           "personaName":"侦探","personaEmoji":"🕵️","format":"oplog-v1","plugins":{"rpcache":{"state":{"chapters":[{"no":1,"content":"x"}]}}},
           "affect":{"mood":"calm"},"ledger":[{"id":"f1"}],"worldRef":{"id":"w"},"worldLog":[{"at":1}],"kb":{},
           "messages":[{"id":"u1","role":"user","content":"你好","createdAt":1,"images":["data:x"],"files":[{"id":"f","name":"a.pdf","text":"t"}]},
-            {"id":"a1","role":"assistant","content":"hi","createdAt":2,"usage":{"prompt":10,"completion":5,"hit":8,"miss":2,"costUsd":0.000123,"raw":{"x":1},"cacheSupported":true,"source":"deepseek"},
+            {"id":"a1","role":"assistant","content":"hi","createdAt":2,"usage":{"prompt":10,"completion":5,"hit":8,"miss":2,"cost":0.000123,"raw":{"x":1},"cacheSupported":true,"source":"deepseek"},
              "versions":[{"content":"old"},null],"vi":1,"truncated":true,"reasoning":"r","pluginStatus":{"rpcache":{"hit":0.8}},"_conflicts":[{"content":"z"}]},
             {"id":"a2","role":"assistant","content":[{"type":"text","text":"array content"}],"createdAt":"3"}]}""")
         val c = ConversationCodec.decode(o)
         assertSem(o, ConversationCodec.encode(c))
         assertEquals(setOf("affect", "ledger", "worldRef", "worldLog", "kb"), c.rpState.keys)
         val u = c.messages[1].usage!!
-        assertEquals(8L, u.hit); assertEquals(0.000123, u.costUsd!!, 0.0); assertNotNull(u.raw)
+        assertEquals(8L, u.hit); assertEquals(0.000123, u.costUsd!!, 0.0); assertNull(u.raw); assertTrue("未建模键进 extras", u.extras.containsKey("raw"))
         // 改正文：只有 content 变
         val e = ConversationCodec.encode(c.copy(messages = c.messages.mapIndexed { i, m -> if (i == 0) m.copy(content = "改") else m }))
         assertEquals(JsonPrimitive("改"), e["messages"]!!.jsonArray[0].jsonObject["content"])
@@ -111,5 +111,17 @@ class CodecRoundTripTest {
         val al = KeyOrder.align(next, prev).jsonObject
         assertEquals(listOf("id", "messages", "title"), al.keys.toList())
         assertEquals(listOf("id", "role", "content", "createdAt"), al["messages"]!!.jsonArray[0].jsonObject.keys.toList())
+    }
+
+    /** 契约 #s：msg.usage 的 cost 键（JS 名）、未建模键无损；Usage.raw（服务商原始 usage）不落盘 */
+    @Test fun usageCostKeyExtrasAndRawNotPersisted() {
+        val stored = Js.toJsonObject(Js.parse("""{"prompt":10,"completion":2,"hit":8,"miss":2,"cacheSupported":true,"source":"deepseek","cost":0.0012,"futureKey":{"a":1}}"""))!!
+        val u = UsageStoreCodec.decode(stored)
+        assertEquals(0.0012, u.costUsd!!, 0.0)
+        assertEquals(Js.stringify(Js.sortKeys(Js.fromJson(stored))), Js.stringify(Js.sortKeys(Js.fromJson(UsageStoreCodec.encode(u)))))
+        val fromProvider = com.aichat.app.domain.model.Usage(prompt = 10, completion = 2, costUsd = 0.5,
+            raw = Js.toJsonObject(Js.parse("""{"prompt_tokens":10,"completion_tokens":2,"cost":0.5}""")))
+        val enc = UsageStoreCodec.encode(fromProvider)
+        assertEquals(listOf("prompt", "completion", "cost"), enc.keys.toList())
     }
 }

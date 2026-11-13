@@ -62,9 +62,9 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
                      private val now: () -> Long = System::currentTimeMillis) : ChatEngine {
     private val running = ConcurrentHashMap<String, Job>()
 
-    override fun send(convId: String, userText: String, images: List<String>): Flow<StreamEvent> = flow {
+    override fun send(convId: String, userText: String, images: List<String>, files: List<FileAttachment>): Flow<StreamEvent> = flow {
         val conv = repo.load(convId) ?: run { emit(StreamEvent.Error(0, "对话不存在", "")); return@flow }
-        val user = Message(fakeId("m"), Role.USER, userText, now(), images = images)
+        val user = Message(fakeId("m"), Role.USER, userText, now(), images = images, files = files.map { com.aichat.app.data.codec.AttachmentCodec.encode(it) })
         val title = if (conv.messages.isEmpty() && conv.title == "新对话") userText.lineSequence().first().take(24).ifBlank { "新对话" } else conv.title
         repo.save(conv.copy(title = title, messages = conv.messages + user))
         val bot = Message(fakeId("m"), Role.ASSISTANT, "", now())

@@ -20,7 +20,7 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 100                  // 原生 v1：> g胖 的 v0.29.0 (90)
-        versionName '1.0.0-dev'
+        versionName '1.0.0-alpha1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 

@@ -113,7 +113,7 @@ class ChatControllerTest {
         c.selectVersion(aid, 0); until { c.state.value.conv!!.messages[1].content == first }
         m = repo.load(conv0.id)!!.messages[1]
         assertEquals(first, m.content)
-        // vi 1→0 目前不落盘（D 的 codec/diff 丢默认值，见 DataLayerRegressionTest），修好后加回：assertEquals(0, m.vi)
+        assertEquals(0, m.vi)
     }
 
     @Test fun regenerateEarlierAsksConfirmAndBranches() = runBlocking {
@@ -156,10 +156,10 @@ class ChatControllerTest {
         val m1 = repo.load(c.state.value.convId!!)!!.messages[1]
         assertEquals(m0.id, m1.id)
         assertTrue(m1.content.startsWith(m0.content)); assertTrue(m1.content.contains("（续写）"))
-        // truncated true→false 目前不落盘（同上，见 DataLayerRegressionTest），修好后加回：assertFalse(m1.truncated)
+        assertFalse(m1.truncated)
     }
 
-    @Test fun filesArePatchedBackToRawText() = runBlocking {
+    @Test fun filesGoToEngineAsAttachments() = runBlocking {
         val (c, repo) = make()
         val f = JsonObject(mapOf("name" to JsonPrimitive("a.txt"), "size" to JsonPrimitive(5), "kind" to JsonPrimitive("text"),
             "text" to JsonPrimitive("文件内容"), "total" to JsonPrimitive(4), "truncated" to JsonPrimitive(false)))
@@ -168,7 +168,7 @@ class ChatControllerTest {
         assertEquals("总结一下", conv.messages[0].content)
         assertEquals(listOf(f), conv.messages[0].files)
         assertEquals("总结一下", conv.title)
-        assertTrue("模型看到了文件", conv.messages[1].content.contains("a.txt") || conv.messages[1].content.contains("文件内容"))
+        // 契约 #m：文件交给引擎（files 参数），请求时由引擎展开（B 的 ChatEngineTest 覆盖）；UI 不再把文件文字并进正文
     }
 
     @Test fun newConversationReusesEmptyAndSelectsLatestOnStart() = runBlocking {
@@ -209,7 +209,7 @@ class ChatControllerTest {
         c.setConversationPlugin("rpcache", false)
         until { (c.state.value.conv?.extras?.get("plugins") as? JsonObject)?.get("rpcache") != null }
         val conv = repo.load(c.state.value.convId!!)!!
-        assertEquals(JsonPrimitive("t-1"), conv.extras["templateId"])
+        assertEquals("t-1", conv.templateId)   // 契约 #o：类型化字段
         assertEquals(false, com.aichat.app.ui.settings.PluginToggles.convEnabled(conv.extras, "rpcache"))
     }
 
@@ -271,8 +271,7 @@ class ChatControllerTest {
         del.run(); until { Versions.count(c.state.value.conv!!.messages[1]) == 2 }
         val keep = c.planKeepOnly(aid) as com.aichat.app.ui.chat.Plan.Ask
         keep.run(); until { c.state.value.toast == "已只保留当前版本" }
-        // versions → [] 目前不落盘（D 的默认值回写问题，见 DataLayerRegressionTest），修好后加回：
-        // assertTrue(repo.load(c.state.value.convId!!)!!.messages[1].versions.isEmpty())
+        assertTrue(repo.load(c.state.value.convId!!)!!.messages[1].versions.isEmpty())
         c.deleteMessage(aid); until { c.state.value.conv!!.messages.size == 1 }
         assertEquals(1, repo.load(c.state.value.convId!!)!!.messages.size)
     }

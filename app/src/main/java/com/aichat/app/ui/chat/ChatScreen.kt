@@ -224,8 +224,8 @@ fun ChatScreen(
                     }
                 }
                 ChatMounts.headerExtras?.invoke(conv, settings)
-                val tplName = (conv?.extras?.get("templateName") as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it.isNotEmpty() }
-                val tplEmoji = (conv?.extras?.get("templateEmoji") as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                val tplName = conv?.templateName?.takeIf { it.isNotEmpty() }
+                val tplEmoji = conv?.templateEmoji.orEmpty()
                 InputBar(input, { input = it }, st.draftImages, controller::setDraftImages, st.isStreaming,
                     onSend = { if (controller.send(input, st.draftImages, st.draftFiles)) { input = ""; controller.setDraftImages(emptyList()); controller.setDraftFiles(emptyList()) } },
                     onStop = controller::stop, onToast = controller::toast, modifier = Modifier.imePadding(),
@@ -297,7 +297,7 @@ fun ChatScreen(
     if (sheet == 1) PromptSheet(onPick = { t -> input = if (input.isEmpty()) t else input + (if (input.endsWith("\n")) "" else "\n") + t; sheet = 0 },
         onManage = { sheet = 0; onOpenSettings(SettingsDestination.Prompts) }, onDismiss = { sheet = 0 })
     if (sheet == 2) TemplateSheet(
-        currentTemplateId = (conv?.extras?.get("templateId") as? kotlinx.serialization.json.JsonPrimitive)?.content,
+        currentTemplateId = conv?.templateId,
         hasSystem = !conv?.systemPrompt.isNullOrEmpty(),
         onApply = { t, text -> sheet = 0; plan = controller.planApplyTemplate(t?.id, t?.name, t?.emoji, text, t?.skill == true) },
         onManage = { sheet = 0; onOpenSettings(SettingsDestination.Templates) }, onDismiss = { sheet = 0 })

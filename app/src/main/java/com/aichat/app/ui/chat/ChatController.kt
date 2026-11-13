@@ -201,12 +201,12 @@ class ChatController(
         val c = _state.value.conv
         val rp = rpOn(c)
         if (tplId == null) {
-            if (c?.systemPrompt.isNullOrEmpty() && c?.extras?.get("templateId") == null) return Plan.Toast("当前没有系统提示词")
+            if (c?.systemPrompt.isNullOrEmpty() && c?.templateId == null) return Plan.Toast("当前没有系统提示词")
             val go = { setConversationSystem("", null, null, null, JsonObject(mapOf("kind" to JsonPrimitive("clear")))); toast("已清空本对话的系统提示词") }
             if (rp) return Plan.Ask("清空系统提示词？", RP_WARN, "仍然清空") { go() }
             go(); return Plan.Done
         }
-        if (text == (c?.systemPrompt ?: "") && (c?.extras?.get("templateId") as? JsonPrimitive)?.content == tplId) return Plan.Toast("已经在使用「$name」")
+        if (text == (c?.systemPrompt ?: "") && c?.templateId == tplId) return Plan.Toast("已经在使用「$name」")
         val go = {
             setConversationSystem(text, tplId, name, emoji, JsonObject(mapOf("kind" to JsonPrimitive("template"), "name" to JsonPrimitive(name ?: ""))))
             toast(if (skill) "已启用「$name」：直接发一句想法或贴旧设定；之后可说「精修一下」「加秘密」等"
@@ -216,19 +216,16 @@ class ChatController(
         go(); return Plan.Done
     }
 
-    /** app.js setConvSystem：模板键 templateId/templateName/templateEmoji 是旧版对话 JSON 顶层键（经 extras 原样往返）。
+    /** app.js setConvSystem：模板键 templateId/templateName/templateEmoji 是旧版对话 JSON 顶层键（D 契约 #o 类型化字段）。
      *  RP 对话且规范化后内容变了 → RPCache.explicitBaseUpdate（C 的钩子）。JS 只在对话已有消息或 plugins 时保存；这里没有对话就先建一个 */
     fun setConversationSystem(text: String, templateId: String?, templateName: String?, templateEmoji: String?,
                               cause: JsonObject = JsonObject(emptyMap())) {
         scope.launch {
             val c = _state.value.conv ?: deps.chats.create(currentTarget()?.first?.id ?: "", currentTarget()?.second ?: "")
             val before = c.systemPrompt ?: ""
-            val ex = c.extras.toMutableMap()
-            if (templateId != null) {
-                ex["templateId"] = JsonPrimitive(templateId); ex["templateName"] = JsonPrimitive(templateName ?: "")
-                ex["templateEmoji"] = JsonPrimitive(templateEmoji ?: "")
-            } else { ex.remove("templateId"); ex.remove("templateName"); ex.remove("templateEmoji") }
-            var nc = c.copy(systemPrompt = text, extras = JsonObject(ex))
+            // 契约 #o：模板键是 Conversation 的类型化字段（编码为顶层键；清除 = 三个都 null → 删键）
+            var nc = if (templateId != null) c.copy(systemPrompt = text, templateId = templateId, templateName = templateName ?: "", templateEmoji = templateEmoji ?: "")
+                else c.copy(systemPrompt = text, templateId = null, templateName = null, templateEmoji = null)
             if (rpOn(nc)) nc = ChatMounts.rp?.systemPromptChanged(nc, before, text, cause, now()) ?: nc
             _state.update { it.copy(convId = c.id) }
             save(nc, touch = false)
@@ -288,22 +285,14 @@ class ChatController(
         val target = currentTarget()
         if (target == null) { toast("请先在设置里添加服务商和模型"); return false }
         if (searchNotReady()) return false
-        // ChatEngine.send 没有 files 参数：先按旧版 Files.buildFileContext 把文件拼进本轮文字（模型看到的与旧版一致），
-        // 流结束后再把落盘的用户消息改回「原文 + files[]」。TODO(D/B)：契约加 files 参数后去掉这段。
-        val withText = files.filter { !(it["text"] as? JsonPrimitive)?.content.isNullOrEmpty() }
-        val scanned = files.filter { (it["scanned"] as? JsonPrimitive)?.content == "true" }
-        // 扫描版 PDF 的提示语与 app.js toRequestMsg 一致（页图已作为 images 一起发送）
-        val body2 = if (scanned.isEmpty()) body else "（附带的 " + scanned.joinToString("、") { "「" + ((it["name"] as? JsonPrimitive)?.content ?: "") + "」" } +
-            " 为扫描版 PDF，已转成图片附上，请识别图片中的文字。）\n" + body.ifEmpty { "请识别并概括这些图片中的内容。" }
-        val sent = if (withText.isNotEmpty()) FileText.buildFileContext(withText, body2) else body2
         scope.launch {
             val conv = _state.value.conv ?: deps.chats.create(target.first.id, target.second).also { c ->
                 _state.update { it.copy(convId = c.id, conv = c) }
             }
             val pending = Message(PENDING_USER_ID, Role.USER, body, now(), images = images, files = files)
-            startStream(conv.id, Streaming(conv.id, conv.messages, pending, startedAt = now(),
-                filePatch = if (files.isNotEmpty()) FilePatch(sent, body, files) else null)) {
-                deps.engine.send(conv.id, sent, images)
+            // 契约 #m：files 交给引擎存进用户消息 files[]，请求时由引擎按 app.js toRequestMsg 展开（扫描版 PDF 提示也在引擎）
+            startStream(conv.id, Streaming(conv.id, conv.messages, pending, startedAt = now())) {
+                deps.engine.send(conv.id, body, images, files.map { com.aichat.app.data.codec.AttachmentCodec.decode(it) })
             }
         }
         return true
