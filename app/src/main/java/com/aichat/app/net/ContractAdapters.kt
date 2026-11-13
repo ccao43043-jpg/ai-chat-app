@@ -21,7 +21,16 @@ data class NetOptions(
     val orSort: String? = null,               // JS: opts.orSort（null = 取 provider.orSort）
     val orGemini: Boolean = false,            // gcache 对本请求生效：不写 session_id
     val orMiniMax: Boolean = false,           // mmcache 对本请求生效：不写 session_id
-    val routePrices: List<JsonObject> = emptyList(),   // TODO(B-M2 路由)：Router.chooseUpstream 移植后接入
+    val routePrices: List<JsonObject> = emptyList(),   // [{slug,pMiss,pHit,ok,completion,latencyMs,calibScale?}]（ModelCatalog.endpointRoutePrices）
+    // ---- routePrices 分支的其余 JS opts（routerState/routerModel/routerModelState/routeCurrent/prefixTokens/routerOpts/onRouteChosen） ----
+    // TODO(D 契约 #2)：这些不进 ChatOptions（含可变状态与回调）；ChatEngine 通常先用 OpenRouterRouting.plan 选好 slug 再走 routeSlug。
+    val routerState: Router.State? = null,
+    val routerModel: String? = null,
+    val routerModelState: Router.ModelState? = null,
+    val routeCurrent: String? = null,
+    val prefixTokens: Double = 0.0,
+    val routerOpts: Router.Settings = Router.DEFAULTS,
+    val onRouteChosen: ((String) -> Unit)? = null,
 )
 
 /** 服务商登记的 baseUrl（约定 #5；旧版 SecretStore r:<id> = baseUrl\nauthType）。null = 未登记。 */

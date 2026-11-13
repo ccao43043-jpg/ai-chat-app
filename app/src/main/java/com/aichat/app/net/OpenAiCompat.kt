@@ -18,7 +18,7 @@ import kotlinx.serialization.json.put
  * xiaomi / openrouter / custom）。键的插入顺序与 JS 完全相同，body 用 [Js.stringify] 输出，与 JSON.stringify 逐字一致。
  *
  * ChatOptions 待加的 opts（cacheSystem / cacheAffinity / orSort / orGemini / orMiniMax / routePrices）暂由 [NetOptions] 传入。
- * routePrices / chooseUpstream 分支等 Router 移植后接入；现在只支持 providerOrder / routeSlug 钉定。
+ * OpenRouter 钉上游优先级同 JS：providerOrder[0] → routeSlug → routePrices 经 [Router.chooseUpstream] 现场选（选中回调 onRouteChosen）。
  * bodyPatch 按 RFC 7386 合并（[JsonMergePatch]）。
  * 不含认证头：由 [AuthInjector] 注入。
  */
@@ -87,6 +87,17 @@ object OpenAiCompat {
                 body["provider"] = ProviderRules.buildProviderField(opts.providerOrder[0]); pinned = true
             } else if (affinity && !opts.routeSlug.isNullOrEmpty()) {
                 body["provider"] = ProviderRules.buildProviderField(opts.routeSlug); pinned = true
+            } else if (affinity && ext.routePrices.isNotEmpty()) {
+                // JS：st = routerState&&routerModel ? ensureModel(…)（会写入状态树） : (routerModelState || {})
+                val st = if (ext.routerState != null && !ext.routerModel.isNullOrEmpty()) Router.ensureModel(ext.routerState, ext.routerModel)
+                    else ext.routerModelState
+                val chosen = Router.chooseUpstream(ext.routePrices, st, ext.routeCurrent?.takeIf { it.isNotEmpty() } ?: st?.current,
+                    ext.prefixTokens, ext.routerOpts)
+                if (!chosen.isNullOrEmpty()) {
+                    body["provider"] = ProviderRules.buildProviderField(chosen)
+                    ext.onRouteChosen?.invoke(chosen)
+                    pinned = true
+                }
             }
             if (!pinned) ProviderRules.openRouterSortField(provider, ext.orSort)?.let { body["provider"] = it }
             // v0.28.7：稳定 session_id；gcache / mmcache 生效时由插件经 bodyPatch 写自己的 session_id（下方合并时覆盖）
