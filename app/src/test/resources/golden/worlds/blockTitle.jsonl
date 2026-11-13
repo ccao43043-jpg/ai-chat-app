@@ -1,0 +1,4 @@
+{"in":["world"],"out":"世界观"}
+{"in":["opening"],"out":"opening"}
+{"in":["bogus"],"out":"bogus"}
+{"in":[null],"out":null}

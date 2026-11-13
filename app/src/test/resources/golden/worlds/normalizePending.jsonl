@@ -1,0 +1,3 @@
+{"in":[null],"out":{}}
+{"in":["x"],"out":{}}
+{"in":[{"world":"a\r\n","character":"","rules":0,"style":5,"bogus":"z"}],"out":{"world":"a","rules":"0","style":"5"}}

@@ -354,6 +354,199 @@ if (want('charcard')) {
   ['', 'YWJj', 'YWJ', 'YW', 'Y', '5Lit5paH8J+YgA==', '5Lit5paH8J-YgA', 'YW Jj\n', 'YWJj=YWJj', '##YW*Jj', '/w==', '7aCA', null, 123, '77u/YQ=='].forEach(s => rec('charcard', 'b64decode', [s], CC.b64decode(s)));
 }
 
+// ───────── 分段文本素材（rpstate / autochar / worlds 共用） ─────────
+const HEADS = ['【世界观】', '【角色卡】', '【RP规则】', '【输出格式】', '【示例对白】', '【禁止事项】', '【写作风格】', '【开场白】', '【剧情】', '【精修说明】', '【主要NPC】', '【备注】',
+  '1. 世界观', '2、角色卡', '一、世界观', '二、角色设定', '**世界观**', '**角色卡**：', '### 【RP规则】', '## 规则', '# 文风', '[角色卡]', '［世界设定］', '〔开场〕', '规则：不许 OOC', '文风：', '世界观',
+  '  【角色】  附注', '**【人物设定】**', '#### 剧情', '### 势力', '【rp 规则】', 'RP  规则：', '【背景设定】 雨港', '十一、开场白', '【 剧情大纲 】', '**[主线剧情]**', '【一二三四五六七八九十十一十二十三】'];
+const BODY = ['- 雨港：常年下雨的港口城', '- 姓名：林晚', '- 名字：**艾琳**（Erin）', '- 角色名: Mira。', '- 名称：灰鸦/乌鸦', '- 28 岁私家侦探', '用户：好累', '角色：「先喝口茶。」', '- 禁止 OOC', '- 短句  ',
+  '*雨夜，门被推开*「……又是新面孔。」', '', '  ', '\t', '- 性格：冷淡、骄傲、嘴硬心软', '外貌：银发', '身份：古堡主人，吸血鬼伯爵，守护着一个秘密。', '```markdown', '```', '<think>想想【角色卡】</think>', '</think>', '<thinking>\n多行\n</thinking>'];
+function sectionText() {
+  const n = ri(14); const out = [];
+  if (rnd() < 0.1) out.push(pick(['<think>先想想</think>', '前言</think>', '好的，以下是设定：']));
+  for (let i = 0; i < n; i++) { out.push(pick(HEADS)); for (let j = ri(4); j > 0; j--) out.push(rnd() < 0.15 ? phrase(1 + ri(4)) : pick(BODY)); }
+  return out.join(rnd() < 0.1 ? '\r\n' : '\n');
+}
+
+// ───────── rpcache 状态核心 + 分段解析 ─────────
+if (want('rpstate')) {
+  rnd = mulberry32(20261116);
+  const RP = require(WWW + '/rpcache.js');
+  rec('rpstate', 'newState', [], RP.newState());
+  const states = [null, undefined, 5, 'x', {}, { blocks: [{ id: 'world', version: '3', content: 7, history: 'h', updatedAt: 9, restoredFrom: 2 }, null, { id: 'memory', content: 'm', restoredFrom: null }] },
+    { settings: { max_context: 100000, summary: { trigger_tokens: 30000 } } }, { settings: { max_context: 50000 } }, { settings: { max_context: 100000, auto_budget: false, budget_mode: 'greedy', lagrange_layers: 'x', min_history_ratio: '2' } },
+    { settings: { min_history_ratio: -1, lore: { scanDepth: 5 }, extra: 1 } }, { settings: { min_history_ratio: 'abc' } }, { summaries: [{ content: '  旧摘要\r\n', coveredIds: ['a'], at: 5, rounds: 3.7, no: 2 }] },
+    { summaries: [{ content: '' }], chapterSeq: 4 }, { chapters: [{ no: 7 }, { no: '9' }], chapterSeq: 2 }, { calib: 0.4 }, { calib: 2.5 }, { calib: '1.2' }, { window: { startId: 'm1' }, seq: 3.9, baseHash: 'h', custom: { a: 1 } },
+    { loreState: { turn: '4', entries: { e1: { stickyUntil: 2.5, cooldownUntil: '3', lastAnchorId: 'm' }, e2: null } } }, { loreState: 'bad' }, { staticVersion: -2.5, lastSummaryRound: 'q', archive: {} }];
+  states.forEach(st => rec('rpstate', 'normalizeState', [st === undefined ? null : st], RP.normalizeState(clone(st))));
+  [null, [], [{ content: '' }], [{ content: 'a' }, { content: ' b \n\n\n\n\n\nc', coveredIds: ['x'], no: 3 }]].forEach(x => rec('rpstate', 'migrateSummaries', [x], RP.migrateSummaries(clone(x))));
+  // setBlock / restoreBlock / syncBase 链
+  for (let k = 0; k < 25; k++) {
+    const init = rnd() < 0.5 ? null : { staticVersion: ri(3) };
+    let st = RP.normalizeState(init);
+    const ops = [];
+    for (let i = 0; i < 6 + ri(30); i++) {
+      const r = rnd();
+      if (r < 0.6) { const id = pick(['world', 'character', 'memory', 'delta', 'state', 'style', 'bogus']); const c = rnd() < 0.2 ? (RP.getBlock(st, id) || {}).content : (rnd() < 0.1 ? '  ' : phrase(1 + ri(4))); ops.push(['set', id, c === undefined ? null : c, i * 10 + (rnd() < 0.2 ? 0 : 1)]); }
+      else if (r < 0.75) { const id = pick(['world', 'memory']); const b = RP.getBlock(st, id); ops.push(['restore', id, null, i, b && b.history.length && rnd() < 0.8 ? pick(b.history).version : 99]); }
+      else if (r < 0.9) ops.push(['base', null, rnd() < 0.3 ? '' : pick(['人设A', '人设B\r\n', ' 人设A '])]);
+      else ops.push(['explicit', null, pick(['x', 'y']), rnd() < 0.5 ? { kind: 'template', name: 'T' } : null, i]);
+      const op = ops[ops.length - 1];
+      try {
+        if (op[0] === 'set') st = RP.setBlock(st, op[1], op[2], op[3]).state;
+        else if (op[0] === 'restore') st = RP.setBlock(st, op[1], null, op[3], op[4]).state;
+        else if (op[0] === 'base') st = RP.syncBase(st, op[2]);
+        else st = RP.explicitBaseUpdate(st, op[2], op[3], op[4]).state;
+      } catch (e) { op.push({ throws: normErr(e) }); }
+    }
+    rec('rpstate', 'stateChain', [init, ops], st);
+  }
+  rec('rpstate', 'markHistoryCause', [null, null, null], RP.markHistoryCause(null));
+  rec('rpstate', 'markHistoryCause', [{ seq: 2 }, { kind: 'regen' }, 5], RP.markHistoryCause({ seq: 2 }, { kind: 'regen' }, 5));
+  const secTexts = ['', null, '【世界观】\nA\n【角色卡】\nB', '【世界观】\nA\n【开场白】\nB', '【精修说明】\nA\n【备注】\nB', '## 世界观\nA\n#### 角色\nB\n### 角色\nC', '【世界观】x\n【世界观】y\n【角色】\n\n\n'];
+  for (let i = 0; i < 120; i++) secTexts.push(sectionText());
+  secTexts.forEach(t => rec('rpstate', 'parseSections', [t], RP.parseSections(t)));
+  for (let i = 0; i < 20; i++) {
+    const msgs = []; for (let j = ri(12); j >= 0; j--) msgs.push(pick([{ role: 'assistant', content: pick(secTexts) }, { role: 'user', content: pick(secTexts) }, { role: 'assistant', content: pick(secTexts), error: true }, null, { role: 'assistant', content: '' }]));
+    const lim = pick([undefined, 0, 1, 3, -1]);
+    rec('rpstate', 'findSectionMessage', [msgs, lim === undefined ? null : lim], RP.findSectionMessage(clone(msgs), lim));
+  }
+}
+
+// ───────── AutoChar（autochar.js；依赖 RPCache.parseSections） ─────────
+if (want('autochar')) {
+  rnd = mulberry32(20261117);
+  globalThis.RPCache = require(WWW + '/rpcache.js');
+  const A = require(WWW + '/autochar.js');
+  const texts = ['', null, '随便说点', '好的，我来帮你。'];
+  for (let i = 0; i < 150; i++) texts.push(sectionText());
+  ['1. 世界观\n- 中世纪城堡\n2. 角色卡\n- 姓名：艾琳\n- 性格：冷淡\n3. 开场白\n夜色降临。', '**世界观**\n- 城堡\n**角色卡**：\n- **姓名**：艾琳（Erin）\n- 年龄：300', '```markdown\n## 【世界观】\n- 城堡\n## 【角色卡】\n- 名字：艾琳\n```',
+    '<think>我先想想 【角色卡】 应该…</think>\n【世界观】\n- 城堡\n【角色卡】\n- 姓名：艾琳', '一、世界观\n- 城堡\n二、角色卡\n- 姓名：艾琳，女', '【角色卡】\n- 姓名：艾琳\n- 性格：冷淡、骄傲、嘴硬心软', '姓名：艾琳\n年龄：三百岁\n性格：冷淡、骄傲，其实很孤独。身份：古堡主人，吸血鬼伯爵，守护着一个秘密。',
+    '【角色卡】\n- 姓名：艾琳\n规则：不许 OOC\n【世界观】\n- 城堡', '【世界观】\n- 废土\n【剧情】\n- 寻找净水厂\n【角色卡】\n- 姓名：灰鸦\n【开场白】\n风沙很大。'].forEach(t => texts.push(t));
+  texts.forEach(t => { rec('autochar', 'normalize', [t], A.normalize(t)); const f = A.parse(t); rec('autochar', 'parse', [t], f); rec('autochar', 'fromUserText', [t], A.fromUserText(t));
+    if (f) { rec('autochar', 'charName', [f], A.charName(f)); rec('autochar', 'toPromptAppend', [f], A.toPromptAppend(f)); } });
+  [null, 0, {}, { character: '**姓名**：__林晚__。 ' }, { character: '名称: A$&B, 其他' }, { character: '角色名 ： ' }].forEach(f => rec('autochar', 'charName', [f], A.charName(f)));
+  const sps = ['', null, '请以 {{角色名}} 的身份，与 {{用户名}} 进行扮演。\n\n【世界背景】\n{{世界背景}}\n\n【规则】\n- 不 OOC\n- {{规则}}', '{{ char }} 和 {{USER}}\n- 设定：{{设定|默认值}}\n【空段】\n\n\n【有内容】\nx\n\n\n\ny{{}}',
+    '名字：{{角色}}\n  - 背景描述很长很长很长很长很长很长：{{x}}\n【A】\n【B】\n  \n'];
+  sps.forEach(sp => [null, { character: '- 姓名：艾琳' }, { character: '- 姓名：$1$$' }].forEach(f => rec('autochar', 'fillLeftovers', [sp, f], A.fillLeftovers(sp, f))));
+  [[null, null, null], ['我叫小林', '', ''], ['x'.repeat(7000), 'S'.repeat(7000), '  自定义规则  '], ['想玩末日', '系统', '   ']].forEach(a => rec('autochar', 'buildPrompt', a, A.buildPrompt(...a)));
+  const sysPs = ['', '请以 角色 的身份…\n【角色】\n', '- 设定：冷淡的骑士', '  - 设定： {{x}}', '【角色卡】\n  艾琳', '【角色卡】\n【世界观】', '【主要角色】\n艾琳：冷淡的吸血鬼', '【主要角色】\n艾琳：{{设定}}', '【主要角色】\n艾琳：a',
+    '主要角色：艾琳——伯爵', '主要角色：艾琳—— {{x}}', '【角色设定】\n冷淡的吸血鬼伯爵', '【人设】\n{{人设}}', '【人物设定】\nx'];
+  const tpls = [{ id: 't-x', tags: ['角色扮演'] }, { id: 't-y', tags: ['rp'], skill: true }, { id: 't-z', tags: ['General', 7] }, { id: 't-w' }];
+  for (let i = 0; i < 120; i++) {
+    const conv = { templateId: pick(['t-rp-immersive', 't-rp-narrator', 't-rp-longform', 't-rp-cardgen', 't-general', 't-x', 't-y', 't-z', 't-w', '', null]), systemPrompt: pick(sysPs), messages: [] };
+    const nm = ri(4); for (let j = 0; j < nm; j++) conv.messages.push(pick([{ role: 'user', content: '我想玩一个吸血鬼城堡的故事' }, { role: 'user', content: '  ' }, { role: 'assistant', content: '*夜色*' }, { role: 'assistant', content: ' ' }, { role: 'assistant', content: 'x', error: 'e' }, { role: 'user', content: 'y', imageGen: true }, { role: 'user', content: 'z', error: true }]));
+    if (rnd() < 0.15) conv.autoChar = pick([{ asked: true }, { status: 'done' }, { status: 'pending' }]);
+    if (rnd() < 0.15) conv.plugins = { rpcache: { state: { blocks: [pick([{ id: 'character', content: ' x ' }, { id: 'character', content: '  ' }, { id: 'world', content: 'w' }, null])] } } };
+    const settings = pick([null, {}, { autoCharMode: 'off' }, { autoCharMode: 'ask' }, { autoCharGen: false }, { autoCharMode: 'bogus' }]);
+    rec('autochar', 'shouldOffer', [conv, tpls, settings], A.shouldOffer(conv, tpls, settings));
+    rec('autochar', 'hasCharacter', [conv], A.hasCharacter(conv));
+    rec('autochar', 'isRpTemplate', [conv, tpls], A.isRpTemplate(conv, tpls));
+    rec('autochar', 'mode', [settings], A.mode(settings));
+  }
+}
+
+// ───────── 世界模板（worlds.js；RPCache = 真实 rpcache.js；Templates 用固定替身） ─────────
+if (want('worlds')) {
+  rnd = mulberry32(20261118);
+  const RP = require(WWW + '/rpcache.js'); globalThis.RPCache = RP;
+  const A = require(WWW + '/autochar.js');
+  const W = require(WWW + '/worlds.js');
+  const FAKE_T = { defaultTemplates: () => [{ id: 't-general', name: 'G' }, { id: 't-rp-immersive', name: '沉浸式 RP', content: '系统 {{date}}' }], applyToConv: (c, t) => Object.assign({}, c, { templateId: t.id, templateName: t.name, systemPrompt: t.content }) };
+  const blk = () => { const b = {}; W.BLOCK_IDS.forEach(id => { if (rnd() < 0.6) b[id] = rnd() < 0.15 ? pick(['', '  ', null, 0]) : (rnd() < 0.3 ? ' ' : '') + phrase(1 + ri(4)) + (rnd() < 0.2 ? '\r\n\r\n\r\n\r\n\r\n\r\nx \t' : ''); }); return b; };
+  const world = () => {
+    const w = { blocks: blk() };
+    if (rnd() < 0.7) w.id = 'w-' + ri(5);
+    if (rnd() < 0.7) w.name = pick(['  星际港  ', '', '雨港', phrase(1)]);
+    if (rnd() < 0.5) w.emoji = pick(['🚀🚀🚀🚀🚀', '  ', 'ab', '🌧']);
+    if (rnd() < 0.5) w.desc = pick([' 边陲 ', 5, '']);
+    if (rnd() < 0.5) w.greeting = pick(['  你好\r\n世界 ', '', '*雨夜*']);
+    if (rnd() < 0.5) w.version = pick([0, 1, 3, '4', -1, 2.7]);
+    if (rnd() < 0.4) w.changelog = pick([[], 'x', [{ version: 1, at: 5, note: '创建' }, { version: 0 }, null, { version: '2', note: 7 }]]);
+    if (rnd() < 0.4) { w.updatedAt = pick([0, 100, null]); w.createdAt = pick([0, 50]); }
+    return w;
+  };
+  const worlds = []; for (let i = 0; i < 60; i++) worlds.push(world());
+  worlds.push(null, {}, { blocks: 'x' });
+  worlds.forEach(w => { rec('worlds', 'normalizeWorld', [w], W.normalizeWorld(clone(w))); rec('worlds', 'filledBlockCount', [w], W.filledBlockCount(clone(w))); rec('worlds', 'formatWorldSections', [w], W.formatWorldSections(clone(w))); });
+  for (let i = 0; i < 40; i++) { const t = rnd() < 0.5 ? phrase(ri(5)) : pick(['', ' a\r\n', '\uFEFFx', 'a\n\n\n\n\n\nb']); rec('worlds', 'hashBlock', [t], W.hashBlock(t)); }
+  rec('worlds', 'hashBlock', [null], W.hashBlock(null));
+  // upsert / duplicate / remove 链
+  for (let k = 0; k < 15; k++) {
+    let list = []; const ops = [];
+    for (let i = 0; i < 3 + ri(8); i++) {
+      const r = rnd();
+      if (r < 0.6) { const item = rnd() < 0.5 && list.length ? Object.assign(clone(pick(list)), rnd() < 0.5 ? { blocks: blk() } : { name: 'renamed' }) : world(); const note = pick([null, '改了']); ops.push(['upsert', item, note]); list = W.upsert(list, clone(item), note); }
+      else if (r < 0.8) { const id = list.length && rnd() < 0.8 ? pick(list).id : 'nope'; ops.push(['dup', id]); list = W.duplicate(list, id); }
+      else { const id = list.length ? pick(list).id : 'nope'; ops.push(['remove', id]); list = W.remove(list, id); }
+    }
+    rec('worlds', 'listChain', [ops], list);
+  }
+  for (let i = 0; i < 20; i++) { const a = rnd() < 0.5 ? W.normalizeWorld(world()) : world(), b = rnd() < 0.5 ? a : world(); rec('worlds', 'blocksChanged', [a, b], W.blocksChanged(clone(a), clone(b))); }
+  rec('worlds', 'blocksChanged', [null, null], W.blocksChanged(null, null));
+  // 开聊字段
+  const provs = [{ id: 'p1', models: ['m1', 'm2'] }, { id: 'p2' }];
+  [[{ providerId: 'p1' }, true], [{ providerId: 'p2' }, false], [{ providerId: 'px', model: 'mx' }, true], [null, false], [{ model: 'only' }, true]].forEach(([fb, useT]) => {
+    const w = pick(worlds); rec('worlds', 'conversationFromWorld', [w, provs, fb, useT], W.conversationFromWorld(clone(w), provs, fb, useT ? FAKE_T : null)); });
+  // 套用到对话 / 同步 / pending / 回滚（真实 RPCache）
+  const conv0 = () => ({ id: 'c1', systemPrompt: pick(['', '系统人设']), messages: [], plugins: rnd() < 0.5 ? { other: { x: 1 } } : undefined });
+  for (let k = 0; k < 30; k++) {
+    const ops = []; let conv = conv0(); const at0 = 1000 + k;
+    let w = W.normalizeWorld(Object.assign(world(), { id: 'w-1' }));
+    ops.push(['applyWorld', conv, w, at0]);
+    let r = W.applyWorldToConversation(clone(conv), clone(w), RP, at0); conv = r.conv;
+    const steps = []; const localIds = [];
+    for (let i = 0; i < 4 + ri(10); i++) {
+      const q = rnd(); const at = at0 + 100 * (i + 1);
+      if (q < 0.3) { // 本地改块
+        const id = pick(W.BLOCK_IDS), c = phrase(1 + ri(3)); steps.push(['local', id, c, at]); localIds.push(id);
+        conv = Object.assign({}, conv, { plugins: Object.assign({}, conv.plugins, { rpcache: Object.assign({}, conv.plugins.rpcache, { state: RP.setBlock(RP.normalizeState(conv.plugins.rpcache.state), id, c, at).state }) }) });
+      } else if (q < 0.55) { // 模板更新
+        const nb = Object.assign({}, w.blocks); const id = localIds.length && rnd() < 0.6 ? pick(localIds) : pick(W.BLOCK_IDS); nb[id] = rnd() < 0.3 ? '' : phrase(1 + ri(3));
+        if (rnd() < 0.4) { const id2 = pick(W.BLOCK_IDS); nb[id2] = (conv.plugins.rpcache.state.blocks.find(b => b.id === id2) || {}).content || ''; }
+        w = W.upsert([w], Object.assign({}, w, { blocks: nb }))[0]; steps.push(['world', w]);
+        rec('worlds', 'detectDrift', [conv, w, null], W.detectDrift(clone(conv), clone(w), W.getConvBlocks(clone(conv), RP)));
+        rec('worlds', 'shouldShowDrift', [conv, w], W.shouldShowDrift(clone(conv), clone(w), W.getConvBlocks(clone(conv), RP)));
+        const rep = W.detectDrift(clone(conv), clone(w), W.getConvBlocks(clone(conv), RP)); rec('worlds', 'formatDriftMessage', [rep, null], W.formatDriftMessage(rep));
+      } else if (q < 0.8) { const mode = pick(['merge', 'merge', 'overwrite', 'skip', undefined]); steps.push(['sync', mode === undefined ? null : mode, at]); conv = W.applySyncToConversation(clone(conv), clone(w), RP, { mode, at }).conv; }
+      else if (q < 0.9) { const id = pick(W.BLOCK_IDS.concat(Object.keys(conv.worldPending || {}))); steps.push(['pending', id, at]); conv = W.applyPendingBlock(clone(conv), id, RP, at).conv; }
+      else { const idx = pick([undefined, 0, -1, 99]); steps.push(['rollback', idx === undefined ? null : idx, at]); conv = W.rollbackWorldLog(clone(conv), RP, { index: idx, at }).conv; }
+    }
+    ops.push(['steps', steps]);
+    rec('worlds', 'syncChain', [ops], conv);
+  }
+  // 零散纯函数
+  for (let i = 0; i < 40; i++) { const pool = ['', 'a', 'b', ' a ', 'a\r\n', null]; const a = [pick(pool), pick(pool), pick(pool)]; rec('worlds', 'merge3', a, W.merge3(...a)); }
+  const refs = [null, 'x', {}, { id: 5, version: '3', blockHash: { world: 123, character: '', rules: null, bogus: 'z' }, syncedAt: 9 }, { blockHash: 'x' }];
+  refs.forEach(r => rec('worlds', 'normalizeWorldRef', [r], W.normalizeWorldRef(clone(r))));
+  [null, 'x', { world: 'a\r\n', character: '', rules: 0, style: 5, bogus: 'z' }].forEach(p => rec('worlds', 'normalizePending', [p], W.normalizePending(clone(p))));
+  ['world', 'opening', 'bogus', null].forEach(id => { rec('worlds', 'sectionTitle', [id], W.sectionTitle(id)); rec('worlds', 'blockTitle', [id], W.blockTitle(id)); });
+  rec('worlds', 'formatDriftMessage', [null, null], W.formatDriftMessage(null, null));
+  rec('worlds', 'formatDriftMessage', [{ ids: ['world', 'bogus'], classified: [] }, { version: 2.9 }], W.formatDriftMessage({ ids: ['world', 'bogus'], classified: [] }, { version: 2.9 }));
+  rec('worlds', 'planSync', [null, {}, null, null], W.planSync(null, {}, null, null));
+  rec('worlds', 'planSync', [{ worldRef: { id: '', version: 1, blockHash: {} } }, { id: 'w', blocks: {} }, null, 'skip'], W.planSync({ worldRef: { id: '', version: 1, blockHash: {} } }, { id: 'w', blocks: {} }, null, 'skip'));
+  rec('worlds', 'detectDrift', [{ worldRef: { id: '', version: 1, blockHash: {} } }, { id: 'w', blocks: {} }, null], W.detectDrift({ worldRef: { id: '', version: 1, blockHash: {} } }, { id: 'w', blocks: {} }));
+  rec('worlds', 'detectDrift', [{ worldRef: { id: 'w2', version: 1 }, _blocks: { world: 'a' } }, { id: 'w', blocks: { world: 'a' } }, null], W.detectDrift({ worldRef: { id: 'w2', version: 1 }, _blocks: { world: 'a' } }, { id: 'w', blocks: { world: 'a' } }));
+  [[{ greeting: 'x' }, { model: 'gpt', messages: [] }, 5, true], [{ greeting: 'x' }, { model: 'gpt', messages: [{}] }, 5, false], [{ greeting: '' }, {}, 5, false], [{ greeting: ' g ' }, { messages: null }, null, false], [{ greeting: 'x' }, null, 1, false]]
+    .forEach(([w, c, now, useId]) => rec('worlds', 'greetingMessage', [w, c, now, useId], W.greetingMessage(w, c, now, useId ? () => 'm-fixed' : undefined)));
+  rec('worlds', 'errors', [], [safe(() => W.applyWorldToConversation(null, {}, RP)), safe(() => W.applySyncToConversation({}, {}, null)), safe(() => W.applyPendingBlock(null, 'world', RP)), safe(() => W.rollbackWorldLog({}, null)),
+    safe(() => W.applyWorldToState({}, {}, 0, null)), W.rollbackWorldLog({ worldLog: [] }, RP), W.applyPendingBlock({ worldPending: {} }, 'world', RP, 1)]);
+  // 从全文填入
+  const FULL = ['【世界观】', '- 雨港：常年下雨的港口城', '### 势力', '- 码头公会', '【角色卡】', '- 姓名：林晚', '- 28 岁私家侦探', '【主要NPC】', '- 老周：线人', '【RP规则】', '- 不替玩家决定', '【输出格式】', '- 第三人称',
+    '【示例对白】', '用户：好累', '角色：「先喝口茶。」', '【禁止事项】', '- 禁止 OOC', '【写作风格】', '- 短句', '【开场白】', '*雨夜，门被推开*「……又是新面孔。」'].join('\n');
+  const texts = ['', null, '   ', FULL, '<think>先想想</think>\n1. 世界观\n魔法学院\n**角色设定**\n- 名字：艾琳\n### 【RP规则】\n不 OOC\n【精修说明】\n这里不导入\n文风：\n古风短句\n【开场】\n「早。」', '只是一段普通文字，没有标题。',
+    '【世界观】\n只有一段', '【世界观】\n一段\n【开场白】\n开场不算块', '【精修说明】\nA\n【备注】\nB', '【世界观】\nA\n【写作风格】\nB'];
+  for (let i = 0; i < 100; i++) texts.push(sectionText());
+  const forms = [{}, null, { name: '旧名', greeting: ' 旧开场 ', blocks: { world: '已有', character: '' }, extra: 1 }, { name: '林晚', greeting: '*雨夜，门被推开*「……又是新面孔。」', blocks: { world: '- 雨港：常年下雨的港口城\n### 势力\n- 码头公会' } }, { name: 'x', blocks: { world: '' } }];
+  texts.forEach(t => {
+    const p = W.parseWorldSections(t, { RPCache: RP, AutoChar: A }); rec('worlds', 'parseWorldSections', [t, true], p);
+    { const keep = globalThis.AutoChar; delete globalThis.AutoChar; rec('worlds', 'parseWorldSections', [t, false], W.parseWorldSections(t, { RPCache: RP })); globalThis.AutoChar = keep; }  // App 中 root.AutoChar 总在；这里去掉以覆盖姓名回退正则
+    if (p) { const f = pick(forms); rec('worlds', 'applySectionsToWorld', [f, p, { overwrite: false }], W.applySectionsToWorld(clone(f), p, { overwrite: false })); rec('worlds', 'applySectionsToWorld', [f, p, { overwrite: true }], W.applySectionsToWorld(clone(f), p, { overwrite: true }));
+      rec('worlds', 'formatWorldSections', [{ blocks: p.blocks, greeting: p.greeting }], W.formatWorldSections({ blocks: p.blocks, greeting: p.greeting })); }
+  });
+  rec('worlds', 'applySectionsToWorld', [{ a: 1 }, null, null], W.applySectionsToWorld({ a: 1 }, null, null));
+  rec('worlds', 'applySectionsToWorld', [{ name: ' n ', greeting: 'g' }, { blocks: { world: '  ', rules: 'r' }, greeting: ' g ', name: 'n' }, { overwrite: true }], W.applySectionsToWorld({ name: ' n ', greeting: 'g' }, { blocks: { world: '  ', rules: 'r' }, greeting: ' g ', name: 'n' }, { overwrite: true }));
+}
+
 // ───────── 写出 ─────────
 if (!ONLY.length) writeCollation();
 let total = 0, nfiles = 0, bad = 0;

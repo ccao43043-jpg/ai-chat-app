@@ -1,0 +1,5 @@
+{"in":[{"greeting":"x"},{"model":"gpt","messages":[]},5,true],"out":{"id":"m-fixed","role":"assistant","content":"x","model":"gpt","createdAt":5}}
+{"in":[{"greeting":"x"},{"model":"gpt","messages":[{}]},5,false],"out":null}
+{"in":[{"greeting":""},{},5,false],"out":null}
+{"in":[{"greeting":" g "},{"messages":null},null,false],"out":{"id":"m-mhwsoi68i","role":"assistant","content":"g","createdAt":1763000000000}}
+{"in":[{"greeting":"x"},null,1,false],"out":null}

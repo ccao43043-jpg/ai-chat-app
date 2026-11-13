@@ -1,0 +1,63 @@
+{"in":[{"blocks":{"world":" 地图","character":"钥匙\n","rules":"账本,雨夜","format":"红色外套二楼卧室；码头  sword","fewshot":"二楼卧室学校、\r\n\r\n\r\n\r\n\r\n\r\nx \t","prohibit":" 钟楼"},"id":"w-3","name":"","emoji":"🌧","desc":"","greeting":"","version":1,"changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}]}],"out":6}
+{"in":[{"blocks":{"world":0,"fewshot":"咖啡馆|车库|林雾学校","prohibit":"ArthurArthur\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"desc":" 边陲 ","updatedAt":100,"createdAt":0}],"out":3}
+{"in":[{"blocks":{"world":"Mira码头车库 ","character":0,"rules":"二楼卧室,Map castle_2！Arthur，","fewshot":"学校","prohibit":"Mira\t咖啡馆\t","style":0},"name":"","desc":5,"greeting":"*雨夜*","version":1,"changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}]}],"out":6}
+{"in":[{"blocks":{"world":"北境艾琳密道、Mira  ","character":"学校|","format":"旧矿、雨夜","fewshot":"守卫！码头\r\n\r\n\r\n\r\n\r\n\r\nx \t","style":0},"id":"w-1","name":"地图/","desc":"","greeting":"  你好\r\n世界 ","version":"4"}],"out":5}
+{"in":[{"blocks":{"world":"张燕","character":"学校  Map\t车库码头  ","rules":null,"fewshot":"车库|","prohibit":" 守卫\n","style":"钟楼  sword\n客厅　"},"id":"w-0","greeting":"  你好\r\n世界 "}],"out":5}
+{"in":[{"blocks":{"world":" 码头 账本，地图","rules":" 红色外套。地图  ","format":" 雨夜！","fewshot":" 学校","style":0},"id":"w-1","name":"","emoji":"  ","greeting":"","version":-1,"updatedAt":0,"createdAt":0}],"out":5}
+{"in":[{"blocks":{"world":"咖啡馆！林雾  ","rules":" 摩托车|sword摩托车\r\n\r\n\r\n\r\n\r\n\r\nx \t","fewshot":"Arthur林雾　守卫|艾琳、","prohibit":"key"},"name":"Mira\n","greeting":"*雨夜*","changelog":"x"}],"out":4}
+{"in":[{"blocks":{"world":"账本守卫  ","character":"守卫客厅/","rules":" Mira、学校，","prohibit":" 车库\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-4","name":"地图\t","version":1}],"out":4}
+{"in":[{"blocks":{"world":"雨夜,钟楼钟楼|","character":" 二楼卧室 castle_2,","rules":"账本；旧矿北境\n"},"name":"守卫。","greeting":"","version":-1,"changelog":[]}],"out":3}
+{"in":[{"blocks":{"character":" sword车库；账本","rules":" 二楼卧室/雨夜\t码头二楼卧室　","prohibit":" 学校Arthurkey"},"id":"w-2","emoji":"ab","greeting":"","version":1,"updatedAt":null,"createdAt":0}],"out":3}
+{"in":[{"blocks":{"character":" 二楼卧室","rules":"Mira！Arthur！","format":"","prohibit":" 客厅/钥匙。castle_2　\r\n\r\n\r\n\r\n\r\n\r\nx \t","style":"Arthur、\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","name":"Arthur　","emoji":"ab","desc":"","version":1}],"out":4}
+{"in":[{"blocks":{"world":"客厅！雨夜学校,地图\n","character":"Mira　钥匙key","format":"二楼卧室/","fewshot":"客厅/Arthur北境　艾琳  ","style":" 张燕张燕  Mira"},"name":"","emoji":"🚀🚀🚀🚀🚀","greeting":"  你好\r\n世界 ","version":1}],"out":5}
+{"in":[{"blocks":{"character":"红色外套、sword","fewshot":0,"prohibit":" 码头\n"},"id":"w-0","name":"  星际港  ","desc":5,"greeting":"*雨夜*","version":2.7}],"out":3}
+{"in":[{"blocks":{"world":" key二楼卧室北境,","character":" 咖啡馆、Map学校|","fewshot":"学校密道\r\n\r\n\r\n\r\n\r\n\r\nx \t","style":"Map、学校张燕钟楼　"},"desc":" 边陲 ","greeting":"  你好\r\n世界 ","version":0,"changelog":"x"}],"out":4}
+{"in":[{"blocks":{"world":"旧矿,码头车库\t艾琳","rules":"摩托车码头\t旧矿账本","fewshot":"客厅　\r\n\r\n\r\n\r\n\r\n\r\nx \t","style":" Arthur\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","emoji":"🚀🚀🚀🚀🚀","desc":"","greeting":"","changelog":[]}],"out":4}
+{"in":[{"blocks":{"format":" 摩托车/Map！码头castle_2　","fewshot":"","prohibit":" 二楼卧室|码头\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","emoji":"  ","greeting":"  你好\r\n世界 ","version":2.7,"changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}],"updatedAt":0,"createdAt":0}],"out":2}
+{"in":[{"blocks":{"character":"Mira\n码头\nMap车库","rules":" 北境\tsword！钥匙"},"id":"w-4","emoji":"  ","desc":5,"changelog":"x","updatedAt":null,"createdAt":0}],"out":2}
+{"in":[{"blocks":{"world":"雨夜；咖啡馆二楼卧室,雨夜；\r\n\r\n\r\n\r\n\r\n\r\nx \t","character":"Map 地图二楼卧室　","rules":"","fewshot":" 地图\nArthur ","style":"钟楼,\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-3","emoji":"  ","desc":"","greeting":"  你好\r\n世界 ","version":-1,"changelog":[]}],"out":4}
+{"in":[{"blocks":{"world":"密道　红色外套|Mira、","format":" 红色外套。红色外套旧矿","fewshot":" 红色外套密道，账本咖啡馆","prohibit":"Mira、车库　key　地图/\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-2","name":"守卫。","version":1,"changelog":"x","updatedAt":100,"createdAt":50}],"out":4}
+{"in":[{"blocks":{"character":" 张燕　","rules":"车库key张燕、","format":"Mira","fewshot":" Arthur","prohibit":" 摩托车、castle_2\t北境"},"id":"w-1","name":"  星际港  ","greeting":"  你好\r\n世界 "}],"out":5}
+{"in":[{"blocks":{"character":"红色外套,\r\n\r\n\r\n\r\n\r\n\r\nx \t","rules":"咖啡馆|旧矿","format":" 艾琳学校，"},"id":"w-0","name":"","greeting":"","updatedAt":null,"createdAt":50}],"out":3}
+{"in":[{"blocks":{"world":" 码头","character":"账本\t艾琳、","rules":" 二楼卧室钥匙。\r\n\r\n\r\n\r\n\r\n\r\nx \t","format":"castle_2Map,车库；旧矿，","fewshot":"钟楼,林雾、摩托车咖啡馆"},"name":"雨港","greeting":"  你好\r\n世界 ","updatedAt":100,"createdAt":50}],"out":5}
+{"in":[{"blocks":{"rules":" swordsword","format":" 学校  castle_2，红色外套/","fewshot":"车库守卫咖啡馆；守卫  \r\n\r\n\r\n\r\n\r\n\r\nx \t","prohibit":""},"id":"w-3","name":"雨港","emoji":"🚀🚀🚀🚀🚀","desc":5,"greeting":""}],"out":3}
+{"in":[{"blocks":{"fewshot":" 码头　客厅；","style":"摩托车、钥匙、张燕  张燕"},"id":"w-3","changelog":[]}],"out":2}
+{"in":[{"blocks":{"world":"摩托车客厅；艾琳/"},"id":"w-0","emoji":"  ","desc":5,"version":1}],"out":1}
+{"in":[{"blocks":{"world":" 旧矿|Mapcastle_2\t","character":" castle_2,密道　张燕sword","format":"  ","fewshot":"北境钥匙\ncastle_2\t艾琳、","prohibit":"Arthur账本　MiraArthur","style":" 密道。Miracastle_2  "},"id":"w-2","name":"雨港","emoji":"ab","updatedAt":0,"createdAt":50}],"out":5}
+{"in":[{"blocks":{"character":"客厅、\r\n\r\n\r\n\r\n\r\n\r\nx \t","rules":"Mira；","prohibit":"","style":"  "},"id":"w-4","name":"  星际港  ","emoji":"🚀🚀🚀🚀🚀","greeting":"","version":1}],"out":2}
+{"in":[{"blocks":{"world":" 北境\n雨夜/旧矿　学校","rules":"地图咖啡馆Map！","fewshot":" 林雾；castle_2|地图，雨夜|","prohibit":"艾琳！红色外套|\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","name":"雨港","desc":" 边陲 ","updatedAt":100,"createdAt":0}],"out":4}
+{"in":[{"blocks":{"fewshot":"码头\t","style":"守卫"},"desc":5,"greeting":"  你好\r\n世界 ","version":"4"}],"out":2}
+{"in":[{"blocks":{"world":null,"rules":" 摩托车旧矿 ","format":"守卫","prohibit":" 旧矿，摩托车\n林雾学校  ","style":"密道\t张燕　艾琳/"},"id":"w-4","name":"雨港","emoji":"ab"}],"out":4}
+{"in":[{"blocks":{"world":" 二楼卧室 钥匙","character":"账本\tArthur|艾琳二楼卧室\r\n\r\n\r\n\r\n\r\n\r\nx \t","fewshot":"旧矿"},"id":"w-2","desc":" 边陲 ","changelog":"x","updatedAt":0,"createdAt":50}],"out":3}
+{"in":[{"blocks":{"character":"地图。地图|钥匙\t雨夜","format":0,"fewshot":"守卫","prohibit":"林雾；摩托车|","style":"二楼卧室　"},"id":"w-0","emoji":"🚀🚀🚀🚀🚀","desc":5}],"out":5}
+{"in":[{"blocks":{"world":"  ","character":"林雾/钥匙Arthur艾琳","rules":"二楼卧室雨夜  castle_2","fewshot":" 码头；北境　雨夜！","prohibit":"key/学校  旧矿！","style":""},"id":"w-0","name":"  星际港  ","emoji":"ab","desc":5,"greeting":"*雨夜*","version":"4"}],"out":4}
+{"in":[{"blocks":{"world":"张燕/账本钟楼","character":" 旧矿\t","rules":"雨夜\n客厅/Arthur","format":"码头　Arthur、雨夜。二楼卧室；","fewshot":null,"prohibit":"","style":"客厅二楼卧室、key|"},"id":"w-3","name":"雨港","emoji":"🌧"}],"out":5}
+{"in":[{"blocks":{"world":" 红色外套。学校  学校咖啡馆","prohibit":"雨夜、Arthur！林雾！"},"id":"w-4","emoji":"🌧","greeting":"*雨夜*","changelog":[],"updatedAt":null,"createdAt":0}],"out":2}
+{"in":[{"blocks":{"format":0,"prohibit":"守卫、雨夜码头\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","name":"","emoji":"🚀🚀🚀🚀🚀","greeting":"","updatedAt":null,"createdAt":0}],"out":2}
+{"in":[{"blocks":{"world":"Mira摩托车，张燕\n","rules":" 密道","format":"钥匙\t密道 艾琳,\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-0","name":"Map","emoji":"ab","desc":"","greeting":"  你好\r\n世界 ","version":2.7,"changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}]}],"out":3}
+{"in":[{"blocks":{"world":" 钥匙sword车库|咖啡馆  ","rules":"张燕钥匙","fewshot":" 红色外套\n","prohibit":" 客厅\t客厅；张燕","style":"  "},"id":"w-1","desc":5,"version":1,"updatedAt":0,"createdAt":0}],"out":4}
+{"in":[{"blocks":{"world":" Arthur\r\n\r\n\r\n\r\n\r\n\r\nx \t","character":"  ","format":"车库红色外套\t艾琳，","prohibit":"摩托车  \r\n\r\n\r\n\r\n\r\n\r\nx \t","style":"客厅Map；"},"id":"w-1","name":"艾琳；","emoji":"🌧","greeting":"","version":"4"}],"out":4}
+{"in":[{"blocks":{"character":"地图","format":" 二楼卧室钟楼,车库钥匙","fewshot":"摩托车,二楼卧室\t","prohibit":"雨夜/雨夜,","style":"key\t张燕，sword,摩托车　\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-2","name":"","emoji":"🌧","greeting":"","updatedAt":100,"createdAt":50}],"out":5}
+{"in":[{"blocks":{"rules":"红色外套\n密道，","format":"张燕账本守卫","prohibit":"钟楼、林雾、"},"id":"w-0","updatedAt":0,"createdAt":0}],"out":3}
+{"in":[{"blocks":{"rules":"sword。红色外套\t密道/Arthur\r\n\r\n\r\n\r\n\r\n\r\nx \t","fewshot":"摩托车/","style":"钥匙钟楼"},"id":"w-2","name":"","changelog":[],"updatedAt":null,"createdAt":0}],"out":3}
+{"in":[{"blocks":{"character":"林雾。Arthur|Map雨夜\r\n\r\n\r\n\r\n\r\n\r\nx \t","rules":"Map  ","format":"key　","fewshot":"Arthursword","prohibit":" 客厅  ","style":"castle_2码头  艾琳"},"id":"w-3","name":"","emoji":"ab","desc":"","greeting":"*雨夜*","updatedAt":null,"createdAt":0}],"out":6}
+{"in":[{"blocks":{"world":" 账本Mira旧矿","rules":"账本咖啡馆\n二楼卧室艾琳/","prohibit":"密道。摩托车学校；北境\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-4","name":"艾琳、","emoji":"ab","desc":"","version":0,"changelog":"x","updatedAt":100,"createdAt":50}],"out":3}
+{"in":[{"blocks":{"character":"守卫/","format":"Map","prohibit":" castle_2Arthur\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"name":"雨港","emoji":"ab","version":"4","updatedAt":0,"createdAt":50}],"out":3}
+{"in":[{"blocks":{"fewshot":"北境\t学校；艾琳，车库","prohibit":"key；红色外套旧矿/红色外套"},"emoji":"ab","version":-1,"updatedAt":100,"createdAt":50}],"out":2}
+{"in":[{"blocks":{"character":"  ","rules":"钥匙 钥匙　","format":"","prohibit":" 账本\t旧矿  ","style":"雨夜Mira！地图！守卫"},"id":"w-2","emoji":"🌧","greeting":"*雨夜*","version":3,"updatedAt":null,"createdAt":0}],"out":3}
+{"in":[{"blocks":{"world":" key钟楼，钥匙咖啡馆  ","character":"摩托车；账本","rules":" 旧矿|咖啡馆 \r\n\r\n\r\n\r\n\r\n\r\nx \t","style":"sword红色外套张燕,\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-4","version":"4","updatedAt":null,"createdAt":50}],"out":4}
+{"in":[{"blocks":{"character":"账本","rules":"  ","format":"  ","fewshot":"码头","style":"Map|地图红色外套守卫　"},"name":"  星际港  ","emoji":"  ","desc":"","updatedAt":0,"createdAt":50}],"out":3}
+{"in":[{"blocks":{"character":" 学校castle_2 客厅账本，","rules":" 密道Arthur、","format":"学校钥匙 Mira  林雾  ","prohibit":"账本。地图；Mira　钥匙"},"name":"  星际港  ","emoji":"🌧","desc":" 边陲 ","greeting":"","changelog":"x"}],"out":4}
+{"in":[{"blocks":{"character":" 密道\n客厅\t密道\t\r\n\r\n\r\n\r\n\r\n\r\nx \t","rules":"","prohibit":0},"name":"雨港","updatedAt":null,"createdAt":50}],"out":2}
+{"in":[{"blocks":{"world":"Arthur旧矿 账本","rules":"摩托车"},"name":"密道","emoji":"🚀🚀🚀🚀🚀","desc":"","changelog":[]}],"out":2}
+{"in":[{"blocks":{"format":"钥匙","style":"二楼卧室。雨夜！张燕,客厅\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"name":"学校！","emoji":"🚀🚀🚀🚀🚀","version":3,"updatedAt":100,"createdAt":50}],"out":2}
+{"in":[{"blocks":{"world":"","character":"sword！二楼卧室  客厅\nArthur/","rules":"Map，艾琳　key","format":"学校，","fewshot":" 客厅|","prohibit":" 艾琳","style":" Map"},"desc":5,"greeting":"  你好\r\n世界 ","version":3,"changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}],"updatedAt":null,"createdAt":50}],"out":6}
+{"in":[{"blocks":{"character":"key\n守卫|钟楼","rules":"码头钟楼　钥匙","fewshot":"Map","prohibit":"雨夜\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-3","name":"","desc":" 边陲 ","version":1}],"out":4}
+{"in":[{"blocks":{"world":"","character":" 客厅车库castle_2摩托车","format":"咖啡馆咖啡馆/","fewshot":"红色外套　sword，咖啡馆","style":"Arthur/sword\nMap　\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-0","name":"雨港","changelog":"x"}],"out":4}
+{"in":[{"blocks":{"world":" 密道码头　","character":" 密道\t","format":"  ","fewshot":" 雨夜","style":"二楼卧室旧矿密道,张燕|\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"id":"w-1","emoji":"ab","desc":"","version":-1,"updatedAt":100,"createdAt":0}],"out":4}
+{"in":[{"blocks":{"world":"钟楼！Arthur、","fewshot":0,"style":" Mira！雨夜张燕客厅\r\n\r\n\r\n\r\n\r\n\r\nx \t"},"name":"","greeting":"*雨夜*","version":0}],"out":3}
+{"in":[{"blocks":{"world":" key守卫  艾琳，","rules":"","format":"红色外套castle_2北境守卫！"},"id":"w-4","name":"雨港","desc":"","greeting":"","version":"4","changelog":[{"version":1,"at":5,"note":"创建"},{"version":0},null,{"version":"2","note":7}],"updatedAt":0,"createdAt":0}],"out":2}
+{"in":[{"blocks":{"world":" Arthur,Mira  学校密道\n","character":"","fewshot":" 艾琳key码头/摩托车/","prohibit":"地图，密道"},"name":"雨港","emoji":"🚀🚀🚀🚀🚀","desc":5,"version":2.7,"changelog":[],"updatedAt":null,"createdAt":0}],"out":3}
+{"in":[null],"out":0}
+{"in":[{}],"out":0}
+{"in":[{"blocks":"x"}],"out":0}

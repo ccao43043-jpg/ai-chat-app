@@ -1,0 +1,40 @@
+{"in":["a\r\n"," a ","b"],"out":{"content":" a","action":"conflict","_pending":"b"}}
+{"in":["a\r\n"," a ",""],"out":{"content":" a","action":"conflict","_pending":""}}
+{"in":["a\r\n","b","a\r\n"],"out":{"content":"b","action":"keepCurrent"}}
+{"in":["a\r\n","a","a\r\n"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["",null,"a\r\n"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["b"," a ","a"],"out":{"content":" a","action":"conflict","_pending":"a"}}
+{"in":[null,"a","a"],"out":{"content":"a","action":"unchanged"}}
+{"in":[null,"",""],"out":{"content":"","action":"takeTheirs"}}
+{"in":["a","a","a\r\n"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["","",""],"out":{"content":"","action":"takeTheirs"}}
+{"in":[null,null,""],"out":{"content":"","action":"takeTheirs"}}
+{"in":["a\r\n"," a ","a\r\n"],"out":{"content":" a","action":"keepCurrent"}}
+{"in":["a","a\r\n",null],"out":{"content":"","action":"takeTheirs"}}
+{"in":["a\r\n",null,""],"out":{"content":"","action":"unchanged"}}
+{"in":["","a\r\n",""],"out":{"content":"a","action":"keepCurrent"}}
+{"in":["a"," a ","a"],"out":{"content":" a","action":"keepCurrent"}}
+{"in":[" a ","b","a"],"out":{"content":"b","action":"conflict","_pending":"a"}}
+{"in":["b","a\r\n","a"],"out":{"content":"a","action":"unchanged"}}
+{"in":[null,"b",""],"out":{"content":"b","action":"keepCurrent"}}
+{"in":["","a"," a "],"out":{"content":"a","action":"conflict","_pending":" a"}}
+{"in":["a","","a"],"out":{"content":"","action":"keepCurrent"}}
+{"in":[null,"a",""],"out":{"content":"a","action":"keepCurrent"}}
+{"in":["b","",""],"out":{"content":"","action":"unchanged"}}
+{"in":["","b",""],"out":{"content":"b","action":"keepCurrent"}}
+{"in":["a\r\n","a\r\n","a"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["a",null,"b"],"out":{"content":"","action":"conflict","_pending":"b"}}
+{"in":["a\r\n","b","b"],"out":{"content":"b","action":"unchanged"}}
+{"in":["","b","a"],"out":{"content":"b","action":"conflict","_pending":"a"}}
+{"in":[""," a "," a "],"out":{"content":" a","action":"unchanged"}}
+{"in":["a",null,"b"],"out":{"content":"","action":"conflict","_pending":"b"}}
+{"in":["a","a","b"],"out":{"content":"b","action":"takeTheirs"}}
+{"in":["","","a"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["",null,"a\r\n"],"out":{"content":"a","action":"takeTheirs"}}
+{"in":["a\r\n",null,""],"out":{"content":"","action":"unchanged"}}
+{"in":["b"," a ","a\r\n"],"out":{"content":" a","action":"conflict","_pending":"a"}}
+{"in":["a","a","b"],"out":{"content":"b","action":"takeTheirs"}}
+{"in":["b","a",null],"out":{"content":"a","action":"conflict","_pending":""}}
+{"in":["","a","a"],"out":{"content":"a","action":"unchanged"}}
+{"in":["b","a","b"],"out":{"content":"a","action":"keepCurrent"}}
+{"in":[""," a ","a\r\n"],"out":{"content":" a","action":"conflict","_pending":"a"}}
