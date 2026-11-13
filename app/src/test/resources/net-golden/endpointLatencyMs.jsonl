@@ -1,0 +1,20 @@
+{"in":[{"name":"DeepInfra | qwen3","provider_name":"DeepInfra","tag":"deepinfra/fp8","context_length":40960,"pricing":{"prompt":"0.0000001","completion":"0.0000003","input_cache_read":"0.00000002","discount":0.25},"latency":0.42,"status":0}],"out":420}
+{"in":[{"name":"Together | qwen3","provider_name":"Together","tag":"together","pricing":{"prompt":"0.0000002","completion":"0.0000002","discount":0},"latency_p50":812}],"out":812}
+{"in":[{"name":"Novita","provider_name":"Novita","pricing":{"prompt":"0.00000015","completion":"0.00000025"},"stats":{"latency_p50":1.5}}],"out":1500}
+{"in":[{"provider_name":"Parasail","tag":"parasail","pricing":{"prompt":"0.00000009","completion":"0.00000031","input_cache_read":"0.00000009"},"stats":{"latency":19.99}}],"out":19990}
+{"in":[{"provider":{"slug":"cheap-no-prompt"},"pricing":{"completion":"0.0000001"}}],"out":0}
+{"in":[{"provider":{"name":"Free"},"pricing":{"prompt":"0","completion":"0"}}],"out":0}
+{"in":[{"tag":"","provider_name":"","name":"","provider":{"slug":"","name":"ByProviderName"},"pricing":{"prompt":"0.0000004","completion":"0"},"latency":"20"}],"out":20}
+{"in":[null],"out":0}
+{"in":[{"pricing":{"prompt":"0.0000001"}}],"out":0}
+{"in":[{"tag":"nan-lat","pricing":{"prompt":"0.0000001","completion":"0.0000003"},"latency":"abc","latency_p50":5}],"out":0}
+{"in":[{"tag":"flex","pricing":{"prompt":"0.00000005","completion":"0.00000035","discount":0.5},"latency":null,"latency_p50":null,"stats":{"latency":null,"latency_p50":0.25}}],"out":250}
+{"in":[{"latency":0}],"out":0}
+{"in":[{"latency":-3}],"out":0}
+{"in":[{"latency":19.9999}],"out":20000}
+{"in":[{"latency":20}],"out":20}
+{"in":[{"latency":1234.5}],"out":1235}
+{"in":[{"latency":0.0005}],"out":1}
+{"in":[{"latency":"0.3"}],"out":300}
+{"in":[{"stats":{}}],"out":0}
+{"in":[{}],"out":0}

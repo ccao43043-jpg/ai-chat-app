@@ -1,0 +1,6 @@
+{"in":["can only afford 12345."],"out":12345}
+{"in":["Can Only Afford   77 tokens"],"out":77}
+{"in":["can only afford 0"],"out":null}
+{"in":["nothing"],"out":null}
+{"in":[""],"out":null}
+{"in":[null],"out":null}
