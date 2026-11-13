@@ -1,0 +1,120 @@
+{"in":["你真好",""],"out":null}
+{"in":[" 滚 ",""],"out":null}
+{"in":["谢 谢",""],"out":null}
+{"in":["完全不相干",""],"out":null}
+{"in":["",""],"out":null}
+{"in":["！！",""],"out":null}
+{"in":["你真好","你好"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","你好"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","你好"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","你好"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","你好"],"out":null}
+{"in":["！！","你好"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","谢谢你，你真好"],"out":{"start":4,"end":7,"quote":"你真好"}}
+{"in":[" 滚 ","谢谢你，你真好"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","谢谢你，你真好"],"out":{"start":0,"end":2,"quote":"谢谢","approx":true}}
+{"in":["完全不相干","谢谢你，你真好"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","谢谢你，你真好"],"out":null}
+{"in":["！！","谢谢你，你真好"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","滚，闭嘴"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","滚，闭嘴"],"out":{"start":0,"end":1,"quote":"滚"}}
+{"in":["谢 谢","滚，闭嘴"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","滚，闭嘴"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","滚，闭嘴"],"out":null}
+{"in":["！！","滚，闭嘴"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","「滚」他说"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","「滚」他说"],"out":{"start":1,"end":2,"quote":"滚"}}
+{"in":["谢 谢","「滚」他说"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","「滚」他说"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","「滚」他说"],"out":null}
+{"in":["！！","「滚」他说"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","发裸照给我"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","发裸照给我"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","发裸照给我"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","发裸照给我"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","发裸照给我"],"out":null}
+{"in":["！！","发裸照给我"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","非常喜欢你"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","非常喜欢你"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","非常喜欢你"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","非常喜欢你"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","非常喜欢你"],"out":null}
+{"in":["！！","非常喜欢你"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","不喜欢"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","不喜欢"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","不喜欢"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","不喜欢"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","不喜欢"],"out":null}
+{"in":["！！","不喜欢"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","有点讨厌"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","有点讨厌"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","有点讨厌"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","有点讨厌"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","有点讨厌"],"out":null}
+{"in":["！！","有点讨厌"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","我不是很开心"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","我不是很开心"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","我不是很开心"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","我不是很开心"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","我不是很开心"],"out":null}
+{"in":["！！","我不是很开心"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","thank you so much, you're great"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","thank you so much, you're great"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","thank you so much, you're great"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","thank you so much, you're great"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","thank you so much, you're great"],"out":null}
+{"in":["！！","thank you so much, you're great"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","shut up idiot"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","shut up idiot"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","shut up idiot"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","shut up idiot"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","shut up idiot"],"out":null}
+{"in":["！！","shut up idiot"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","*他骂了一句白痴*"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","*他骂了一句白痴*"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","*他骂了一句白痴*"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","*他骂了一句白痴*"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","*他骂了一句白痴*"],"out":null}
+{"in":["！！","*他骂了一句白痴*"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","（旁白：去死吧）"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","（旁白：去死吧）"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","（旁白：去死吧）"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","（旁白：去死吧）"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","（旁白：去死吧）"],"out":null}
+{"in":["！！","（旁白：去死吧）"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","> 引用：废物\n正常的话"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","> 引用：废物\n正常的话"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","> 引用：废物\n正常的话"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","> 引用：废物\n正常的话"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","> 引用：废物\n正常的话"],"out":null}
+{"in":["！！","> 引用：废物\n正常的话"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","真棒！抱抱"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","真棒！抱抱"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","真棒！抱抱"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","真棒！抱抱"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","真棒！抱抱"],"out":null}
+{"in":["！！","真棒！抱抱"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","没有失望"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","没有失望"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","没有失望"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","没有失望"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","没有失望"],"out":null}
+{"in":["！！","没有失望"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","我很生气，非常失望"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","我很生气，非常失望"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","我很生气，非常失望"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","我很生气，非常失望"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","我很生气，非常失望"],"out":null}
+{"in":["！！","我很生气，非常失望"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}
+{"in":["你真好","😀 你真可爱！！"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","😀 你真可爱！！"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","😀 你真可爱！！"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","😀 你真可爱！！"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","😀 你真可爱！！"],"out":null}
+{"in":["！！","😀 你真可爱！！"],"out":{"start":7,"end":9,"quote":"！！"}}
+{"in":["你真好","love you 爱你 想你"],"out":{"start":-1,"end":-1,"quote":"你真好","approx":true}}
+{"in":[" 滚 ","love you 爱你 想你"],"out":{"start":-1,"end":-1,"quote":"滚","approx":true}}
+{"in":["谢 谢","love you 爱你 想你"],"out":{"start":-1,"end":-1,"quote":"谢 谢","approx":true}}
+{"in":["完全不相干","love you 爱你 想你"],"out":{"start":-1,"end":-1,"quote":"完全不相干","approx":true}}
+{"in":["","love you 爱你 想你"],"out":null}
+{"in":["！！","love you 爱你 想你"],"out":{"start":-1,"end":-1,"quote":"！！","approx":true}}

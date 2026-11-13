@@ -83,3 +83,50 @@ class DomainGoldenTest {
         },
     ))
 }
+
+/** affect：本地自然日固定 Asia/Shanghai（导出端 TZ 同值） */
+class AffectGoldenTest {
+    private fun suite(dir: String, table: Map<String, (List<Any?>) -> Any?>) {
+        com.aichat.app.plugins.affect.Affect.zone = java.time.ZoneId.of("Asia/Shanghai")
+        val files = Golden.list(dir)
+        assertEquals("$dir：golden 文件与 Kotlin 对照表不一致", files.toSet(), table.keys)
+        var n = 0
+        for (f in files) n += Golden.run("$dir/$f", table[f]!!)
+        println("[golden] $dir：${files.size} 个函数，$n 条向量全部一致")
+    }
+    @Test fun affect() {
+        val A = com.aichat.app.plugins.affect.Affect
+        fun L(v: Any?): List<Any?> = DomainGoldenTest.L(v)
+        suite("affect", mapOf(
+            "parseState" to { a -> A.parseState(a[0]) },
+            "stripState" to { a -> A.stripState(a[0]) },
+            "lexiconScore" to { a -> A.lexiconScore(a[0]) },
+            "directText" to { a -> A.directText(a[0]) },
+            "guard" to { a -> A.guard(a[0].d(), a[1], a[2], a[3]) },
+            "checkConsistency" to { a -> A.checkConsistency(a[0], a[1].d(), a[2]) },
+            "jaccard" to { a -> A.jaccard(a[0], a[1]) },
+            "locateWhy" to { a -> A.locateWhy(a[0], a[1]) },
+            "deltaFromA" to { a -> A.deltaFromA(a[0].d()) },
+            "affToX" to { a -> A.affToX(a[0]) },
+            "classify" to { a -> A.classify(a[0], a[1]) },
+            "vecStepKf" to { a -> A.vecStepKf(a[0], a[1], a[2]) },
+            "decay" to { a -> A.decay(a[0], a[1].d(), a[2]) },
+            "kfCusumSeq" to { a ->
+                var x: Any? = null; var cu: Any? = null; val kfs = ArrayList<Any?>(); val cus = ArrayList<Any?>()
+                L(a[0]).forEach { y -> x = A.kfUpdate(x, y.d(), 0.3); kfs += x; cu = A.cusumUpdate(cu, x["x"].d(), 0.3); cus += cu }
+                jobj("kfs" to kfs, "cus" to cus)
+            },
+            "stepChain" to { a ->
+                var prev: Any? = null; val out = ArrayList<Any?>()
+                L(a[0]).forEach { s -> val nx = A.step(prev, s["parsed"], s["u"], s["t"].d(), s["o"]); out += nx; prev = nx }
+                out
+            },
+            "formatKfHint" to { a -> A.formatKfHint(a[0]) },
+            "formatCusumHint" to { a -> A.formatCusumHint(a[0]) },
+            "blendAffect" to { a -> A.blendAffect(a[0], a[1]) },
+            "modeOf" to { a -> A.modeOf(a[0]) },
+            "clockOf" to { a -> A.clockOf(a[0], a[1]) },
+            "estimatorOf" to { a -> A.estimatorOf(a[0], a[1]) },
+        ))
+    }
+}

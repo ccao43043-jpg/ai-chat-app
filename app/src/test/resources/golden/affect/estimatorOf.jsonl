@@ -1,0 +1,5 @@
+{"in":[null,null],"out":"kf"}
+{"in":[{"affectEstimator":"legacy"},null],"out":"legacy"}
+{"in":[{"affectKf":false},{"affectEstimator":"kf"}],"out":"kf"}
+{"in":[{},{"affectKf":false}],"out":"legacy"}
+{"in":[{"affectEstimator":"x"},{}],"out":"kf"}

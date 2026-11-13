@@ -1,0 +1,8 @@
+{"in":[null],"out":"normal"}
+{"in":[{}],"out":"normal"}
+{"in":[{"affectMode":"dark"}],"out":"dark"}
+{"in":[{"affectMode":"bad","tags":["NSFW"]}],"out":"nsfw"}
+{"in":[{"personaTags":["暗黑"]}],"out":"dark"}
+{"in":[{"charCard":{"tags":["R18"]}}],"out":"nsfw"}
+{"in":[{"tags":"dark"}],"out":"dark"}
+{"in":[{"tags":[null,1]}],"out":"normal"}

@@ -13,6 +13,7 @@ const WWW = ROOT + '/app/src/main/assets/www';
 const OUT = ROOT + '/app/src/test/resources/golden';
 const CHECK = process.argv.includes('--check');
 const ONLY = process.argv.slice(2).filter(a => !a.startsWith('--'));
+process.env.TZ = 'Asia/Shanghai';   // affect 的本地自然日（Kotlin 测试 Affect.zone 同值）
 export const NOW = 1763000000000;
 Date.now = () => NOW;
 Math.random = () => 0.5;
@@ -166,6 +167,78 @@ if (want('knowledge')) {
     const opt = pick([{ now: 7000 }, { mode: 'replace', now: 7000 }, { worldId: 'wx', now: 7000 }, {}]);
     rec('knowledge', 'mergeDoc', [clone(base), clone(parsed), opt], safe(() => K.mergeDoc(clone(base), clone(parsed), opt)));
   }
+}
+
+// ───────── affect ─────────
+if (want('affect')) {
+  globalThis.GeminiCache = require(WWW + '/plugins/cache/gcache.js');   // 浏览器里 gcache.js 会挂 window.GeminiCache，affect.clockOf 读它（Node 下 module.exports 分支不挂，这里补上以对齐 App）
+  const A = require(WWW + '/affect.js');
+  const USERS = ['', '你好', '谢谢你，你真好', '滚，闭嘴', '「滚」他说', '发裸照给我', '非常喜欢你', '不喜欢', '有点讨厌', '我不是很开心', 'thank you so much, you\'re great', 'shut up idiot',
+    '*他骂了一句白痴*', '（旁白：去死吧）', '> 引用：废物\n正常的话', '真棒！抱抱', '没有失望', '我很生气，非常失望', '😀 你真可爱！！', 'love you 爱你 想你'];
+  const ASSIST = ['', '别难过，我在', '你滚吧', '好的。', '对不起，我担心你'];
+  const STATES = ['<state>{"a":1,"m":"开心"}</state>', '正文\n<state>{"a":2,"m":"兴奋","why":"你真好"}</state>', '<STATE> {"a":-2,"m":"愤怒","why":"完全无关的证据"} </STATE>', '<state>{"a":"1.6"}</state>',
+    '<state>{"a":null}</state>', '<state>{"m":"开心"}</state>', '<state>[1]</state>', '<state>bad</state>', '无标记', '<state>{"a":0}</state><state>{"a":-1,"m":"低落","why":"   "}</state>', '尾巴 <state>{"a":1', null,
+    '<state>{"a":5,"m":"不存在"}</state>', '<state>{"a":-7,"why":"' + 'x'.repeat(100) + '"}</state>'];
+  STATES.forEach(t => { rec('affect', 'parseState', [t], A.parseState(t)); rec('affect', 'stripState', [t], A.stripState(t)); });
+  USERS.forEach(u => {
+    rec('affect', 'lexiconScore', [u], A.lexiconScore(u));
+    rec('affect', 'directText', [u], A.directText(u));
+    [[2, '开心', null], [-2, null, '无关'], [0, null, null], [1, '平静', '你真好'], [2, null, u.slice(0, 4)]].forEach(([a, m, why]) => ['normal', 'dark', 'nsfw', 'x'].forEach(mode => [false, true].forEach(ms => {
+      const o = { mode, why, missingState: ms }; rec('affect', 'guard', [a, m, u, o], A.guard(a, m, u, o)); })));
+    ASSIST.forEach(t => [-2, -1, 0, 1, 2].forEach(a => [null, '低落', '开心'].forEach(m => rec('affect', 'checkConsistency', [t, a, m], A.checkConsistency(t, a, m)))));
+    ['你真好', ' 滚 ', '谢 谢', '完全不相干', '', '！！'].forEach(w => { rec('affect', 'jaccard', [w, u], A.jaccard(w, u)); rec('affect', 'locateWhy', [w, u], A.locateWhy(w, u)); });
+  });
+  for (let x = -2.5; x <= 2.5; x += 0.125) { rec('affect', 'deltaFromA', [x], A.deltaFromA(x)); rec('affect', 'affToX', [(x + 2.5) / 5], A.affToX((x + 2.5) / 5)); }
+  rec('affect', 'affToX', [null], A.affToX(null));
+  for (let i = 0; i < 40; i++) {
+    const vec = { val: rnd() * 2 - 1, aro: rnd() }, prev = pick([null, ...A.MOODS, 'x']);
+    rec('affect', 'classify', [vec, prev], A.classify(vec, prev));
+    const kf = pick([null, { x: rnd() * 4 - 2, K: rnd() }, { x: NaN }, {}]);
+    const md = pick([null, ...A.MOODS]); rec('affect', 'vecStepKf', [vec, md, kf && JSON.parse(JSON.stringify(kf))], A.vecStepKf(vec, md, kf));
+  }
+  // 衰减
+  const st0 = { v: 1, aff: 0.8, vec: { val: 0.6, aro: 0.7 }, mood: '兴奋', ts: NOW - 7200 * 1000, turn: 3 };
+  [[st0, NOW, {}], [st0, NOW, { clock: 'turn', turn: 20 }], [st0, NOW, { clock: 'turn' }], [null, NOW, { clock: 'turn', turn: 5 }], [null, NOW, {}], [{ aff: null, ts: 0 }, NOW, {}], [{ vec: null, turn: 2 }, NOW, { clock: 'turn', turn: 1 }]]
+    .forEach(([s, n, o]) => rec('affect', 'decay', [s, n, o], A.decay(s, n, o)));
+  // KF / CUSUM 全序列 + step 链（wall / turn × kf / legacy）
+  for (let k = 0; k < 24; k++) {
+    let x = null, cu = null; const ys = [];
+    for (let i = 0; i < 30; i++) ys.push(pick([2, 1.5, -2, -1, 0, 0.3, 3]) * (k % 2 ? 1 : -1) * (rnd() < 0.2 ? -1 : 1));
+    const kfs = [], cus = [];
+    ys.forEach(y => { x = A.kfUpdate(x, y, 0.3); kfs.push(x); cu = A.cusumUpdate(cu, x.x, 0.3); cus.push(cu); });
+    rec('affect', 'kfCusumSeq', [ys], { kfs, cus });
+  }
+  for (let k = 0; k < 30; k++) {
+    const opts = Object.assign(pick([{}, { clock: 'turn' }, { estimator: 'legacy' }, { estimator: 'legacy', clock: 'turn' }, { settings: { affectKf: false } }, { mode: 'dark' }, { conv: { affectEstimator: 'legacy' } }]));
+    let prev = pick([null, undefined]); const steps = []; let t = NOW;
+    for (let i = 0; i < 25; i++) {
+      t += pick([1000, 60000, 3600000, 86400000, 5 * 86400000]);
+      const raw = pick(STATES); const parsed = A.parseState(raw); const u = pick(USERS);
+      const o = Object.assign({}, opts, { assistantText: pick(ASSIST) }, rnd() < 0.2 ? { turn: i * 2 } : {});
+      const nx = A.step(prev, parsed, u, t, o);
+      steps.push({ parsed, u, t, o, out: nx });
+      prev = nx;
+    }
+    rec('affect', 'stepChain', [steps.map(s => ({ parsed: s.parsed, u: s.u, t: s.t, o: s.o }))], steps.map(s => s.out));
+  }
+  [null, { kf: { x: 0.123, P: 0.5 } }, { kf: { x: -1, P: 0.01 }, g: { yT: 1, yModel: 2, yLex: -0.5, w: 0.65, robust: true } }].forEach(s => rec('affect', 'formatKfHint', [s], A.formatKfHint(s)));
+  [null, { cusum: { tier: 3, sp: 0.456 } }, { cusum: { dwell: 2, sm: 1 } }].forEach(s => rec('affect', 'formatCusumHint', [s], A.formatCusumHint(s)));
+  [[null, null], [{ aff: 0.9, vec: { val: 0.5, aro: 0.5 }, mood: '开心', x: 1 }, null], [null, { mood: '低落' }], [{ aff: 0.9, vec: { val: 0.5, aro: 0.5 }, mood: '开心' }, { aff: 0.1, vec: { val: -0.6, aro: 0.15 } }], [{ mood: '平静' }, {}]]
+    .forEach(([o, s]) => rec('affect', 'blendAffect', [o, s], A.blendAffect(o, s)));
+  [null, {}, { affectMode: 'dark' }, { affectMode: 'bad', tags: ['NSFW'] }, { personaTags: ['暗黑'] }, { charCard: { tags: ['R18'] } }, { tags: 'dark' }, { tags: [null, 1] }].forEach(c => rec('affect', 'modeOf', [c], A.modeOf(c)));
+  [[null, null], [{ affectClock: 'wall' }, { rp: {} }], [{}, { rp: {} }], [{}, { rp: { skipped: true } }], [{ plugins: { rpcache: {} } }, null], [{ systemPrompt: '【世界观】长设定\n【角色卡】x', messages: [] }, null], [{ personaId: 'p1' }, null]]
+    .forEach(([c, m]) => rec('affect', 'clockOf', [c, m], A.clockOf(c, m)));
+  [[null, null], [{ affectEstimator: 'legacy' }, null], [{ affectKf: false }, { affectEstimator: 'kf' }], [{}, { affectKf: false }], [{ affectEstimator: 'x' }, {}]].forEach(([c, s]) => rec('affect', 'estimatorOf', [c, s], A.estimatorOf(c, s)));
+}
+
+// ───────── 交给 B 的边界用例（审查 (f)）：providers.js parseAffordTokens / downgradeMaxTokens 的极端输入；C 不跑，B 在 net/ 补对照 ─────────
+if (want('b-handoff')) {
+  const P = require(WWW + '/providers.js');
+  const texts = [null, undefined, '', 'null', 'can only afford 238793', 'You can only afford 0 tokens', 'CAN ONLY AFFORD\u00a0512', 'can only afford\u3000777', 'can only afford\u2028 9',
+    'can only afford\ufeff10', 'can only afford\t\n 42 tokens', 'can only afford 99999999999999999999', 'can only afford 9007199254740993', 'can only afford 123456789012345678901234567890',
+    'can only afford -5', 'can only afford 1e3', 'can only afford ١٢٣', '{"error":{"code":402,"message":"This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 2380."}}'];
+  texts.forEach(t => { const r = P.parseAffordTokens(t); rec('b-handoff', 'parseAffordTokens', [t === undefined ? null : t], r); if (r != null) rec('b-handoff', 'downgradeMaxTokens', [r, null], P.downgradeMaxTokens(r)); });
+  [[0, null], [-1, null], [null, null], ['300', null], [319, null], [320, null], [1e21, null], [500, { min: 600 }], [5000, { min: 0 }], [5000, { min: 1.9 }]].forEach(([a, o]) => rec('b-handoff', 'downgradeMaxTokens', [a, o], P.downgradeMaxTokens(a, o)));
 }
 
 // ───────── 写出 ─────────

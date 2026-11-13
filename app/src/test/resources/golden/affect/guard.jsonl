@@ -1,0 +1,800 @@
+{"in":[2,"开心","",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"",{"mode":"normal","why":"","missingState":false}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"normal","why":"","missingState":true}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"dark","why":"","missingState":false}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"dark","why":"","missingState":true}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"nsfw","why":"","missingState":false}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"nsfw","why":"","missingState":true}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"x","why":"","missingState":false}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,null,"",{"mode":"x","why":"","missingState":true}],"out":{"a":1,"m":null,"hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","你好",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"你好",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"你好",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"你好",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"你好",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","你好",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","你好",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"你好",{"mode":"normal","why":"你好","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"normal","why":"你好","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"dark","why":"你好","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"dark","why":"你好","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"nsfw","why":"你好","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"nsfw","why":"你好","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"x","why":"你好","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"你好",{"mode":"x","why":"你好","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","谢谢你，你真好",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"谢谢你，你真好",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"谢谢你，你真好",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[1,"平静","谢谢你，你真好",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"normal","why":"谢谢你，","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"normal","why":"谢谢你，","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"dark","why":"谢谢你，","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"dark","why":"谢谢你，","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"nsfw","why":"谢谢你，","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"nsfw","why":"谢谢你，","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"x","why":"谢谢你，","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"谢谢你，你真好",{"mode":"x","why":"谢谢你，","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":"开心","hit":["abuse_dark"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","滚，闭嘴",{"mode":"x","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-2,"m":null,"hit":["abuse_dark","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-2,"m":null,"hit":["abuse_dark","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"滚，闭嘴",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["abuse_dark"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"滚，闭嘴",{"mode":"x","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":0,"m":"平静","hit":["abuse_dark","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","滚，闭嘴",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"normal","why":"滚，闭嘴","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"normal","why":"滚，闭嘴","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"dark","why":"滚，闭嘴","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"dark","why":"滚，闭嘴","missingState":true}],"out":{"a":0,"m":null,"hit":["abuse_dark","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"nsfw","why":"滚，闭嘴","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"nsfw","why":"滚，闭嘴","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"x","why":"滚，闭嘴","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:1.00"]}}
+{"in":[2,null,"滚，闭嘴",{"mode":"x","why":"滚，闭嘴","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:1.00"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","「滚」他说",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"「滚」他说",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[0,null,"「滚」他说",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"「滚」他说",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","「滚」他说",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[2,null,"「滚」他说",{"mode":"normal","why":"「滚」他","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"normal","why":"「滚」他","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"dark","why":"「滚」他","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"dark","why":"「滚」他","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"nsfw","why":"「滚」他","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"nsfw","why":"「滚」他","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"x","why":"「滚」他","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"「滚」他说",{"mode":"x","why":"「滚」他","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"normal","why":null,"missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["boundary_dark","a2_unfounded"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["boundary_dark","a2_unfounded"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["boundary_nsfw","a2_unfounded"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["boundary_nsfw","a2_unfounded"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"x","why":null,"missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[2,"开心","发裸照给我",{"mode":"x","why":null,"missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["boundary_dark","why_weak","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["boundary_dark","why_weak","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["boundary_nsfw","why_weak","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["boundary_nsfw","why_weak","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[-2,null,"发裸照给我",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[0,null,"发裸照给我",{"mode":"normal","why":null,"missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[0,null,"发裸照给我",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[0,null,"发裸照给我",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["boundary_dark"]}}
+{"in":[0,null,"发裸照给我",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["boundary_dark"]}}
+{"in":[0,null,"发裸照给我",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["boundary_nsfw"]}}
+{"in":[0,null,"发裸照给我",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["boundary_nsfw"]}}
+{"in":[0,null,"发裸照给我",{"mode":"x","why":null,"missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[0,null,"发裸照给我",{"mode":"x","why":null,"missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["boundary_dark","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["boundary_dark","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["boundary_nsfw","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["boundary_nsfw","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[1,"平静","发裸照给我",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.00"]}}
+{"in":[2,null,"发裸照给我",{"mode":"normal","why":"发裸照给","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"normal","why":"发裸照给","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"dark","why":"发裸照给","missingState":false}],"out":{"a":2,"m":null,"hit":["boundary_dark","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"dark","why":"发裸照给","missingState":true}],"out":{"a":2,"m":null,"hit":["boundary_dark","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"nsfw","why":"发裸照给","missingState":false}],"out":{"a":2,"m":null,"hit":["boundary_nsfw","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"nsfw","why":"发裸照给","missingState":true}],"out":{"a":2,"m":null,"hit":["boundary_nsfw","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"x","why":"发裸照给","missingState":false}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.80"]}}
+{"in":[2,null,"发裸照给我",{"mode":"x","why":"发裸照给","missingState":true}],"out":{"a":-2,"m":"愤怒","hit":["boundary","why:0.80"]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","非常喜欢你",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"非常喜欢你",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"非常喜欢你",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"非常喜欢你",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","非常喜欢你",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"normal","why":"非常喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"normal","why":"非常喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"dark","why":"非常喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"dark","why":"非常喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"nsfw","why":"非常喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"nsfw","why":"非常喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"x","why":"非常喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"非常喜欢你",{"mode":"x","why":"非常喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","不喜欢",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","不喜欢",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"不喜欢",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"不喜欢",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"不喜欢",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"不喜欢",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","不喜欢",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","不喜欢",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"normal","why":"不喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"normal","why":"不喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"dark","why":"不喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"dark","why":"不喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"nsfw","why":"不喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"nsfw","why":"不喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"x","why":"不喜欢","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"不喜欢",{"mode":"x","why":"不喜欢","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","有点讨厌",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"有点讨厌",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"有点讨厌",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"有点讨厌",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","有点讨厌",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","有点讨厌",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"normal","why":"有点讨厌","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"normal","why":"有点讨厌","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"dark","why":"有点讨厌","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"dark","why":"有点讨厌","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"nsfw","why":"有点讨厌","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"nsfw","why":"有点讨厌","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"x","why":"有点讨厌","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"有点讨厌",{"mode":"x","why":"有点讨厌","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我不是很开心",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我不是很开心",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"我不是很开心",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我不是很开心",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","我不是很开心",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我不是很开心",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"我不是很开心",{"mode":"normal","why":"我不是很","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"normal","why":"我不是很","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"dark","why":"我不是很","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"dark","why":"我不是很","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"nsfw","why":"我不是很","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"nsfw","why":"我不是很","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"x","why":"我不是很","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我不是很开心",{"mode":"x","why":"我不是很","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","thank you so much, you're great",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"thank you so much, you're great",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"thank you so much, you're great",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","thank you so much, you're great",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"normal","why":"than","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"normal","why":"than","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"dark","why":"than","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"dark","why":"than","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"nsfw","why":"than","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"nsfw","why":"than","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"x","why":"than","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"thank you so much, you're great",{"mode":"x","why":"than","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":"开心","hit":["abuse_dark"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":["abuse_soft"]}}
+{"in":[2,"开心","shut up idiot",{"mode":"x","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-2,"m":null,"hit":["abuse_dark","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-2,"m":null,"hit":["abuse_dark","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[-2,null,"shut up idiot",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-2,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[0,null,"shut up idiot",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"shut up idiot",{"mode":"normal","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[0,null,"shut up idiot",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"shut up idiot",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["abuse_dark"]}}
+{"in":[0,null,"shut up idiot",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"shut up idiot",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[0,null,"shut up idiot",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["abuse_soft"]}}
+{"in":[0,null,"shut up idiot",{"mode":"x","why":null,"missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":0,"m":"平静","hit":["abuse_dark","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["abuse_soft","why:0.00"]}}
+{"in":[1,"平静","shut up idiot",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.00"]}}
+{"in":[2,null,"shut up idiot",{"mode":"normal","why":"shut","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"normal","why":"shut","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"dark","why":"shut","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"dark","why":"shut","missingState":true}],"out":{"a":0,"m":null,"hit":["abuse_dark","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"nsfw","why":"shut","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"nsfw","why":"shut","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"x","why":"shut","missingState":false}],"out":{"a":2,"m":null,"hit":["abuse_soft","why:0.80"]}}
+{"in":[2,null,"shut up idiot",{"mode":"x","why":"shut","missingState":true}],"out":{"a":-1,"m":"不悦","hit":["abuse","why:0.80"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","*他骂了一句白痴*",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"*他骂了一句白痴*",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"*他骂了一句白痴*",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","*他骂了一句白痴*",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"normal","why":"*他骂了","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"normal","why":"*他骂了","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"dark","why":"*他骂了","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"dark","why":"*他骂了","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"nsfw","why":"*他骂了","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"nsfw","why":"*他骂了","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"x","why":"*他骂了","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"*他骂了一句白痴*",{"mode":"x","why":"*他骂了","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","（旁白：去死吧）",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"（旁白：去死吧）",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"（旁白：去死吧）",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","（旁白：去死吧）",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"normal","why":"（旁白：","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"normal","why":"（旁白：","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"dark","why":"（旁白：","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"dark","why":"（旁白：","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"nsfw","why":"（旁白：","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"nsfw","why":"（旁白：","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"x","why":"（旁白：","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"（旁白：去死吧）",{"mode":"x","why":"（旁白：","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[2,"开心","> 引用：废物\n正常的话",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["story_ref","a2_unfounded"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[-2,null,"> 引用：废物\n正常的话",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["story_ref","why_weak","why:0.00"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[0,null,"> 引用：废物\n正常的话",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":["story_ref"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[1,"平静","> 引用：废物\n正常的话",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["story_ref","why:0.00"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"normal","why":"> 引用","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"normal","why":"> 引用","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"dark","why":"> 引用","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"dark","why":"> 引用","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":"> 引用","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"nsfw","why":"> 引用","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"x","why":"> 引用","missingState":false}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,null,"> 引用：废物\n正常的话",{"mode":"x","why":"> 引用","missingState":true}],"out":{"a":2,"m":null,"hit":["story_ref","why:0.80"]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","真棒！抱抱",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"真棒！抱抱",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"真棒！抱抱",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","真棒！抱抱",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"normal","why":"真棒！抱","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"normal","why":"真棒！抱","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"dark","why":"真棒！抱","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"dark","why":"真棒！抱","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"nsfw","why":"真棒！抱","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"nsfw","why":"真棒！抱","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"x","why":"真棒！抱","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"真棒！抱抱",{"mode":"x","why":"真棒！抱","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","没有失望",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","没有失望",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"没有失望",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"没有失望",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"没有失望",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"没有失望",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","没有失望",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","没有失望",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"没有失望",{"mode":"normal","why":"没有失望","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"normal","why":"没有失望","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"dark","why":"没有失望","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"dark","why":"没有失望","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"nsfw","why":"没有失望","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"nsfw","why":"没有失望","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"x","why":"没有失望","missingState":false}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,null,"没有失望",{"mode":"x","why":"没有失望","missingState":true}],"out":{"a":2,"m":null,"hit":["why:1.00"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"normal","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"normal","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"dark","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"dark","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"x","why":null,"missingState":false}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[2,"开心","我很生气，非常失望",{"mode":"x","why":null,"missingState":true}],"out":{"a":1,"m":"开心","hit":["a2_unfounded"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"我很生气，非常失望",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"我很生气，非常失望",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","我很生气，非常失望",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"normal","why":"我很生气","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"normal","why":"我很生气","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"dark","why":"我很生气","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"dark","why":"我很生气","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"nsfw","why":"我很生气","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"nsfw","why":"我很生气","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"x","why":"我很生气","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"我很生气，非常失望",{"mode":"x","why":"我很生气","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","😀 你真可爱！！",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"😀 你真可爱！！",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"😀 你真可爱！！",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[1,"平静","😀 你真可爱！！",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.40"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"normal","why":"😀 你","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"normal","why":"😀 你","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"dark","why":"😀 你","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"dark","why":"😀 你","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"nsfw","why":"😀 你","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"nsfw","why":"😀 你","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"x","why":"😀 你","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,null,"😀 你真可爱！！",{"mode":"x","why":"😀 你","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.00"]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"normal","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"normal","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"dark","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"dark","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"x","why":null,"missingState":false}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[2,"开心","love you 爱你 想你",{"mode":"x","why":null,"missingState":true}],"out":{"a":2,"m":"开心","hit":[]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"normal","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"normal","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"dark","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"dark","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"nsfw","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"nsfw","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"x","why":"无关","missingState":false}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[-2,null,"love you 爱你 想你",{"mode":"x","why":"无关","missingState":true}],"out":{"a":-1,"m":null,"hit":["why_weak","why:0.00"]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"normal","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"normal","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"dark","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"dark","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"nsfw","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"nsfw","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"x","why":null,"missingState":false}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[0,null,"love you 爱你 想你",{"mode":"x","why":null,"missingState":true}],"out":{"a":0,"m":null,"hit":[]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"normal","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"normal","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"dark","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"dark","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"nsfw","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"nsfw","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"x","why":"你真好","missingState":false}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[1,"平静","love you 爱你 想你",{"mode":"x","why":"你真好","missingState":true}],"out":{"a":1,"m":"平静","hit":["why:0.00"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"normal","why":"love","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"normal","why":"love","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"dark","why":"love","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"dark","why":"love","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"nsfw","why":"love","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"nsfw","why":"love","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"x","why":"love","missingState":false}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}
+{"in":[2,null,"love you 爱你 想你",{"mode":"x","why":"love","missingState":true}],"out":{"a":2,"m":null,"hit":["why:0.80"]}}

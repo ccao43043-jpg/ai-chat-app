@@ -1,0 +1,7 @@
+{"in":[null,null],"out":"wall"}
+{"in":[{"affectClock":"wall"},{"rp":{}}],"out":"wall"}
+{"in":[{},{"rp":{}}],"out":"turn"}
+{"in":[{},{"rp":{"skipped":true}}],"out":"wall"}
+{"in":[{"plugins":{"rpcache":{}}},null],"out":"turn"}
+{"in":[{"systemPrompt":"【世界观】长设定\n【角色卡】x","messages":[]},null],"out":"turn"}
+{"in":[{"personaId":"p1"},null],"out":"wall"}

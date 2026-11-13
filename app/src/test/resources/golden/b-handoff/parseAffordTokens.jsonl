@@ -1,0 +1,18 @@
+{"in":[null],"out":null}
+{"in":[null],"out":null}
+{"in":[""],"out":null}
+{"in":["null"],"out":null}
+{"in":["can only afford 238793"],"out":238793}
+{"in":["You can only afford 0 tokens"],"out":null}
+{"in":["CAN ONLY AFFORD 512"],"out":512}
+{"in":["can only afford　777"],"out":777}
+{"in":["can only afford  9"],"out":9}
+{"in":["can only afford﻿10"],"out":10}
+{"in":["can only afford\t\n 42 tokens"],"out":42}
+{"in":["can only afford 99999999999999999999"],"out":100000000000000000000}
+{"in":["can only afford 9007199254740993"],"out":9007199254740992}
+{"in":["can only afford 123456789012345678901234567890"],"out":1.2345678901234568e+29}
+{"in":["can only afford -5"],"out":null}
+{"in":["can only afford 1e3"],"out":1}
+{"in":["can only afford ١٢٣"],"out":null}
+{"in":["{\"error\":{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 2380.\"}}"],"out":2380}

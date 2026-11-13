@@ -1,0 +1,5 @@
+{"in":[null,null],"out":null}
+{"in":[{"aff":0.9,"vec":{"val":0.5,"aro":0.5},"mood":"开心","x":1},null],"out":{"aff":0.9,"vec":{"val":0.5,"aro":0.5},"mood":"开心","x":1}}
+{"in":[null,{"mood":"低落"}],"out":{"mood":"低落","aff":0.3}}
+{"in":[{"aff":0.9,"vec":{"val":0.5,"aro":0.5},"mood":"开心"},{"aff":0.1,"vec":{"val":-0.6,"aro":0.15}}],"out":{"aff":0.66,"vec":{"val":0.17,"aro":0.395},"mood":"害羞","blended":true}}
+{"in":[{"mood":"平静"},{}],"out":{"mood":"平静","aff":0.3,"vec":{"val":0,"aro":0.2},"blended":true}}

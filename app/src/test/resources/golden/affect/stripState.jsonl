@@ -1,0 +1,14 @@
+{"in":["<state>{\"a\":1,\"m\":\"开心\"}</state>"],"out":""}
+{"in":["正文\n<state>{\"a\":2,\"m\":\"兴奋\",\"why\":\"你真好\"}</state>"],"out":"正文"}
+{"in":["<STATE> {\"a\":-2,\"m\":\"愤怒\",\"why\":\"完全无关的证据\"} </STATE>"],"out":"<STATE> {\"a\":-2,\"m\":\"愤怒\",\"why\":\"完全无关的证据\"} </STATE>"}
+{"in":["<state>{\"a\":\"1.6\"}</state>"],"out":""}
+{"in":["<state>{\"a\":null}</state>"],"out":""}
+{"in":["<state>{\"m\":\"开心\"}</state>"],"out":""}
+{"in":["<state>[1]</state>"],"out":""}
+{"in":["<state>bad</state>"],"out":""}
+{"in":["无标记"],"out":"无标记"}
+{"in":["<state>{\"a\":0}</state><state>{\"a\":-1,\"m\":\"低落\",\"why\":\"   \"}</state>"],"out":""}
+{"in":["尾巴 <state>{\"a\":1"],"out":"尾巴"}
+{"in":[null],"out":null}
+{"in":["<state>{\"a\":5,\"m\":\"不存在\"}</state>"],"out":""}
+{"in":["<state>{\"a\":-7,\"why\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}</state>"],"out":""}
