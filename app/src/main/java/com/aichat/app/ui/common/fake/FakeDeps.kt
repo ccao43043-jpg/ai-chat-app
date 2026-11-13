@@ -1,5 +1,6 @@
 package com.aichat.app.ui.common.fake
 
+import com.aichat.app.data.DataGraph
 import com.aichat.app.domain.*
 import com.aichat.app.domain.model.*
 import com.aichat.app.ui.common.UiDeps
@@ -8,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,78 +23,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /*
- * M1 用的内存 fake（D/B/C 的真实实现就位前，UI 先跑通）。只实现契约语义，不读写磁盘、不联网。
+ * B/C 就位前的 fake：ChatEngine（演示流式回复）与 PluginRegistry（6 个插件空壳）。仓库用 D 的 DataGraph.inMemory()。
  */
 
 private val seq = AtomicLong(0)
 internal fun fakeId(prefix: String) = prefix + System.currentTimeMillis().toString(36) + seq.incrementAndGet().toString(36)
-
-class FakeChatRepository(private val now: () -> Long = System::currentTimeMillis) : ChatRepository {
-    private val convs = ConcurrentHashMap<String, Conversation>()
-    private val _index = MutableStateFlow<List<ConversationMeta>>(emptyList())
-    override val index: StateFlow<List<ConversationMeta>> = _index.asStateFlow()
-    private val lock = Mutex()
-
-    private fun reindex() {
-        _index.value = convs.values.sortedByDescending { it.updatedAt }
-            .map { ConversationMeta(it.id, it.title, it.providerId, it.model, it.updatedAt, it.personaName, it.personaEmoji) }
-    }
-    override suspend fun load(id: String): Conversation? = convs[id]
-    override suspend fun save(conv: Conversation, touch: Boolean) = lock.withLock {
-        convs[conv.id] = if (touch) conv.copy(updatedAt = now()) else conv; reindex()
-    }
-    override suspend fun create(providerId: String, model: String, title: String): Conversation = lock.withLock {
-        val t = now()
-        val c = Conversation(fakeId("c"), title, providerId, model, t, t, emptyList())
-        convs[c.id] = c; reindex(); c
-    }
-    override suspend fun delete(id: String) = lock.withLock { convs.remove(id); reindex() }
-    override suspend fun exportJson(id: String): String = "{\"id\":\"$id\",\"note\":\"fake\"}"
-    override suspend fun exportAllJson(): String = "[]"
-    override suspend fun importJson(json: String): List<String> = emptyList()
-}
-
-class FakeSettingsRepository(initial: AppSettings = AppSettings(providers = ProviderPresets.defaults())) : SettingsRepository {
-    private val _s = MutableStateFlow(initial)
-    override val settings: StateFlow<AppSettings> = _s.asStateFlow()
-    private val origins = HashMap<String, String>()
-    var keys: FakeKeyVault? = null
-    /** 旧版 settings.removedPresets：删除预设服务商时由仓库记录（真实仓库按旧 JSON 同名同位置落盘，A 不碰 extras） */
-    val removedPresets = mutableListOf<String>()
-    override suspend fun update(transform: (AppSettings) -> AppSettings) {
-        val old = _s.value; val new = transform(old)
-        old.providers.filter { o -> new.providers.none { it.id == o.id } }
-            .forEach { p -> if (p.presetId.isNotEmpty() && p.presetId != "custom" && p.presetId !in removedPresets) removedPresets += p.presetId }
-        _s.value = new
-    }
-    override suspend fun registerProvider(id: String, baseUrl: String, auth: AuthType): Boolean {
-        val o = originOf(baseUrl)
-        val prev = origins.put(id, o)
-        if (prev != null && prev != o && keys?.has(id) == true) { keys?.delete(id); return true }
-        return false
-    }
-    private fun originOf(u: String) = Regex("^(https?://[^/]+)").find(u.trim().lowercase())?.value ?: u
-}
-
-class FakeLibraryRepository : LibraryRepository {
-    override val personas = MutableStateFlow<List<Persona>>(emptyList())
-    override val prompts = MutableStateFlow<List<PromptSnippet>>(emptyList())
-    override val templates = MutableStateFlow<List<PromptTemplate>>(emptyList())
-    override val worlds = MutableStateFlow<List<World>>(emptyList())
-    override suspend fun savePersonas(list: List<Persona>) { personas.value = list }
-    override suspend fun savePrompts(list: List<PromptSnippet>) { prompts.value = list }
-    override suspend fun saveTemplates(list: List<PromptTemplate>) { templates.value = list }
-    override suspend fun saveWorlds(list: List<World>) { worlds.value = list }
-}
-
-class FakeKeyVault : KeyVault {
-    private val m = ConcurrentHashMap<String, String>()
-    override fun has(providerId: String) = m.containsKey(providerId)
-    override fun set(providerId: String, key: String): Boolean { if (key.isEmpty()) m.remove(providerId) else m[providerId] = key; return true }
-    override fun delete(providerId: String) { m.remove(providerId) }
-    override fun keyFor(providerId: String, requestUrl: String): String? = null   // fake 永不交出明文
-    override fun authType(providerId: String) = AuthType.BEARER
-}
 
 /** 6 个插件的空壳（id / 名称 / 默认开关与旧版一致，hook 全部空跑），供插件开关页演示 */
 private class StubPlugin(override val id: String, override val name: String, override val defaultEnabled: Boolean,
@@ -121,7 +56,7 @@ class FakePluginRegistry : PluginRegistry {
  *  - send：流式前先存用户消息；流开始时创建助手消息并保存；结束时保存；取消时也保存并标 truncated=true；
  *  - 出错时把 error 写进助手消息（输入里含「#error」可演示）；
  *  - regenerate：UI 已整理好版本，这里在同一条助手消息上原位重写；continueGeneration：在同一条消息后追加。
- *  （Started 事件待 D 加入契约后再发）
+ *  - 第一个事件是 Started(userMsgId, assistantMsgId)（契约 #c）；输入含「#notice」时演示 Notice。
  */
 class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs: Long = 35,
                      private val now: () -> Long = System::currentTimeMillis) : ChatEngine {
@@ -134,6 +69,7 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
         repo.save(conv.copy(title = title, messages = conv.messages + user))
         val bot = Message(fakeId("m"), Role.ASSISTANT, "", now())
         repo.load(convId)?.let { repo.save(it.copy(messages = it.messages + bot)) }
+        emit(StreamEvent.Started(user.id, bot.id))
         reply(convId, bot.id, demoReply(userText, images.size), append = false)
     }
 
@@ -142,10 +78,13 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
         val idx = conv.messages.indexOfFirst { it.id == assistantMsgId }
         if (idx < 0) { emit(StreamEvent.Error(0, "消息不存在", "")); return@flow }
         val lastUser = conv.messages.take(idx).lastOrNull { it.role == Role.USER }?.content.orEmpty()
+        emit(StreamEvent.Started(null, assistantMsgId))
         reply(convId, assistantMsgId, demoReply(lastUser, 0), append = false)
     }
 
     override fun continueGeneration(convId: String, assistantMsgId: String): Flow<StreamEvent> = flow {
+        emit(StreamEvent.Started(null, assistantMsgId))
+        if (repo.load(convId)?.messages?.any { it.id == assistantMsgId } != true) emit(StreamEvent.Notice("演示：找不到要续写的消息"))
         reply(convId, assistantMsgId, "（续写）这是续写出来的演示文字。", append = true)
     }
 
@@ -159,6 +98,7 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
         var usage: Usage? = null
         try {
             emit(StreamEvent.Status(200))
+            if (text.contains("#notice")) emit(StreamEvent.Notice("演示提示：额度不足，已将最大输出降至 1024 并重试"))
             val fail = text.contains("#error")
             for ((n, piece) in chunk(text).withIndex()) {
                 delay(chunkDelayMs); acc.append(piece); emit(StreamEvent.Delta(piece))
@@ -194,6 +134,7 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
         append("这是**演示回复**（数据/网络层接入前的 fake 引擎）。")
         if (imgs > 0) append("收到 $imgs 张图片。")
         if (user.contains("#error")) append("#error ")
+        if (user.contains("#notice")) append("#notice ")
         append("\n\n你说：\n\n> ").append(user.take(400).lines().joinToString("\n> "))
         append("\n\n## 渲染测试\n\n- 列表项一，含 `行内代码`\n- 列表项二，含 [链接](https://example.com)\n  1. 嵌套有序\n\n")
         append("```kotlin\nfun greet(name: String): String {\n    // 注释\n    return \"你好，\$name\" + 42\n}\n```\n\n")
@@ -201,19 +142,16 @@ class FakeChatEngine(private val repo: ChatRepository, private val chunkDelayMs:
     }
 }
 
-/** 没有 D 的真实实现时用：导出 / 导入给出明确的失败原因 */
-class FakeMigrationService : MigrationService {
-    override suspend fun needed() = false
-    override suspend fun run() = MigrationReport(0, 0, 0, emptyList(), null, listOf("fake"))
-    override suspend fun exportBackup(target: android.net.Uri): Result<Long> = Result.failure(IllegalStateException("数据层尚未接入（等待工作流 D 的 MigrationService）"))
-    override suspend fun importBackup(source: android.net.Uri): Result<Int> = Result.failure(IllegalStateException("数据层尚未接入（等待工作流 D 的 MigrationService）"))
-}
-
 object FakeDeps {
-    fun create(): UiDeps {
-        val chats = FakeChatRepository()
-        val keys = FakeKeyVault()
-        val settings = FakeSettingsRepository().also { it.keys = keys }
-        return UiDeps(chats, settings, FakeLibraryRepository(), keys, FakeChatEngine(chats), FakePluginRegistry(), FakeMigrationService(), isFake = true)
+    /**
+     * 仓库 / KeyVault / 备份全部用 D 的真实实现（DataGraph.inMemory：MemFileStore + FakeKeyVault，进程内、不落盘）；
+     * 只有 ChatEngine（等 B）和 PluginRegistry（等 C）还是本文件的 fake。
+     */
+    fun create(data: DataGraph = DataGraph.inMemory(), engineDelayMs: Long = 35, now: () -> Long = System::currentTimeMillis): UiDeps {
+        if (data.settings.settings.value.providers.isEmpty()) runBlocking {
+            data.settings.update { it.copy(providers = ProviderPresets.defaults()) }
+        }
+        return UiDeps(data.chats, data.settings, data.library, data.keys, FakeChatEngine(data.chats, engineDelayMs, now), FakePluginRegistry(),
+            data.migration, isFake = true)
     }
 }

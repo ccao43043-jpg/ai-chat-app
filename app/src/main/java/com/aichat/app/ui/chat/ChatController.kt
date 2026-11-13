@@ -339,9 +339,11 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
             is StreamEvent.Reasoning -> s.copy(reasoning = s.reasoning + ev.text)
             is StreamEvent.UsageUpdate -> s.copy(usage = ev.usage)
             is StreamEvent.Error -> s.copy(error = ev.message.ifEmpty { "HTTP ${ev.httpStatus}" })
-            else -> started(ev)?.let { (u, a) ->
-                s.copy(pendingUser = s.pendingUser?.copy(id = u ?: s.pendingUser.id), liveId = a ?: s.liveId)
-            } ?: s
+            // 契约 #c：第一个事件给出真实 id（用户消息已落盘、助手消息为空占位），替换乐观显示用的临时 id
+            is StreamEvent.Started -> s.copy(pendingUser = s.pendingUser?.copy(id = ev.userMsgId ?: s.pendingUser.id), liveId = ev.assistantMsgId)
+            // 契约 #4：给用户的轻提示（如 402 降级重试），不影响正文
+            is StreamEvent.Notice -> return@update st.copy(toast = ev.text)
+            else -> s
         }
         st.copy(streams = st.streams + (convId to ns))
     }
@@ -380,15 +382,5 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
 
     companion object {
         const val PENDING_USER_ID = "__pending_user__"
-
-        /**
-         * StreamEvent.Started(userMsgId, assistantMsgId)：协调者已确认、D 将加入契约（native/D）。
-         * 契约落地前这里按名字反射读取，D 合入后改成 `is StreamEvent.Started ->` 一行即可。
-         */
-        fun started(ev: StreamEvent): Pair<String?, String?>? {
-            if (ev.javaClass.simpleName != "Started") return null
-            fun get(name: String) = runCatching { ev.javaClass.getMethod("get" + name.replaceFirstChar { it.uppercase() }).invoke(ev) as? String }.getOrNull()
-            return get("userMsgId") to get("assistantMsgId")
-        }
     }
 }

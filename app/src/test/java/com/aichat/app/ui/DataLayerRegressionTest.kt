@@ -1,0 +1,28 @@
+package com.aichat.app.ui
+
+import com.aichat.app.data.DataGraph
+import com.aichat.app.domain.model.Message
+import com.aichat.app.domain.model.Role
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Ignore
+import org.junit.Test
+
+/**
+ * A 发现的数据层问题复现（归 D 修）：字段从非默认值改回默认值（已确认 truncated true→false、vi 1→0；error→null 未单独验证）后 save，
+ * load 回来仍是旧值——MessageCodec 编码时省略默认值，conv-log diff 把「键缺失」当成「没变」。
+ * 影响：版本切回第 1 个时 ‹1/2› 显示错误；续写成功后「已中断」标记不消失。D 修好后去掉 @Ignore。
+ */
+class DataLayerRegressionTest {
+    @Ignore("D：默认值字段回写不落盘，待 native/D 修复")
+    @Test fun revertToDefaultPersists() = runBlocking {
+        val d = DataGraph.inMemory()
+        val c = d.chats.create("p", "m")
+        val m = Message("m1", Role.ASSISTANT, "hi", 1, truncated = true, error = "e", vi = 1, versions = listOf(null, null))
+        d.chats.save(c.copy(messages = listOf(m)))
+        d.chats.save(c.copy(messages = listOf(m.copy(truncated = false, error = null, vi = 0))))
+        val back = d.chats.load(c.id)!!.messages[0]
+        assertFalse(back.truncated); assertEquals(0, back.vi); assertEquals(null, back.error)
+    }
+}

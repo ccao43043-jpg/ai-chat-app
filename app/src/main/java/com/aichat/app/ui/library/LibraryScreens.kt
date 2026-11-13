@@ -165,7 +165,11 @@ fun TemplatesScreen(onBack: () -> Unit, toast: (String) -> Unit) {
     }
     deleting?.let { t ->
         ConfirmDialog("删除模板？", "「${t.name}」", "删除", danger = true, onDismiss = { deleting = null },
-            onOk = { scope.launch { deps.library.saveTemplates(list.filterNot { it.id == t.id }) } })
+            onOk = { scope.launch {
+                deps.library.saveTemplates(list.filterNot { it.id == t.id })
+                // app.js 4201：删掉内置模板记入 settings.removedTemplates，mergeBuiltins 不再补回
+                if (t.builtin) deps.settings.update { s -> if (t.id in s.removedTemplates) s else s.copy(removedTemplates = s.removedTemplates + t.id) }
+            } })
     }
 }
 

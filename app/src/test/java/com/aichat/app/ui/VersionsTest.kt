@@ -22,7 +22,7 @@ class VersionsTest {
         assertNull(p[1].versions[1])
         p = p.toMutableList().also { it[1] = it[1].copy(content = "答二") }
         val back = Versions.select(p, 1, 0)
-        assertEquals("答一", back[1].content); assertEquals(Usage(prompt = 3, completion = 4), back[1].usage)
+        assertEquals("答一", back[1].content); assertEquals(3L to 4L, back[1].usage!!.prompt to back[1].usage!!.completion)
         assertEquals(0, back[1].vi); assertNull(back[1].versions[0])
         assertEquals("答二", Versions.select(back, 1, 1)[1].content)
     }

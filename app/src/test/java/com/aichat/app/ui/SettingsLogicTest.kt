@@ -1,8 +1,10 @@
 package com.aichat.app.ui
 
 import com.aichat.app.domain.model.ProviderType
-import com.aichat.app.ui.common.fake.FakeKeyVault
-import com.aichat.app.ui.common.fake.FakeSettingsRepository
+import com.aichat.app.data.DataGraph
+import com.aichat.app.domain.KeyVault
+import com.aichat.app.domain.SettingsRepository
+import com.aichat.app.ui.common.fake.FakeDeps
 import com.aichat.app.ui.settings.KeyMask
 import com.aichat.app.ui.settings.ProviderDraft
 import com.aichat.app.ui.settings.ProviderEditor
@@ -17,9 +19,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsLogicTest {
-    private fun setup(): Triple<FakeSettingsRepository, FakeKeyVault, ProviderEditor> {
-        val keys = FakeKeyVault(); val s = FakeSettingsRepository().also { it.keys = keys }
-        return Triple(s, keys, ProviderEditor(s, keys))
+    /** D 的真实 FileSettingsRepository + FakeKeyVault（DataGraph.inMemory） */
+    private fun setup(): Triple<SettingsRepository, KeyVault, ProviderEditor> {
+        val d = FakeDeps.create(DataGraph.inMemory())
+        return Triple(d.settings, d.keys, ProviderEditor(d.settings, d.keys))
     }
 
     @Test fun keyMaskSemantics() {
@@ -74,7 +77,7 @@ class SettingsLogicTest {
         val openai = s.settings.value.providers.first { it.id == "openai" }
         ed.delete(openai)
         assertFalse(s.settings.value.providers.any { it.id == "openai" })
-        assertEquals(listOf("openai"), s.removedPresets); assertTrue(s.settings.value.extras.isEmpty())
+        assertEquals(listOf("openai"), s.settings.value.removedPresets); assertTrue(s.settings.value.extras.isEmpty())
         assertFalse(keys.has("openai"))
     }
 

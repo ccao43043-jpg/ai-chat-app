@@ -49,9 +49,13 @@ class ProviderEditor(private val settings: SettingsRepository, private val keys:
     }
 
     /** 删除服务商及其 Key。旧版的 settings.removedPresets（防止预设被重新合并回来）由 SettingsRepository 负责记录 */
+    /** app.js 3787：删除预设服务商时记入 settings.removedPresets（顶层键，D 的 schema），启动补预设时不再补回 */
     suspend fun delete(p: ProviderConfig) {
         keys.delete(p.id)
-        settings.update { s -> s.copy(providers = s.providers.filterNot { it.id == p.id }) }
+        settings.update { s ->
+            val rm = if (p.presetId.isNotEmpty() && p.presetId != "custom" && p.presetId !in s.removedPresets) s.removedPresets + p.presetId else s.removedPresets
+            s.copy(providers = s.providers.filterNot { it.id == p.id }, removedPresets = rm)
+        }
     }
 
     /** 新建：预设 id 未被占用时直接用 presetId（与旧版 presetToProvider 一致），否则加后缀 */

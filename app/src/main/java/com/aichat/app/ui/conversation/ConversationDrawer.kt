@@ -81,7 +81,7 @@ fun ConversationDrawer(
             }
         }
         HorizontalDivider()
-        TextButton(onClick = onOpenSettings, modifier = Modifier.padding(8.dp)) {
+        TextButton(onClick = onOpenSettings, modifier = Modifier.padding(8.dp).testTag("drawer-settings")) {
             Icon(Icons.Filled.Settings, null); Text("  设置")
         }
     }
