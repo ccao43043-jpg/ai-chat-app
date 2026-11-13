@@ -242,11 +242,17 @@ test('启动冒烟：完整桥 / 残缺桥 / 抛错 / 迁移 / 空服务商，�
           ver: (document.getElementById('about-ver') && document.getElementById('about-ver').textContent) || '',
           mp: (document.getElementById('mp-model') && document.getElementById('mp-model').textContent) || '',
           igSel: !!document.getElementById('ig-model-sel'),
+          tabChat: typeof (document.getElementById('tab-chat') || {}).onclick,
+          tabIg: typeof (document.getElementById('tab-imagegen') || {}).onclick,
+          tabsOn: document.body.classList.contains('tabs-on'),
         }));
         assert.equal(errors.length, 0, c.name + ' 未捕获异常: ' + errors.join(' | '));
         assert.ok(snap.ver && !snap.ver.includes('选择模型'), c.name + ' 关于页版本应已写入');
         assert.notEqual(snap.mp, '选择模型', c.name + ' 模型胶囊不应停留在 HTML 占位（说明 boot 未跑完）');
         assert.ok(snap.igSel, '生图页模型下拉应存在');
+        assert.equal(snap.tabChat, 'function', c.name + ' 底部 Tab「聊天」应在启动时绑定');
+        assert.equal(snap.tabIg, 'function', c.name + ' 底部 Tab「生图」应在启动时绑定');
+        assert.ok(snap.tabsOn, c.name + ' 聊天主界面应显示底部 Tab');
         await assertClicksWork(page);
       } finally {
         await page.close();
