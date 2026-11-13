@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonObject
 /** B 的 ChatEngine 接线前的占位：任何发送都立即返回 Error（UI 可据此显示「引擎未接线」） */
 object UnwiredChatEngine : ChatEngine {
     private fun err() = flowOf<StreamEvent>(StreamEvent.Error(0, "聊天引擎未接线（等待 B 的 ChatEngine）", ""))
-    override fun send(convId: String, userText: String, images: List<String>): Flow<StreamEvent> = err()
+    override fun send(convId: String, userText: String, images: List<String>, files: List<com.aichat.app.domain.model.FileAttachment>): Flow<StreamEvent> = err()
     override fun regenerate(convId: String, assistantMsgId: String) = err()
     override fun continueGeneration(convId: String, assistantMsgId: String) = err()
     override fun stop(convId: String) {}

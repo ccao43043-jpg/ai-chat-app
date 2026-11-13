@@ -135,18 +135,19 @@ object SettingsCodec : Codec<AppSettings> {
     private val showTopCost = Fields.bool("showTopCost", true)
     private val removedPresets = Fields.strList("removedPresets"); private val removedPersonas = Fields.strList("removedPersonas")
     private val removedTemplates = Fields.strList("removedTemplates")
+    private val recentTemplates = Fields.strList("recentTemplates"); private val recentWorlds = Fields.strList("recentWorlds"); private val recentPersonas = Fields.strList("recentPersonas")
     /** 缺省按 JS 语义：autoCharMode 缺失时 v0.8.4 迁移会设为 auto；这里解码缺失为 ""，由 SettingsMigrator 处理 */
     private val autoCharMode = Fields.str("autoCharMode", ""); private val autoCharV084 = Fields.bool("autoCharV084", false)
     override fun decode(o: JsonObject): AppSettings { val r = Reader(o)
         return AppSettings(r.read(providers), r.read(systemPrompt), r.read(stream), r.read(temperature), r.read(maxTokens), r.read(imageSize), r.read(imageGenProviderId),
             r.read(imageGenModel), r.read(lastProviderId), r.read(lastModel), r.read(settingsVersion), r.read(searchOn), r.read(search), r.read(plugins), r.read(showTopCost),
-            r.read(removedPresets), r.read(removedPersonas), r.read(removedTemplates), r.read(autoCharMode), r.read(autoCharV084), r.extras()) }
+            r.read(removedPresets), r.read(removedPersonas), r.read(removedTemplates), r.read(recentTemplates), r.read(recentWorlds), r.read(recentPersonas), r.read(autoCharMode), r.read(autoCharV084), r.extras()) }
     override fun encode(e: AppSettings): JsonObject = Writer(e.extras).apply {
         put(providers, e.providers); put(systemPrompt, e.systemPrompt); put(stream, e.stream); put(temperature, e.temperature); put(maxTokens, e.maxTokens)
         put(imageSize, e.imageSize); put(imageGenProviderId, e.imageGenProviderId); put(imageGenModel, e.imageGenModel); put(lastProviderId, e.lastProviderId)
         put(lastModel, e.lastModel); put(settingsVersion, e.settingsVersion); put(searchOn, e.searchOn); put(search, e.search); put(plugins, e.plugins)
         put(showTopCost, e.showTopCost); put(removedPresets, e.removedPresets); put(removedPersonas, e.removedPersonas)
-        put(removedTemplates, e.removedTemplates); put(autoCharMode, e.autoCharMode); put(autoCharV084, e.autoCharV084) }.build()
+        put(removedTemplates, e.removedTemplates); put(recentTemplates, e.recentTemplates); put(recentWorlds, e.recentWorlds); put(recentPersonas, e.recentPersonas); put(autoCharMode, e.autoCharMode); put(autoCharV084, e.autoCharV084) }.build()
     fun default(): AppSettings = AppSettings(providers = emptyList())
 }
 
@@ -214,16 +215,18 @@ object ConversationCodec : Codec<Conversation> {
     private val createdAt = Fields.long("createdAt"); private val updatedAt = Fields.long("updatedAt")
     private val messages = F("messages", Fields.list("messages", MessageCodec).dec, { v: List<Message> -> JsonArray(v.map(MessageCodec::encode)) })
     private val personaName = Fields.strOrNull("personaName"); private val personaEmoji = Fields.strOrNull("personaEmoji"); private val systemPrompt = Fields.strOrNull("systemPrompt")
+    private val templateId = Fields.strOrNull("templateId"); private val templateName = Fields.strOrNull("templateName"); private val templateEmoji = Fields.strOrNull("templateEmoji")
     override fun decode(o: JsonObject): Conversation {
         val rest = JsonObject(o.filterKeys { it !in RP_KEYS }); val rp = JsonObject(o.filterKeys { it in RP_KEYS })
         val r = Reader(rest)
         return Conversation(r.read(id), r.read(title), r.read(providerId), r.read(model), r.read(createdAt), r.read(updatedAt), r.read(messages),
-            r.read(personaName), r.read(personaEmoji), r.read(systemPrompt), rp, r.extras())
+            r.read(personaName), r.read(personaEmoji), r.read(systemPrompt), r.read(templateId), r.read(templateName), r.read(templateEmoji), rp, r.extras())
     }
     override fun encode(e: Conversation): JsonObject {
         val base = Writer(e.extras).apply {
             put(id, e.id); put(title, e.title); put(providerId, e.providerId); put(model, e.model); put(createdAt, e.createdAt); put(updatedAt, e.updatedAt)
-            put(messages, e.messages); put(personaName, e.personaName); put(personaEmoji, e.personaEmoji); put(systemPrompt, e.systemPrompt) }.build()
+            put(messages, e.messages); put(personaName, e.personaName); put(personaEmoji, e.personaEmoji); put(systemPrompt, e.systemPrompt)
+            put(templateId, e.templateId); put(templateName, e.templateName); put(templateEmoji, e.templateEmoji) }.build()
         return JsonObject(LinkedHashMap(base).apply { e.rpState.forEach { (k, v) -> put(k, v) } })
     }
 }
@@ -293,4 +296,19 @@ object KeyOrder {
         }
         else -> next
     }
+}
+
+/** FileAttachment ⇄ JS user.files[] 元素（app.js send：pages/scanned/imagePages 为假值时不写键） */
+object AttachmentCodec {
+    fun encode(a: FileAttachment): JsonObject = buildJsonObject {
+        put("name", a.name); put("size", Fields.num(a.size.toDouble())); put("kind", a.kind); put("text", a.text)
+        put("total", Fields.num(a.total.toDouble())); put("truncated", a.truncated)
+        a.pages?.takeIf { it != 0 }?.let { put("pages", it) }
+        if (a.scanned) put("scanned", true)
+        a.imagePages?.takeIf { it != 0 }?.let { put("imagePages", it) }
+    }
+    fun decode(o: JsonObject): FileAttachment = FileAttachment(
+        Fields.strOf(o["name"]) ?: "", Fields.numOf(o["size"])?.toLong() ?: 0, Fields.strOf(o["kind"]) ?: "text", Fields.strOf(o["text"]) ?: "",
+        Fields.numOf(o["total"])?.toLong() ?: 0, Fields.boolOf(o["truncated"]) ?: false, Fields.numOf(o["pages"])?.toInt(),
+        Fields.boolOf(o["scanned"]) ?: false, Fields.numOf(o["imagePages"])?.toInt())
 }

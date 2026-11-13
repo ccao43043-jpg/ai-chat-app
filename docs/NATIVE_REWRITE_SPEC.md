@@ -169,6 +169,9 @@ com.aichat.app
 | i | `Badge.action: String?`（点击打开的面板 id）；`PluginContext.notify(text)`，`PluginRegistry.attach(context)`，ChatEngine 把 notify 转成 `StreamEvent.Notice` | `domain/Contracts.kt` |
 | j | C 的 golden 放 `tests/golden-export/` + `app/src/test/resources/golden/` 为正式布局；B 的 `net-golden/` 之后由 D 迁入 | §6 |
 | k | 缓存适配器配置与 JS 同键同位置：JS 放在 provider 对象上（如 `cacheAdapter`），原生读 `ProviderConfig.extras`，Codec 保证往返 | `data/codec/Codecs.kt`（测试 `CodecRoundTripTest`） |
+| m | `ChatEngine.send(convId, userText, images, files: List<FileAttachment> = emptyList())`；`FileAttachment` 键名同 app.js `user.files[]`（name/size/kind/text/total/truncated/pages?/scanned?/imagePages?），`AttachmentCodec` 互转。引擎负责写 files[] 并拼进请求，UI 不再把文件文字并进正文 | `domain/Contracts.kt`、`domain/model/Models.kt` |
+| n | `AppSettings.recentTemplates` / `recentWorlds` / `recentPersonas`（app.js 199 顶层键）。JS 没有 `removedPrompts`，不加 | `domain/model/Models.kt` |
+| o | 对话模板：`Conversation.templateId` / `templateName` / `templateEmoji`（顶层键，清除 = 三个都置 null，编码时删键）。每对话插件开关与数据不建模：`conv.extras["plugins"][id] = { enabled?: Boolean, … }`，enabled 缺失 = 跟随全局 `settings.plugins[id].enabled` | 同上 |
 
 
 ### 3.5 行为对齐政策与有意差异（契约变更 #l）
@@ -179,6 +182,7 @@ com.aichat.app
 | D1 | OpenRouter 402「can only afford N」重试时，只把已构造请求体里的 `max_tokens` 改成 80%（最低 256），不重新走 runBeforeRequest / buildChatRequest | JS 整体重建会让插件统计（rpcache/gcache/usage）重复计数一次 | B `net/` |
 | D2 | conv-log 章节 `contentZ`：Kotlin 用 java.util.zip.Deflater(6)，JS 用 fflate；字节可能不同，互相可解；「压缩后不短于原文就不压」的判定因此个别不同 | 平台无 fflate；replay 结果不受影响（golden 双向验证） | D `data/convlog/JsConvLog.kt` |
 | D4 | `Personas.mergeBuiltins` 的 normalize：基本字段与 JS 一致，但未知字段保留在 extras（JS 会丢） | 无损约定（§3.3-1）；JS 读到多余字段无害 | D `data/repo/Repositories.kt` |
+| D5 | 保存对话时，上次状态里有值、这次缺失的**消息顶层键**显式写 `null`（truncated/error/finishReason/vi…） | conv-log `msg.edit` 是 Object.assign 合并，缺键不删；JS 里 `delete m.truncated` 后重启会复活（JS 潜在 bug），原生 Codec 省略默认值也会撞上。JS 读这些键都是真假判断 / `vi\|0`，null 与缺键等价 | D `FileChatRepository.save` |
 | D3 | conv-log 在 JS 会抛 TypeError 的畸形数据上（如快照缺 tombstones.msg），Kotlin 按「缺失 = 空对象」继续 | 不让坏数据阻塞启动；正常数据行为一致 | D 同上 |
 
 **v1 之后再议（不在 v1.0.0 做）**：① 续写时【续写】后缀从 system 末尾移到追加的 user 消息（保住缓存前缀，属于行为变更）；② OpenRouter `provider.order` 钉住上游与 session_id 粘滞的冲突诊断（mmcache 诊断降级或缓存插件生效时不钉住）。

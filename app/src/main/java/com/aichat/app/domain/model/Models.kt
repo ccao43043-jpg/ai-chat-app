@@ -65,6 +65,9 @@ data class AppSettings(
     val removedPresets: List<String> = emptyList(),   // app.js 3787：删掉的预设服务商，不再自动补回
     val removedPersonas: List<String> = emptyList(),  // Personas.mergeBuiltins 的 removedIds
     val removedTemplates: List<String> = emptyList(), // Templates.mergeBuiltins 的 removedIds
+    val recentTemplates: List<String> = emptyList(),  // app.js 199 / Templates.pushRecent(…, 5)：最近用过的模板 id，新的在前
+    val recentWorlds: List<String> = emptyList(),     // app.js 199
+    val recentPersonas: List<String> = emptyList(),   // app.js 199
     val autoCharMode: String = "auto",                // auto | ask | off
     val autoCharV084: Boolean = false,                // v0.8.4 一次性迁移标记
     val extras: JsonObject = EmptyJson,
@@ -125,6 +128,24 @@ data class Message(
 )
 
 /** 完整对话（ConvLog.load 的输出 / conv_<id>.json 旧格式） */
+/**
+ * 用户消息的文档附件（app.js send() 写入 user.files[] 的形状，键名一致）：
+ * { name, size, kind, text, total, truncated, pages?, scanned?, imagePages? }。
+ * 扫描版 PDF：scanned=true、text=""，渲染出的页图走 images（JS 同样把页图并入 attachments）。
+ * Message.files 仍是原始 JsonObject 列表（无损）；用 [com.aichat.app.data.codec.AttachmentCodec] 互转。
+ */
+data class FileAttachment(
+    val name: String,
+    val size: Long,
+    val kind: String,              // pdf | docx | pptx | xlsx | text …（files.js kind）
+    val text: String,
+    val total: Long,               // 抽取出的总字数（text 可能已被截断）
+    val truncated: Boolean = false,
+    val pages: Int? = null,
+    val scanned: Boolean = false,
+    val imagePages: Int? = null,
+)
+
 data class Conversation(
     val id: String,
     val title: String,
@@ -136,6 +157,12 @@ data class Conversation(
     val personaName: String? = null,
     val personaEmoji: String? = null,
     val systemPrompt: String? = null,
+    /** 对话模板（app.js applyTemplate：conv.templateId / templateName / templateEmoji 顶层键；清除时三个键都删） */
+    val templateId: String? = null,
+    val templateName: String? = null,
+    val templateEmoji: String? = null,
+    /* 每对话插件开关与插件数据不建模：原样在 extras["plugins"]，即 conv.plugins[pluginId] = { enabled?: Boolean, ...插件数据 }
+     * （plugins.js isActive / setForConversation / convData）。enabled 缺失 = 跟随全局 settings.plugins[id].enabled。 */
     /** chapters/affect/affectBy/ledger/worldRef/worldLog/worldPending/kb 等 RP 状态，原样保留 */
     val rpState: JsonObject = EmptyJson,
     val extras: JsonObject = EmptyJson,

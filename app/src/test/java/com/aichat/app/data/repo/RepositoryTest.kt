@@ -37,6 +37,39 @@ class RepositoryTest {
         assertEquals("重新保存未改动的对话不应追加 op", log1, g.store.get("conv_${c.id}.log.jsonl"))
     }
 
+    /** A 报的回归（native/A DataLayerRegressionTest）：字段改回默认值必须落盘，重启后也不复活；JS 回放同一 store 结果一致 */
+    @Test fun revertToDefaultPersistsAndReplaysInJs() = runBlocking {
+        val g = graph()
+        val c = g.chats.create("p", "m")
+        val m = Message("m1", Role.ASSISTANT, "hi", 1, truncated = true, error = "e", finishReason = "length", vi = 1, versions = listOf(null, null))
+        g.chats.save(c.copy(messages = listOf(m)))
+        g.chats.save(c.copy(messages = listOf(m.copy(truncated = false, error = null, finishReason = null, vi = 0))))
+        for (back in listOf(g.chats.load(c.id)!!, graphOn(g).chats.load(c.id)!!)) {   // 会话缓存 + 冷启动重放
+            val b = back.messages[0]
+            assertFalse(b.truncated); assertEquals(0, b.vi); assertNull(b.error); assertNull(b.finishReason)
+        }
+        // 再存一次不应产生新 op（null 已是当前状态）
+        val log = g.store.get("conv_${c.id}.log.jsonl")
+        graphOn(g).let { g2 -> g2.chats.save(g2.chats.load(c.id)!!, touch = false) }
+        assertEquals(log, g.store.get("conv_${c.id}.log.jsonl"))
+        // 改回非默认值也照常生效
+        g.chats.save(g.chats.load(c.id)!!.let { it.copy(messages = listOf(it.messages[0].copy(truncated = true, vi = 1))) })
+        graphOn(g).chats.load(c.id)!!.messages[0].let { assertTrue(it.truncated); assertEquals(1, it.vi) }
+        // Kotlin → JS：JS ConvLog.load 读到的状态与 Kotlin 一致
+        g.chats.save(g.chats.load(c.id)!!.let { it.copy(messages = listOf(it.messages[0].copy(truncated = false, vi = 0, error = null))) })
+        val e = com.aichat.app.data.convlog.JsConvLog(now = { t }); val st = com.aichat.app.data.store.StoreJs(g.store)
+        val expect = e.load(st, c.id)!!
+        val mm = (expect["messages"] as List<*>)[0] as com.aichat.app.data.json.JsObj
+        assertFalse(Js.truthy(mm["truncated"])); assertFalse(Js.truthy(mm["error"])); assertEquals(0, Js.int32(mm["vi"]))
+        val files = com.aichat.app.data.json.JsObj(); g.store.list().sorted().filterNot { it.endsWith(".bak") }.forEach { files[it] = g.store.get(it) }
+        val f = java.io.File(com.aichat.app.golden.Golden.kotlinOutDir, "convlog-k2j-revert.jsonl")
+        f.parentFile.mkdirs(); f.writeText(Js.stringify(com.aichat.app.data.json.JsObj("label" to "revert", "id" to c.id, "files" to files, "expect" to expect)) + "\n")
+        org.junit.Assume.assumeTrue(com.aichat.app.golden.Golden.nodeBinary() != null)
+        val (code, text) = com.aichat.app.golden.Golden.runNode("tests/golden-export/verify-kotlin.mjs", "convlog", f.path)
+        assertEquals(text, 0, code)
+    }
+    private fun graphOn(g: DataGraph) = DataGraph(g.store, g.keys, java.io.File(System.getProperty("java.io.tmpdir"), "aichat-t"), now = { t })
+
     @Test fun legacyConversationLoadsAndKeepsOriginalFile() = runBlocking {
         val legacy = """{"id":"old1","title":"旧对话","providerId":"p","model":"m","createdAt":1,"updatedAt":2,"messages":[{"id":"u","role":"user","content":"hi","createdAt":1}],"customKey":{"a":1}}"""
         val g = graph(mapOf("conv_old1.json" to legacy, "device-id.json" to """{"dev":"dev-x"}"""))

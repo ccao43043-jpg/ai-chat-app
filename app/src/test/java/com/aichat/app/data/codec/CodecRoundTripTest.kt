@@ -73,6 +73,24 @@ class CodecRoundTripTest {
         assertEquals("9", u2["hit"].toString()); assertEquals(obj("""{"x":1}"""), u2["raw"])
     }
 
+    @Test fun templateFieldsAndPluginToggles() {
+        val o = obj("""{"id":"c","title":"t","providerId":"p","model":"m","createdAt":1,"updatedAt":2,"messages":[],"systemPrompt":"s",
+          "templateId":"t-x","templateName":"翻译","templateEmoji":"🌐","plugins":{"rpcache":{"enabled":true,"state":{}},"gcache":{"enabled":false}}}""")
+        val c = ConversationCodec.decode(o)
+        assertEquals("t-x", c.templateId); assertEquals("🌐", c.templateEmoji)
+        assertEquals(false, c.extras["plugins"]!!.jsonObject["gcache"]!!.jsonObject["enabled"]!!.jsonPrimitive.boolean)
+        assertSem(o, ConversationCodec.encode(c))
+        val cleared = ConversationCodec.encode(c.copy(templateId = null, templateName = null, templateEmoji = null))
+        assertFalse(cleared.containsKey("templateId") || cleared.containsKey("templateName") || cleared.containsKey("templateEmoji"))
+        val s = SettingsCodec.decode(obj("""{"providers":[],"recentTemplates":["a","b"],"recentWorlds":[],"recentPersonas":["p"]}"""))
+        assertEquals(listOf("a", "b"), s.recentTemplates); assertEquals(listOf("p"), s.recentPersonas)
+        assertEquals(JsonArray(listOf(JsonPrimitive("t"), JsonPrimitive("a"))), SettingsCodec.encode(s.copy(recentTemplates = listOf("t", "a")))["recentTemplates"])
+        val f = obj("""{"name":"a.pdf","size":1234,"kind":"pdf","text":"x","total":10,"truncated":false,"pages":3}""")
+        assertSem(f, AttachmentCodec.encode(AttachmentCodec.decode(f)))
+        val sc = AttachmentCodec.encode(com.aichat.app.domain.model.FileAttachment("s.pdf", 9, "pdf", "", 0, scanned = true, imagePages = 4))
+        assertEquals(obj("""{"name":"s.pdf","size":9,"kind":"pdf","text":"","total":0,"truncated":false,"scanned":true,"imagePages":4}"""), sc)
+    }
+
     @Test fun libraryEntitiesRoundTrip() {
         val p = obj("""{"id":"p1","emoji":"🤖","name":"n","desc":"","systemPrompt":"s","providerId":"","model":"","temperature":"","builtin":false,"firstMes":"hi","cardRaw":{"spec":"v2"}}""")
         assertSem(p, PersonaCodec.encode(PersonaCodec.decode(p)))

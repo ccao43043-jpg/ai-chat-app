@@ -222,7 +222,11 @@ interface PluginRegistry : RequestTransformer {
  *  5. 出错：错误文案写进助手消息的 error 字段（与 JS 相同；已收到的正文保留），save，并发 StreamEvent.Error。
  */
 interface ChatEngine {
-    fun send(convId: String, userText: String, images: List<String>): Flow<StreamEvent>
+    /**
+     * 契约变更 #m：files = 文档附件（已抽取文字），引擎写进用户消息 files[]（AttachmentCodec.encode，与 app.js 一致），
+     * 并按 JS toRequestMsg 把文字拼进发给模型的内容——UI 不再自己把文件文字并进 userText。
+     */
+    fun send(convId: String, userText: String, images: List<String>, files: List<FileAttachment> = emptyList()): Flow<StreamEvent>
     fun regenerate(convId: String, assistantMsgId: String): Flow<StreamEvent>
     fun continueGeneration(convId: String, assistantMsgId: String): Flow<StreamEvent>
     fun stop(convId: String)
