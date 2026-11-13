@@ -2,6 +2,7 @@ package com.aichat.app.net
 
 import com.aichat.app.domain.ChatOptions
 import com.aichat.app.domain.KeyVault
+import com.aichat.app.domain.ProviderRegistration
 import com.aichat.app.domain.StreamEvent
 import com.aichat.app.domain.WireMessage
 import com.aichat.app.domain.model.AuthType
@@ -31,8 +32,7 @@ class ProviderStreamTest {
     private val vault = FakeVault(mapOf("or" to "sk-test"))
     private val http = OkHttpClient.Builder().readTimeout(5, TimeUnit.SECONDS).followRedirects(false).build()
     private val registered = mutableMapOf<String, String>()
-    private val notices = mutableListOf<String>()
-    private val client = DefaultProviderClient(AuthInjector(vault) { registered[it] }, http) { notices += it }
+    private val client = DefaultProviderClient(AuthInjector(vault.withReg { registered[it] }), http)
 
     init { registered["or"] = server.baseUrl + "/api/v1" }
 
@@ -62,7 +62,9 @@ class ProviderStreamTest {
         assertEquals(listOf(StreamEvent.Reasoning("想"), StreamEvent.Delta("你好😀"), StreamEvent.Finish("stop")),
             ev.filter { it is StreamEvent.Reasoning || it is StreamEvent.Delta || it is StreamEvent.Finish })
         val u = ev.filterIsInstance<StreamEvent.UsageUpdate>().last().usage
-        assertEquals(Usage(prompt = 100, completion = 3, hit = 64, miss = 36, cacheSupported = true, source = "openai", costUsd = 0.0012), u)
+        assertEquals(Usage(prompt = 100, completion = 3, hit = 64, miss = 36, cacheSupported = true, source = "openai", costUsd = 0.0012), u.copy(raw = null))
+        // 契约 #1：raw = 服务商原始 usage
+        assertEquals("""{"prompt_tokens":100,"completion_tokens":3,"cost":0.0012,"prompt_tokens_details":{"cached_tokens":64}}""", Js.stringify(u.raw))
         assertTrue(ev.none { it is StreamEvent.Error })
 
         val rec = server.requests.poll(1, TimeUnit.SECONDS)!!
@@ -80,9 +82,12 @@ class ProviderStreamTest {
             ex.text("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}],\"usage\":{\"prompt_tokens\":50}}\n\n")
             ex.text("data: {\"choices\":[],\"usage\":{\"completion_tokens\":7,\"prompt_cache_hit_tokens\":40,\"prompt_cache_miss_tokens\":10,\"prompt_tokens\":50}}\n\ndata: [DONE]\n\n")
         }
-        val us = collect(req()).filterIsInstance<StreamEvent.UsageUpdate>().map { it.usage }
+        val all = collect(req()).filterIsInstance<StreamEvent.UsageUpdate>().map { it.usage }
+        val us = all.map { it.copy(raw = null) }
         assertEquals(Usage(prompt = 50), us[0])
         assertEquals(Usage(prompt = 50, completion = 7, hit = 40, miss = 10, cacheSupported = true, source = "deepseek"), us[1])
+        // 多块原始 usage 浅合并（后到覆盖）
+        assertEquals("""{"prompt_tokens":50,"completion_tokens":7,"prompt_cache_hit_tokens":40,"prompt_cache_miss_tokens":10}""", Js.stringify(all[1].raw))
     }
 
     @Test fun httpErrorBodyBecomesReadableError() {
@@ -103,14 +108,13 @@ class ProviderStreamTest {
         }
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(200); ex.text("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n") }
         val ev = collect(req())
-        assertEquals(listOf(StreamEvent.Status(402), StreamEvent.Status(200), StreamEvent.Delta("ok")), ev)
+        assertEquals(listOf(StreamEvent.Status(402), StreamEvent.Notice("额度不足，已将最大输出降至 8000 并重试…"), StreamEvent.Status(200), StreamEvent.Delta("ok")), ev)
         val first = server.requests.poll(1, TimeUnit.SECONDS)!!; val second = server.requests.poll(1, TimeUnit.SECONDS)!!
         assertTrue(first.body.contains("\"max_tokens\":65536"))
         // 与 JS 重建请求体逐字一致（只有 max_tokens 不同）
         val rebuilt = client.buildChatRequest(provider(), "m", listOf(WireMessage(Role.USER, "hi")), "sys", ChatOptions(maxTokens = 8000, convId = "c1"))
         assertEquals(rebuilt.body, second.body)
         assertEquals("Bearer sk-test", second.headers["authorization"])
-        assertEquals(listOf("额度不足，已将最大输出降至 8000 并重试…"), notices)
     }
 
     @Test fun unregisteredProviderIsNeverSent() {
@@ -129,7 +133,7 @@ class ProviderStreamTest {
 
     @Test fun anthropicStreamEndToEnd() {
         val anthVault = FakeVault(mapOf("cl" to "sk-ant"), AuthType.ANTHROPIC)
-        val c = DefaultProviderClient(AuthInjector(anthVault) { if (it == "cl") server.baseUrl else null }, http)
+        val c = DefaultProviderClient(AuthInjector(anthVault.withReg { if (it == "cl") server.baseUrl else null }), http)
         val p = ProviderConfig("cl", "anthropic", "Claude", ProviderType.ANTHROPIC, server.baseUrl, listOf("claude-opus-5-5"))
         fun ev(name: String, json: String) = "event: $name\ndata: $json\n\n"
         val sse = ev("message_start", """{"type":"message_start","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":2000,"cache_creation_input_tokens":100,"output_tokens":1}}}""") +
@@ -144,7 +148,7 @@ class ProviderStreamTest {
         val events = runBlocking { withTimeout(10_000) { c.stream(p, r).toList() } }
         assertEquals(listOf(StreamEvent.Reasoning("先想"), StreamEvent.Delta("答案😀")), events.filter { it is StreamEvent.Delta || it is StreamEvent.Reasoning })
         assertEquals(Usage(prompt = 2105, completion = 42, hit = 2000, miss = 105, cacheWrite = 100, cacheSupported = true, source = "anthropic"),
-            events.filterIsInstance<StreamEvent.UsageUpdate>().last().usage)
+            events.filterIsInstance<StreamEvent.UsageUpdate>().last().usage.copy(raw = null))
         val rec = server.requests.poll(1, TimeUnit.SECONDS)!!
         assertEquals("/v1/messages", rec.path)
         assertEquals("sk-ant", rec.headers["x-api-key"]); assertNull(rec.headers["authorization"])
@@ -155,7 +159,7 @@ class ProviderStreamTest {
 
     @Test fun anthropicHttpErrorAndMidStreamError() {
         val anthVault = FakeVault(mapOf("cl" to "k"), AuthType.ANTHROPIC)
-        val c = DefaultProviderClient(AuthInjector(anthVault) { server.baseUrl }, http)
+        val c = DefaultProviderClient(AuthInjector(anthVault.withReg { server.baseUrl }), http)
         val p = ProviderConfig("cl", "anthropic", "Claude", ProviderType.ANTHROPIC, server.baseUrl, listOf("m"))
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(529, "application/json"); ex.text("""{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}""") }
         val r = c.buildChatRequest(p, "m", listOf(WireMessage(Role.USER, "hi")), "", ChatOptions())
@@ -171,7 +175,7 @@ class ProviderStreamTest {
     }
 
     @Test fun anthropic402DowngradePatchesMaxTokens() {
-        val c = DefaultProviderClient(AuthInjector(FakeVault(mapOf("cl" to "k"), AuthType.ANTHROPIC)) { server.baseUrl }, http)
+        val c = DefaultProviderClient(AuthInjector(FakeVault(mapOf("cl" to "k"), AuthType.ANTHROPIC).withReg { server.baseUrl }), http)
         val p = ProviderConfig("cl", "anthropic", "Claude", ProviderType.ANTHROPIC, server.baseUrl, listOf("m"))
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(402, "application/json"); ex.text("""{"error":{"message":"can only afford 1000"}}""") }
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(200); ex.text("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n") }
@@ -186,7 +190,7 @@ class ProviderStreamTest {
     @Test fun geminiStreamEndToEnd() {
         val gVault = FakeVault(mapOf("g" to "AIza-test"), AuthType.GEMINI)
         val base = server.baseUrl + "/v1beta"
-        val c = DefaultProviderClient(AuthInjector(gVault) { base }, http)
+        val c = DefaultProviderClient(AuthInjector(gVault.withReg { base }), http)
         val p = ProviderConfig("g", "gemini", "Gemini", ProviderType.GEMINI, base, listOf("gemini-3.8-flash"))
         val sse = "data: " + """{"candidates":[{"content":{"role":"model","parts":[{"text":"想","thought":true}]}}],"usageMetadata":{"promptTokenCount":5000,"candidatesTokenCount":1}}""" + "\r\n\r\n" +
             "data: " + """{"candidates":[{"content":{"role":"model","parts":[{"text":"你好"}]}}],"usageMetadata":{"promptTokenCount":5000,"candidatesTokenCount":8,"thoughtsTokenCount":4,"cachedContentTokenCount":4096}}""" + "\r\n\r\n" +
@@ -196,7 +200,7 @@ class ProviderStreamTest {
         val events = runBlocking { withTimeout(10_000) { c.stream(p, r).toList() } }
         assertEquals(listOf(StreamEvent.Reasoning("想"), StreamEvent.Delta("你好"), StreamEvent.Delta("！")), events.filter { it is StreamEvent.Delta || it is StreamEvent.Reasoning })
         assertEquals(Usage(prompt = 5000, completion = 13, hit = 4096, miss = 904, cacheSupported = true, source = "gemini"),
-            events.filterIsInstance<StreamEvent.UsageUpdate>().last().usage)
+            events.filterIsInstance<StreamEvent.UsageUpdate>().last().usage.copy(raw = null))
         val rec = server.requests.poll(1, TimeUnit.SECONDS)!!
         assertEquals("/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse", rec.path)
         assertEquals("AIza-test", rec.headers["x-goog-api-key"]); assertNull(rec.headers["authorization"])
@@ -204,12 +208,12 @@ class ProviderStreamTest {
     }
 
     @Test fun geminiNonStreamAndErrorBody() {
-        val c = DefaultProviderClient(AuthInjector(FakeVault(mapOf("g" to "k"), AuthType.GEMINI)) { server.baseUrl }, http)
+        val c = DefaultProviderClient(AuthInjector(FakeVault(mapOf("g" to "k"), AuthType.GEMINI).withReg { server.baseUrl }), http)
         val p = ProviderConfig("g", "gemini", "Gemini", ProviderType.GEMINI, server.baseUrl, listOf("m"))
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(200, "application/json"); ex.text("""{"candidates":[{"content":{"parts":[{"text":"整包"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}""") }
         val r = c.buildChatRequest(p, "m", listOf(WireMessage(Role.USER, "hi")), "", ChatOptions(stream = false))
         assertTrue(r.url.endsWith("/models/m:generateContent"))
-        assertEquals(listOf(StreamEvent.Status(200), StreamEvent.UsageUpdate(Usage(prompt = 3, completion = 2)), StreamEvent.Delta("整包")), runBlocking { c.stream(p, r).toList() })
+        assertEquals(listOf(StreamEvent.Status(200), StreamEvent.UsageUpdate(Usage(prompt = 3, completion = 2)), StreamEvent.Delta("整包")), runBlocking { c.stream(p, r).toList() }.noRaw())
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(400, "application/json"); ex.text("""[{"error":{"code":400,"message":"API key not valid","status":"INVALID_ARGUMENT"}}]""") }
         val e = runBlocking { c.stream(p, r).toList() }[1] as StreamEvent.Error
         assertEquals("HTTP 400（请求参数有误）：API key not valid", e.message)
@@ -234,7 +238,7 @@ class ProviderStreamTest {
         // 请求了流式，服务商却回了整包 JSON → 兜底解析
         val ev = collect(req(stream = true))
         assertEquals(listOf(StreamEvent.Status(200), StreamEvent.Reasoning("r"), StreamEvent.Delta("整包"), StreamEvent.Finish("stop"),
-            StreamEvent.UsageUpdate(Usage(prompt = 3, completion = 2))), ev)
+            StreamEvent.UsageUpdate(Usage(prompt = 3, completion = 2))), ev.noRaw())
         server.handlers += TinySseServer.Handler { _, ex -> ex.head(200, "application/json"); ex.text("{\"choices\":[{\"message\":{\"content\":\"x\"}}]}") }
         val ev2 = collect(req(stream = false))
         assertEquals(listOf(StreamEvent.Status(200), StreamEvent.Delta("x")), ev2)
@@ -282,18 +286,17 @@ class ProviderStreamTest {
         assertEquals("Bearer sk-test", rec.headers["authorization"]); assertNull(rec.headers["x-api-key"]); assertEquals("1", rec.headers["x-custom"])
 
         val foreign = r.copy(url = "http://example.invalid/api/v1/chat/completions")
-        notices.clear()
         val ev = collect(foreign)
         assertEquals(listOf(StreamEvent.Error(0, "请求地址与服务商 Base URL 不一致，已拒绝", "")), ev)
         assertEquals(0, server.requests.size)
     }
 
     @Test fun anthropicKeyHeaderAndNoKeyCase() {
-        val inj = AuthInjector(FakeVault(mapOf("a" to "k1"), AuthType.ANTHROPIC)) { "https://api.anthropic.com" }
+        val inj = AuthInjector(FakeVault(mapOf("a" to "k1"), AuthType.ANTHROPIC).withReg { "https://api.anthropic.com" })
         val br = com.aichat.app.domain.BuiltRequest("https://api.anthropic.com/v1/messages", "POST", mapOf("x-api-key" to "old"), "{}")
         assertEquals(mapOf("x-api-key" to "k1"), inj.authorize("a", br).headers)
         // 已登记但未存 Key：同旧版 NativeBridge，不带 Key 发出（只剥掉调用方的认证头）
-        assertEquals(emptyMap<String, String>(), AuthInjector(FakeVault(emptyMap())) { "https://api.anthropic.com" }.authorize("a", br).headers)
+        assertEquals(emptyMap<String, String>(), AuthInjector(FakeVault(emptyMap()).withReg { "https://api.anthropic.com" }).authorize("a", br).headers)
     }
 
     @Test fun redirectsAreNotFollowedForKeyedRequests() {
@@ -319,5 +322,14 @@ class ProviderStreamTest {
         override fun delete(providerId: String) {}
         override fun keyFor(providerId: String, requestUrl: String) = keys[providerId]
         override fun authType(providerId: String) = type
+        override fun registration(providerId: String): ProviderRegistration? = null
     }
+}
+
+fun List<StreamEvent>.noRaw() = map { if (it is StreamEvent.UsageUpdate) StreamEvent.UsageUpdate(it.usage.copy(raw = null)) else it }
+
+/** 测试用：给 KeyVault 套上登记表（baseUrl → ProviderRegistration，origin 用 SecretKeyVault.originOf） */
+fun KeyVault.withReg(f: (String) -> String?): KeyVault = object : KeyVault by this {
+    override fun registration(providerId: String): ProviderRegistration? =
+        f(providerId)?.let { ProviderRegistration(it, com.aichat.app.data.secret.SecretKeyVault.originOf(it), authType(providerId)) }
 }

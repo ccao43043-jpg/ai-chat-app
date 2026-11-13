@@ -97,7 +97,8 @@ object UsageCodec {
     }
 
     private fun long(e: JsonElement?): Long? = Js.num(e)?.toLong()
-    fun toUsage(u: JsonObject?): Usage? {
+    /** 归一化 usage（JS 形状）→ 契约 Usage；raw = 服务商原始 usage JSON（多块时浅合并，后到覆盖） */
+    fun toUsage(u: JsonObject?, raw: JsonObject? = null): Usage? {
         if (u == null) return null
         return Usage(
             prompt = long(u["prompt"]), completion = long(u["completion"]), hit = long(u["hit"]), miss = long(u["miss"]),
@@ -105,6 +106,9 @@ object UsageCodec {
             cacheSupported = (u["cacheSupported"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.booleanOrNull,
             source = (u["source"] as? JsonPrimitive)?.takeIf { it.isString }?.content,
             costUsd = Js.num(u["cost"]),
+            upstreamCost = Js.num(u["upstreamCost"]),
+            cacheSaved = Js.num(u["cacheSaved"]),
+            raw = raw,
         )
     }
 }

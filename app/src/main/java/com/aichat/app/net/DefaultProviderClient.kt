@@ -40,20 +40,18 @@ import java.util.concurrent.atomic.AtomicReference
 class DefaultProviderClient(
     private val auth: AuthInjector,
     private val client: OkHttpClient = HttpClients.authed,
-    /** TODO(D 契约 #4)：改为在流里发 StreamEvent.Notice(text)；在那之前用回调把提示交给 ChatEngine */
-    private val notices: ((String) -> Unit)? = null,
 ) : ProviderClient {
 
-    constructor(keys: KeyVault?, registry: ProviderRegistry) : this(AuthInjector(keys, registry))
+    constructor(keys: KeyVault?) : this(AuthInjector(keys))
 
     override fun buildChatRequest(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
                                   opts: ChatOptions, bodyPatch: JsonObject): BuiltRequest =
-        buildChatRequest(provider, model, messages, systemPrompt, opts, bodyPatch, NetOptions())
+        buildChatRequest(provider, model, messages, systemPrompt, opts, bodyPatch, RouteInputs())
 
-    /** TODO(D 契约 #2)：ext 字段并入 ChatOptions 后删掉这个重载 */
+    /** 带 OpenRouter 路由状态的版本（opts.routePrices 分支用；B 内部） */
     fun buildChatRequest(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
-                         opts: ChatOptions, bodyPatch: JsonObject, ext: NetOptions): BuiltRequest = when (provider.type) {
-        ProviderType.OPENAI -> OpenAiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch, ext)
+                         opts: ChatOptions, bodyPatch: JsonObject, route: RouteInputs): BuiltRequest = when (provider.type) {
+        ProviderType.OPENAI -> OpenAiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch, route)
         ProviderType.ANTHROPIC -> AnthropicCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch)
         ProviderType.GEMINI -> GeminiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch)
     }
@@ -67,6 +65,7 @@ class DefaultProviderClient(
             var req = request
             var downgraded = false
             var usage: JsonObject? = null
+            var rawUsage: JsonObject? = null
             while (true) {
                 val authed = try { auth.authorize(provider.id, req) } catch (e: AuthInjector.Rejected) {
                     send(StreamEvent.Error(0, e.message ?: "请求失败", "")); break
@@ -87,7 +86,8 @@ class DefaultProviderClient(
                             is StreamDelta.Finish -> send(StreamEvent.Finish(d.reason))
                             is StreamDelta.UsageDelta -> {
                                 usage = UsageCodec.mergeUsage(usage, d.usage)
-                                UsageCodec.toUsage(usage)?.let { send(StreamEvent.UsageUpdate(it)) }
+                                d.raw?.let { r -> rawUsage = JsonObject(LinkedHashMap<String, JsonElement>(rawUsage ?: emptyMap()).apply { putAll(r) }) }
+                                UsageCodec.toUsage(usage, rawUsage)?.let { send(StreamEvent.UsageUpdate(it)) }
                             }
                         }
                     }
@@ -117,7 +117,7 @@ class DefaultProviderClient(
                                     downgraded = true
                                     val next = ProviderRules.downgradeMaxTokens(afford)
                                     req = withMaxTokens(req, provider.type, next)
-                                    notices?.invoke(downgradeNotice(next))   // TODO(D 契约 #4)：send(StreamEvent.Notice(...))
+                                    send(StreamEvent.Notice(downgradeNotice(next)))
                                     retry = true
                                     return@use
                                 }

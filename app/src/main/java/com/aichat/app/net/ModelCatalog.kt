@@ -139,7 +139,7 @@ object ModelCatalog {
             parsePricing(m["pricing"])?.let { o["price"] = it }
             if (o.isNotEmpty()) out[id] = JsonObject(o)
         }
-        return JsonObject(out)
+        return Js.jsObject(out)
     }
 
     // ---------------- 价格 ----------------

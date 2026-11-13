@@ -363,6 +363,28 @@ const routeChatLines = [];
   });
 }
 
+// ---------------- providerMigration（Providers.migrateSettings）/ UsageStats.normalize / PRESETS ----------------
+const U = require(path.join(WWW, 'usage-stats.js'));
+const presetLines = [{ in: [], out: { PRESETS: P.PRESETS, OLD_DEFAULTS: P.OLD_DEFAULTS, RETIRED: P.RETIRED, SETTINGS_VERSION: P.SETTINGS_VERSION } }];
+const oldProv = (presetId, extra) => Object.assign({ id: 'p_' + presetId, presetId, name: (P.OLD_DEFAULTS[presetId] && P.OLD_DEFAULTS[presetId].name) || presetId, type: 'openai',
+  baseUrl: (P.OLD_DEFAULTS[presetId] && P.OLD_DEFAULTS[presetId].baseUrl) || 'https://x', models: (P.OLD_DEFAULTS[presetId] || { models: [] }).models.slice(), imageModel: (P.OLD_DEFAULTS[presetId] && P.OLD_DEFAULTS[presetId].imageModel) || '', apiKey: 'sk-keep' }, extra || {});
+const migCases = [
+  null, {}, { settingsVersion: 2, providers: [oldProv('deepseek')] }, { settingsVersion: '2', providers: [] }, { settingsVersion: 3 },
+  { providers: Object.keys(P.OLD_DEFAULTS).map(id => oldProv(id)), lastProviderId: 'p_deepseek', lastModel: 'deepseek-reasoner', theme: 'dark' },
+  { settingsVersion: 1, providers: [oldProv('deepseek', { models: ['deepseek-reasoner', 'deepseek-chat', 'my-model', '', 'my-model'], baseUrl: 'https://api.deepseek.com/v1///' }),
+    oldProv('moonshot', { models: ['kimi-latest', 'moonshot-v1-8k'], name: 'Moonshot (Kimi)' }), oldProv('moonshot', { id: 'm2', models: ['moonshot-v1-8k', 'kimi-latest', 'moonshot-v1-32k', 'moonshot-v1-128k'] }),
+    oldProv('openai', { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o4-mini', ''], imageModel: 'gpt-image-1' }),
+    oldProv('openai', { id: 'o2', models: ['gpt-4o'], imageModel: 'dall-e-3' }), oldProv('custom', { models: ['x'] }), { id: 'bare', presetId: 'zhipu' },
+    { id: 'p_q', presetId: 'qwen', models: [] }], lastProviderId: 'm2', lastModel: 'kimi-latest' },
+  { settingsVersion: 0, providers: [oldProv('deepseek')], lastModel: 'deepseek-chat' },
+  { providers: [{ presetId: 'deepseek', models: ['deepseek-chat'] }], lastModel: 'deepseek-chat' },
+  { settingsVersion: null, lastProviderId: 'nope', lastModel: 'deepseek-chat', providers: [oldProv('deepseek')] },
+];
+const migLines = migCases.map(c => { const r = P.migrateSettings(clone(c)); return { in: [c], out: { settings: r.settings, changed: r.changed } }; });
+const normCases = [null, {}, { log: 'x', priceMode: 'weird', calib: null, version: 9, extra: 1 }, { prices: { 'qwen-plus': { hit: 0.1, miss: 0.8, out: 2 }, default: { hit: 0, miss: 1, out: 2 } }, priceMode: 'peak', backfilled: true, log: [{ key: 'a' }], calib: { m: { scale: 1.1 } } },
+  { prices: null, priceMode: 'offpeak', calib: [] }, { prices: 'ab', calib: 'x' }, { backfilled: null, priceMode: null, calib: 0 }, 'str', 5, false];
+const normLines = normCases.map(c => ({ in: [c], out: U.normalize(clone(c)) }));
+
 const files = {
   'localeCompare.jsonl': lcLines,
   'classifyModel.jsonl': clsLines,
@@ -385,6 +407,9 @@ const files = {
   'planOpenRouterRoute.jsonl': planLines,
   'observeRoute.jsonl': obsRouteLines,
   'buildChatRequest.route.jsonl': routeChatLines,
+  'presets.jsonl': presetLines,
+  'migrateSettings.jsonl': migLines,
+  'usageStats.normalize.jsonl': normLines,
 };
 let diff = 0;
 for (const [f, lines] of Object.entries(files)) {

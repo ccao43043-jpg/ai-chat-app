@@ -329,7 +329,11 @@ object Router {
             put("hitRate", h?.let { Js.number(it) } ?: JsonNull)
             put("lastSwitchAt", Js.number(ms?.lastSwitchAt?.takeIf { !it.isNaN() } ?: 0.0))
             put("obs", JsonPrimitive(if (st != null) Js.toInt32(st.obs) else 0))
-            p?.get("calibScale")?.let { put("calibScale", it) }
+            // JS：priceMap && slug && priceMap[slug] && priceMap[slug].calibScale —— 前两项为 null 时值是 null，后两项缺失时整键消失
+            when {
+                priceMap == null || slug == null -> put("calibScale", JsonNull)
+                p != null -> p["calibScale"]?.let { put("calibScale", it) }
+            }
         }
     }
 
