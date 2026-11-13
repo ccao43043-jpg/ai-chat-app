@@ -23,7 +23,7 @@
 |---|---|---|
 | [`feat/native-v1`](https://github.com/ccao43043-jpg/ai-chat-app/tree/feat/native-v1) | `334e023` | 共享基线：规格、数据层、迁移、备份、golden 框架、模拟器旧数据回归 |
 | [`native/A`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/A) | `bbda014` | 界面：壳、Tab、聊天、抽屉、设置、助手/提示词/模板库、附件、编辑/重生成/续写/版本、RP 冻结与徽章 |
-| [`native/B-r2`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/B-r2) | `db53f4f` | 网络与引擎：OpenAI / Anthropic / Gemini 流式、路由、附件展开、写入顺序对齐 JS。请用这一支，不要用下面的旧 `native/B` |
+| [`native/B-r2`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/B-r2) | `b957c8a` | 网络与引擎：流式、路由、附件、写入顺序对齐 JS，并已把联网搜索和 NetRetry 接到引擎。请用这一支，不要用下面的旧 `native/B` |
 | [`native/B`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/B) | `f9e16b4` | **旧头**（未接 files 参数）。rebase 后非快进，没有强推，仅作历史保留 |
 | [`native/C`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/C) | `ba4ece7` | 插件与 RP 领域：gcache / mmcache / usage、知识库 BM25F+MMR、affect、角色卡、世界书（三路合并、从全文填入）、AutoChar、rpcache 状态核心 |
 | [`native/D`](https://github.com/ccao43043-jpg/ai-chat-app/tree/native/D) | `334e023` | 与 `feat/native-v1` 同提交 |
@@ -45,7 +45,7 @@ git push origin native/integ:refs/heads/native/integ
 
 待整合时再对的细节：`UiDeps.charCard` 与 `ChatMounts.rp`（`RpUiHooks`）留给 C 注册。
 
-### B 网络与引擎（g胖）— 聊天主路径基本完成，搜索/费用/生图未接上引擎
+### B 网络与引擎（g胖）— 聊天主路径（含搜索和重试）已完成，成本和生图页未做
 
 已完成：
 
@@ -60,9 +60,9 @@ git push origin native/integ:refs/heads/native/integ
 - D6 排序：含非拉丁字符时用 `Collator(Locale.CHINESE)`；纯拉丁仍用已与 Node golden 对齐的近似排序（Java Collator 对 ASCII 标点和大小写与 ICU 不同）
 - `native/B-r2` 上 `testDebugUnitTest` 112/112 通过，三份 golden `--check` 一致（以作者报告为准，整合线上已开始复测）
 
-已写好但**尚未接入引擎**的代码与 golden（见 `21cebe7`）：`NetRetry`、联网搜索、`FileContext`、`CostCoreJs`、`UsageStats` 统计、`Balance`、`formatModelPrice`。
+在 `b957c8a`（2026-11-14 02:30 香港时间）已把联网搜索和 `NetRetry` 接到引擎：改写查询、`searchQuery` / `sources` / `searchError` / `lastUser.search`，退避重试并经 `Notice` 提示（「已重试 N 次」），另有 M4 golden（netretry / search / files.context）和引擎测试。这份提交晚于当前 `native/integ`（仍基于 `db53f4f`），整合树还需要再快进合并一次。
 
-还没做：把搜索和 `NetRetry` 接到引擎，成本和余额，生图页（`ImageClient` / `ImageScreen`），用量页。
+还没做：成本和余额接到产品路径，生图页（`ImageClient` / `ImageScreen`），用量页。`CostCoreJs` / `UsageStats` / `Balance` / `formatModelPrice` 的代码和 golden 已在树里（`21cebe7`），但未完全接到界面和引擎产品路径。
 
 后续提交请快进推到 `native/B-r2`。
 
@@ -112,7 +112,7 @@ git push origin native/integ:refs/heads/native/integ
 按优先顺序：
 
 1. 完成 I1：整合树通过单测 / golden / 模拟器真聊天验收，产出签过名的 `1.0.0-alpha1` 调试包
-2. B：引擎接上搜索和 `NetRetry`，然后成本和余额，最后生图页和用量页
+2. B：把 `b957c8a`（搜索 + NetRetry）并进整合树；然后成本和余额，最后生图页和用量页
 3. C：rpcache 请求组装，其余插件钩子、RP 页面，再并入 `native/integ`
 4. 全应用模拟器回归（含插件），对照旧版行为
 5. M4 发版准备：`versionName` 改为 `1.0.0`，用本地 `keystore.properties`（不进 git）做 release 签名，`apksigner` 核对证书，Release 说明写上「不可降级，请先导出备份」
