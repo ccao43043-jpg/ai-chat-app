@@ -58,6 +58,15 @@ object Js {
         d == Math.floor(d) && Math.abs(d) < 1e15 -> JsonPrimitive(d.toLong())
         else -> kotlinx.serialization.json.JsonUnquotedLiteral(numberToString(d))
     }
+    /** 能精确回读为 d 的最短十进制（JDK 17 的 Double.toString 并不总是最短，如 4.9E-324 vs 5e-324） */
+    private fun shortest(d: Double): java.math.BigDecimal {
+        val exact = java.math.BigDecimal(d)
+        for (p in 1..17) {
+            val r = exact.round(java.math.MathContext(p, java.math.RoundingMode.HALF_EVEN))
+            if (r.toDouble() == d) return r.stripTrailingZeros()
+        }
+        return java.math.BigDecimal(java.lang.Double.toString(d)).stripTrailingZeros()
+    }
     /** Number.prototype.toString()（ECMAScript Number::toString，基数 10）：1e21 → "1e+21"，1e-7 → "1e-7"，8e19 → "80000000000000000000" */
     fun numberToString(d: Double): String {
         if (d.isNaN()) return "NaN"
@@ -65,7 +74,7 @@ object Js {
         if (d == Double.NEGATIVE_INFINITY) return "-Infinity"
         if (d == 0.0) return "0"
         if (d < 0) return "-" + numberToString(-d)
-        val bd = java.math.BigDecimal(java.lang.Double.toString(d)).stripTrailingZeros()
+        val bd = shortest(d)
         val digits = bd.unscaledValue().toString()
         val k = digits.length
         val n = k - bd.scale()
@@ -78,6 +87,16 @@ object Js {
                 (if (k == 1) digits else digits[0] + "." + digits.substring(1)) + "e" + (if (e >= 0) "+" else "-") + Math.abs(e)
             }
         }
+    }
+    /** JS 对象键序：数组下标形的键（"0"、"12"，< 2^32−1，无前导 0）按数值升序排最前，其余保持插入序 */
+    fun jsObject(m: Map<String, JsonElement>): JsonObject {
+        fun idx(k: String): Long? = if (k.isEmpty() || k.length > 10 || (k.length > 1 && k[0] == '0') || !k.all { it in '0'..'9' }) null
+            else k.toLong().takeIf { it < 4294967295L }
+        if (m.keys.none { idx(it) != null }) return JsonObject(m)
+        val out = LinkedHashMap<String, JsonElement>()
+        m.keys.mapNotNull { k -> idx(k)?.let { k to it } }.sortedBy { it.second }.forEach { (k, _) -> out[k] = m[k]!! }
+        m.forEach { (k, v) -> if (idx(k) == null) out[k] = v }
+        return JsonObject(out)
     }
     /** JS 的 x | 0（ToInt32） */
     fun toInt32(d: Double): Int {

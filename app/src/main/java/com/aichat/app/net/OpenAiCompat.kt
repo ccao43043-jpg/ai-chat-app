@@ -17,7 +17,7 @@ import kotlinx.serialization.json.put
  * providers.js buildChatRequest 的 OpenAI 兼容分支（openai / deepseek / qwen / qwen-intl / moonshot / zhipu / siliconflow /
  * xiaomi / openrouter / custom）。键的插入顺序与 JS 完全相同，body 用 [Js.stringify] 输出，与 JSON.stringify 逐字一致。
  *
- * ChatOptions 待加的 opts（cacheSystem / cacheAffinity / orSort / orGemini / orMiniMax / routePrices）暂由 [NetOptions] 传入。
+ * opts 与 JS 一一对应：ChatOptions.cacheSystem / cacheAffinity / orSort / orGemini / orMiniMax / routePrices（契约 #2）；路由状态走 [RouteInputs]。
  * OpenRouter 钉上游优先级同 JS：providerOrder[0] → routeSlug → routePrices 经 [Router.chooseUpstream] 现场选（选中回调 onRouteChosen）。
  * bodyPatch 按 RFC 7386 合并（[JsonMergePatch]）。
  * 不含认证头：由 [AuthInjector] 注入。
@@ -41,14 +41,14 @@ object OpenAiCompat {
     }
 
     fun buildBody(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
-                  opts: ChatOptions, bodyPatch: JsonObject = JsonObject(emptyMap()), ext: NetOptions = NetOptions()): JsonObject {
+                  opts: ChatOptions, bodyPatch: JsonObject = JsonObject(emptyMap()), route: RouteInputs = RouteInputs()): JsonObject {
         val stream = opts.stream
         val base = Js.trimSlash(provider.baseUrl)
         val msgs = filterMessages(messages)
         val sys = Js.trim(systemPrompt)
         val temp = opts.temperature?.takeIf { !it.isNaN() }
         val cc = opts.cacheControl
-        val cacheSystem = ext.cacheSystem
+        val cacheSystem = opts.cacheSystem != false
         val split = if (cc && cacheSystem && opts.cacheSystemSplit > 0 && opts.cacheSystemSplit < sys.length) opts.cacheSystemSplit else 0
 
         val out = buildJsonArray {
@@ -81,27 +81,27 @@ object OpenAiCompat {
         if (opts.jsonMode && ProviderRules.jsonModeSupported(provider)) body["response_format"] = buildJsonObject { put("type", "json_object") }
 
         if (ProviderRules.isOpenRouterBase(provider.presetId, base)) {
-            val affinity = ext.cacheAffinity && provider.cacheAffinity != false
+            val affinity = opts.cacheAffinity != false && provider.cacheAffinity != false
             var pinned = false
             if (affinity && opts.providerOrder.isNotEmpty()) {
                 body["provider"] = ProviderRules.buildProviderField(opts.providerOrder[0]); pinned = true
             } else if (affinity && !opts.routeSlug.isNullOrEmpty()) {
                 body["provider"] = ProviderRules.buildProviderField(opts.routeSlug); pinned = true
-            } else if (affinity && ext.routePrices.isNotEmpty()) {
+            } else if (affinity && opts.routePrices.isNotEmpty()) {
                 // JS：st = routerState&&routerModel ? ensureModel(…)（会写入状态树） : (routerModelState || {})
-                val st = if (ext.routerState != null && !ext.routerModel.isNullOrEmpty()) Router.ensureModel(ext.routerState, ext.routerModel)
-                    else ext.routerModelState
-                val chosen = Router.chooseUpstream(ext.routePrices, st, ext.routeCurrent?.takeIf { it.isNotEmpty() } ?: st?.current,
-                    ext.prefixTokens, ext.routerOpts)
+                val st = if (route.routerState != null && !route.routerModel.isNullOrEmpty()) Router.ensureModel(route.routerState, route.routerModel)
+                    else route.routerModelState
+                val chosen = Router.chooseUpstream(opts.routePrices, st, route.routeCurrent?.takeIf { it.isNotEmpty() } ?: st?.current,
+                    route.prefixTokens, route.routerOpts)
                 if (!chosen.isNullOrEmpty()) {
                     body["provider"] = ProviderRules.buildProviderField(chosen)
-                    ext.onRouteChosen?.invoke(chosen)
+                    route.onRouteChosen?.invoke(chosen)
                     pinned = true
                 }
             }
-            if (!pinned) ProviderRules.openRouterSortField(provider, ext.orSort)?.let { body["provider"] = it }
+            if (!pinned) ProviderRules.openRouterSortField(provider, opts.orSort)?.let { body["provider"] = it }
             // v0.28.7：稳定 session_id；gcache / mmcache 生效时由插件经 bodyPatch 写自己的 session_id（下方合并时覆盖）
-            if (body["session_id"] == null && !opts.convId.isNullOrEmpty() && !ext.orGemini && !ext.orMiniMax) {
+            if (body["session_id"] == null && !opts.convId.isNullOrEmpty() && !opts.orGemini && !opts.orMiniMax) {
                 val sid = ProviderRules.orSessionIdFor(opts.convId)
                 if (sid.isNotEmpty()) body["session_id"] = JsonPrimitive(sid)
             }
@@ -111,8 +111,8 @@ object OpenAiCompat {
     }
 
     fun build(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
-              opts: ChatOptions, bodyPatch: JsonObject = JsonObject(emptyMap()), ext: NetOptions = NetOptions()): BuiltRequest {
-        val body = buildBody(provider, model, messages, systemPrompt, opts, bodyPatch, ext)
+              opts: ChatOptions, bodyPatch: JsonObject = JsonObject(emptyMap()), route: RouteInputs = RouteInputs()): BuiltRequest {
+        val body = buildBody(provider, model, messages, systemPrompt, opts, bodyPatch, route)
         val headers = LinkedHashMap<String, String>()
         headers["Content-Type"] = "application/json"
         if (opts.stream) headers["Accept"] = "text/event-stream"

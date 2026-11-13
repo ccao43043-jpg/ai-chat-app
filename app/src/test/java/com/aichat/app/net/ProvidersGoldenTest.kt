@@ -18,7 +18,7 @@ import kotlin.random.Random
 /** 工作流 B · M1：Kotlin 实现 vs providers.js（Node 导出的 golden） */
 class ProvidersGoldenTest {
 
-    private val builder = DefaultProviderClient(AuthInjector(null) { null })
+    private val builder = DefaultProviderClient(AuthInjector(null))
 
     @Test fun buildChatRequestOpenAiMatchesJsByteForByte() = checkBuild("buildChatRequest.openai.jsonl", 40)
     @Test fun buildChatRequestAnthropicMatchesJsByteForByte() = checkBuild("buildChatRequest.anthropic.jsonl", 10)
@@ -30,7 +30,7 @@ class ProvidersGoldenTest {
         for (c in cases) {
             val (p, model, msgs, sys, opts) = c.input
             val r = builder.buildChatRequest(Golden.provider(p), (model as JsonPrimitive).content, Golden.messages(msgs),
-                (sys as JsonPrimitive).content, Golden.opts(opts), JsonObject(emptyMap()), Golden.ext(opts))
+                (sys as JsonPrimitive).content, Golden.opts(opts), JsonObject(emptyMap()))
             val exp = c.out as JsonObject
             assertEquals("${c.name} url", (exp["url"] as JsonPrimitive).content, r.url)
             assertEquals("${c.name} method", (exp["method"] as JsonPrimitive).content, r.method)

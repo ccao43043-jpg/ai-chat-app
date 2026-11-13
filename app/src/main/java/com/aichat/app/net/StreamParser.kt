@@ -12,7 +12,8 @@ sealed interface StreamDelta {
     data class Text(val text: String) : StreamDelta
     data class Reasoning(val text: String) : StreamDelta
     data class Error(val text: String) : StreamDelta
-    data class UsageDelta(val usage: JsonObject) : StreamDelta
+    /** usage = normalizeUsage 结果（golden 比这个）；raw = 服务商原始 usage 对象（Usage.raw，契约 #1） */
+    data class UsageDelta(val usage: JsonObject, val raw: JsonObject? = null) : StreamDelta
     data class Finish(val reason: String) : StreamDelta
 
     /** 与 JS 对象同形（golden 比对用） */
@@ -43,7 +44,7 @@ object Deltas {
             "anthropic" -> {
                 val t = s(ob["type"])
                 val au = if (t == "message_start" && Js.truthy(ob["message"])) o(ob["message"])?.get("usage") else ob["usage"]
-                UsageCodec.normalizeUsage("anthropic", au)?.let { out += StreamDelta.UsageDelta(it) }
+                UsageCodec.normalizeUsage("anthropic", au)?.let { out += StreamDelta.UsageDelta(it, au as? JsonObject) }
                 val delta = o(ob["delta"])
                 if (t == "content_block_delta" && Js.truthy(ob["delta"])) {
                     when (s(delta?.get("type"))) {
@@ -65,7 +66,7 @@ object Deltas {
             }
             "gemini" -> {
                 if (Js.truthy(ob["error"])) { out += StreamDelta.Error(errText(ob["error"]!!)); return out }
-                UsageCodec.normalizeUsage("gemini", ob["usageMetadata"])?.let { out += StreamDelta.UsageDelta(it) }
+                UsageCodec.normalizeUsage("gemini", ob["usageMetadata"])?.let { out += StreamDelta.UsageDelta(it, ob["usageMetadata"] as? JsonObject) }
                 val c0 = o((ob["candidates"] as? JsonArray)?.firstOrNull())
                 val parts = o(c0?.get("content"))?.get("parts")
                 if (Js.truthy(c0?.get("content")) && Js.truthy(parts)) (parts as? JsonArray)?.forEach { p ->
@@ -83,7 +84,7 @@ object Deltas {
                     s(d["content"])?.takeIf { it.isNotEmpty() }?.let { out += StreamDelta.Text(it) }
                     if (Js.truthy(ch["finish_reason"])) out += StreamDelta.Finish(Js.str(ch["finish_reason"]))
                 }
-                UsageCodec.normalizeUsage("openai", ob["usage"])?.let { out += StreamDelta.UsageDelta(it) }
+                UsageCodec.normalizeUsage("openai", ob["usage"])?.let { out += StreamDelta.UsageDelta(it, ob["usage"] as? JsonObject) }
             }
         }
         return out

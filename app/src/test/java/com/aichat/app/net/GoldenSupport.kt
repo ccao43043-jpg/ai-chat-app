@@ -82,12 +82,39 @@ object Golden {
             cacheSystemSplit = (o["cacheSystemSplit"] as? JsonPrimitive)?.intOrNull ?: 0,
             providerOrder = (o["providerOrder"] as? JsonArray)?.mapNotNull { str(it) } ?: emptyList(),
             routeSlug = str(o["routeSlug"]),
+            cacheSystem = bool(o["cacheSystem"]), cacheAffinity = bool(o["cacheAffinity"]), orSort = str(o["orSort"]),
+            orGemini = Js.truthy(o["orGemini"]), orMiniMax = Js.truthy(o["orMiniMax"]),
+            routePrices = (o["routePrices"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList(),
         )
     }
-    /** JS opts 里 ChatOptions 尚未建模的字段（D 契约 #2 落地前走 NetOptions） */
-    fun ext(e: JsonElement?): NetOptions {
+    /** JS opts 里路由状态相关字段 → RouteInputs（onRouteChosen 由调用方给） */
+    fun route(e: JsonElement?, onChosen: ((String) -> Unit)? = null): RouteInputs {
         val o = e as? JsonObject ?: JsonObject(emptyMap())
-        return NetOptions(cacheSystem = bool(o["cacheSystem"]) != false, cacheAffinity = bool(o["cacheAffinity"]) != false,
-            orSort = str(o["orSort"]), orGemini = Js.truthy(o["orGemini"]), orMiniMax = Js.truthy(o["orMiniMax"]))
+        return RouteInputs(
+            routerState = (o["routerState"] as? JsonObject)?.let { Router.State.fromJson(it) },
+            routerModel = str(o["routerModel"]),
+            routerModelState = (o["routerModelState"] as? JsonObject)?.let { Router.ModelState.fromJson(it) },
+            routeCurrent = str(o["routeCurrent"]),
+            prefixTokens = o["prefixTokens"]?.let { Js.toNumber(it) }?.takeIf { it == it } ?: 0.0,
+            routerOpts = Router.Settings.of(o["routerOpts"] as? JsonObject),
+            onRouteChosen = onChosen,
+        )
+    }
+    /** 精确比较（数字 double 必须 ==，不给容差；用于 Router 数值） */
+    fun exactEquals(a: JsonElement?, b: JsonElement?): Boolean {
+        val x = a ?: JsonNull; val y = b ?: JsonNull
+        if (x is JsonNull || y is JsonNull) return x is JsonNull && y is JsonNull
+        if (x is JsonObject && y is JsonObject) return x.keys == y.keys && x.keys.all { exactEquals(x[it], y[it]) }
+        if (x is JsonArray && y is JsonArray) return x.size == y.size && x.indices.all { exactEquals(x[it], y[it]) }
+        if (x is JsonPrimitive && y is JsonPrimitive) {
+            if (x.isString || y.isString) return x.isString == y.isString && x.content == y.content
+            val bx = x.booleanOrNull; val by = y.booleanOrNull
+            if (bx != null || by != null) return bx == by
+            return x.doubleOrNull != null && x.doubleOrNull == y.doubleOrNull
+        }
+        return false
+    }
+    fun assertExact(label: String, expected: JsonElement?, actual: JsonElement?) {
+        if (!exactEquals(expected, actual)) fail("$label\n  expected: ${Js.stringify(expected)}\n  actual:   ${Js.stringify(actual)}")
     }
 }
