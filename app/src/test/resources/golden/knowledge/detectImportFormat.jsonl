@@ -1,0 +1,19 @@
+{"in":[""],"out":"empty"}
+{"in":["   "],"out":"empty"}
+{"in":["random text"],"out":"unknown"}
+{"in":["{\"categories\":[{\"id\":\"housing\",\"entries\":[{\"title\":\"A\",\"content\":\"x\"}]}],\"worldId\":\" w9 \"}"],"out":"json"}
+{"in":["[{\"id\":\"other\",\"entries\":[{\"id\":\"e1\",\"title\":\"T\"}]}]"],"out":"json"}
+{"in":["[{\"title\":\"a\",\"category\":\"locations\"},{\"title\":\"b\",\"categoryName\":\"新地方\",\"pinned\":\"是\"}]"],"out":"ndjson"}
+{"in":["{\"title\":\"one\",\"content\":\"c\",\"tags\":\"x, y\"}"],"out":"ndjson"}
+{"in":["{\"title\":\"a\"}\n{\"title\":\"b\",\"category_id\":\"actions\"}\n// c\n# d\n"],"out":"markdown"}
+{"in":["{\"a\":1}\n[1]\n"],"out":"unknown"}
+{"in":["{\"title\":\"a\"}\n{bad json}\n"],"out":"unknown"}
+{"in":["﻿## housing\n### 客厅\nkeywords: 沙发，电视\ntags: a b\npinned: yes\nid: e-x\n\n正文第一行\n\n第二段\n### 无元数据\n正文\nkeywords: 不是元数据\n## 自定义 分类\n### 条目\n内容\n## Weird Name Here\n### t\n"],"out":"markdown"}
+{"in":["# 只有一级\n正文"],"out":"markdown"}
+{"in":["## cat\n没有三级标题"],"out":"markdown"}
+{"in":["[1,2]"],"out":"ndjson"}
+{"in":["{\"categories\":\"x\"}"],"out":"ndjson"}
+{"in":["\"str\""],"out":"unknown"}
+{"in":["{\"title\":\"x\"} trailing"],"out":"unknown"}
+{"in":["[{\"title\":\"x\"}]\n"],"out":"ndjson"}
+{"in":["## housing\n### A\nid: e1\n内容1\n## other\n### B\n内容2\n"],"out":"markdown"}

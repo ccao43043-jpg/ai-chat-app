@@ -1,0 +1,14 @@
+{"in":["",""],"out":""}
+{"in":["","INJ"],"out":"INJ"}
+{"in":["正文",""],"out":"正文"}
+{"in":["正文","INJ"],"out":"正文\n\nINJ"}
+{"in":["A\n[MEMORY_UPDATE]\nm1  \n[CURRENT_STATE]\ns",""],"out":"A\n[MEMORY_UPDATE]\nm1  \n[CURRENT_STATE]\ns"}
+{"in":["A\n[MEMORY_UPDATE]\nm1  \n[CURRENT_STATE]\ns","INJ"],"out":"A\n[MEMORY_UPDATE]\nm1\n\nINJ\n\n[CURRENT_STATE]\ns"}
+{"in":["A\n[MEMORY_UPDATE]\nm1\n\n",""],"out":"A\n[MEMORY_UPDATE]\nm1\n\n"}
+{"in":["A\n[MEMORY_UPDATE]\nm1\n\n","INJ"],"out":"A\n[MEMORY_UPDATE]\nm1\n\nINJ"}
+{"in":["A\n[MEMORY_UPDATE]\nm\n[X]\ny",""],"out":"A\n[MEMORY_UPDATE]\nm\n[X]\ny"}
+{"in":["A\n[MEMORY_UPDATE]\nm\n[X]\ny","INJ"],"out":"A\n[MEMORY_UPDATE]\nm\n\nINJ\n[X]\ny"}
+{"in":["pre  \n\n[CURRENT_STATE]\nnow",""],"out":"pre  \n\n[CURRENT_STATE]\nnow"}
+{"in":["pre  \n\n[CURRENT_STATE]\nnow","INJ"],"out":"pre\n\nINJ\n\n[CURRENT_STATE]\nnow"}
+{"in":[null,""],"out":null}
+{"in":[null,"INJ"],"out":"INJ"}

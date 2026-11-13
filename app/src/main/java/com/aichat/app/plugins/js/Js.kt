@@ -24,7 +24,7 @@ fun num(v: Any?): Any? = when (v) { is Int -> v.toDouble(); is Long -> v.toDoubl
 object Js {
     // ───────── 类型判断 / 转换 ─────────
     fun truthy(v: Any?): Boolean = when (v) {
-        null -> false; is Boolean -> v; is Double -> !(v == 0.0 || v.isNaN()); is Number -> v.toDouble().let { !(it == 0.0 || it.isNaN()) }
+        null, Undefined -> false; is Boolean -> v; is Double -> !(v == 0.0 || v.isNaN()); is Number -> v.toDouble().let { !(it == 0.0 || it.isNaN()) }
         is String -> v.isNotEmpty(); else -> true
     }
     fun isStr(v: Any?) = v is String
