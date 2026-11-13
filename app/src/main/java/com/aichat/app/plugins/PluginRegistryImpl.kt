@@ -7,18 +7,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.*
 
-/**
- * C 侧扩展契约：旧版 app.js 在 buildChatRequest 之后调用 gcache / mmcache 的 transformRequest（改写请求体：合并 system、断点、session_id、Hybrid 窗口）。
- * Contracts.kt 里没有这个钩子 —— 已在报告里提请 D/B：ChatEngine 需在 buildChatRequest 之后（含 402 降级重建之后）调用 [PluginRegistryImpl.transformRequest]。
- */
-interface RequestTransformer {
-    fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest
-}
-
-/** 插件宿主（对应 app.js 的 pluginHost 中插件用到的部分）。 */
-interface PluginHost {
+/** 插件宿主（对应 app.js 的 pluginHost 中插件用到的部分）；notify = 旧版 host.toast，经 [PluginRegistry.attach] 绑定的 [PluginContext] 转给 ChatEngine */
+interface PluginHost : PluginContext {
     fun now(): Long
-    fun toast(text: String)
     /** reg.convData(conv, id)：对话级插件数据的可变镜像（= conv.plugins[id]），runAfterResponse 时写回 conv.extras.plugins */
     fun convData(conv: Conversation, id: String): JObj
     /** reg.config(settings, id)：settings.plugins[id] 的 JS 值副本 */
@@ -33,8 +24,10 @@ interface PluginHost {
  */
 class PluginRegistryImpl(
     private val clock: () -> Long = { System.currentTimeMillis() },
-    private val onToast: (String) -> Unit = {},
 ) : PluginRegistry, PluginHost {
+    @Volatile private var context: PluginContext? = null
+    /** 契约变更 #i：ChatEngine 每轮发送前绑定；插件 notify 的文字经它变成 StreamEvent.Notice */
+    override fun attach(context: PluginContext) { this.context = context }
     private val list = mutableListOf<ChatPlugin>()
     override val plugins: List<ChatPlugin> get() = list.toList()
     private val _errors = MutableStateFlow<List<JsonObject>>(emptyList())
@@ -98,13 +91,14 @@ class PluginRegistryImpl(
         return cur
     }
 
-    /** 依次调用实现了 [RequestTransformer] 的生效插件（旧版只有 gcache、mmcache，顺序 gcache → mmcache）；出错时保留上一步请求 */
-    fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest {
+    /**
+     * 契约变更 #g：按注册顺序调用各插件的 ChatPlugin.transformRequest（默认原样返回）。
+     * 旧版 app.js 只对 gcache / mmcache 调用，且由插件自己在 onBeforeRequest 写入的 opts.orGemini / orMiniMax 把关（这里同样由插件读 ctx.meta 自行把关）；
+     * 出错时保留上一步请求（旧版 console.warn，不计入插件错误列表）。
+     */
+    override fun transformRequest(req: BuiltRequest, ctx: RequestContext): BuiltRequest {
         var r = req
-        for (id in listOf("gcache", "mmcache")) {
-            val p = get(id) as? RequestTransformer ?: continue
-            r = try { p.transformRequest(r, ctx) } catch (e: Throwable) { r }
-        }
+        for (p in list) r = try { p.transformRequest(r, ctx) } catch (e: Throwable) { r }
         return r
     }
 
@@ -137,7 +131,7 @@ class PluginRegistryImpl(
 
     // ── PluginHost ──
     override fun now(): Long = clock()
-    override fun toast(text: String) = onToast(text)
+    override fun notify(text: String) { context?.notify(text) }
     override fun convData(conv: Conversation, id: String): JObj {
         val m = convPlugins.getOrPut(conv.id) { (Js.fromJson(conv.extras["plugins"]) as? JObj) ?: JObj() }
         return (m[id] as? JObj) ?: JObj().also { m[id] = it }
@@ -150,8 +144,8 @@ class PluginRegistryImpl(
         val ORDER = listOf("knowledge", "rpcache", "usage", "gcache", "mmcache", "affect")
 
         /** 默认组装：按 ORDER 注册已实现的插件 */
-        fun createDefault(clock: () -> Long = { System.currentTimeMillis() }, onToast: (String) -> Unit = {}): PluginRegistryImpl {
-            val reg = PluginRegistryImpl(clock, onToast)
+        fun createDefault(clock: () -> Long = { System.currentTimeMillis() }): PluginRegistryImpl {
+            val reg = PluginRegistryImpl(clock)
             val impls: Map<String, (PluginHost) -> ChatPlugin> = mapOf(
                 "usage" to { _ -> com.aichat.app.plugins.usage.UsagePlugin() },
                 "gcache" to { h -> com.aichat.app.plugins.cache.GCachePluginImpl(h) },

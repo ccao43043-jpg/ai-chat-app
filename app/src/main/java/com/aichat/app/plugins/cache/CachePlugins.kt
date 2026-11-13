@@ -6,7 +6,6 @@ import com.aichat.app.domain.rp.GCachePlugin
 import com.aichat.app.domain.rp.MmCachePlugin
 import com.aichat.app.plugins.PluginHost
 import com.aichat.app.plugins.PluginRegistryImpl
-import com.aichat.app.plugins.RequestTransformer
 import com.aichat.app.plugins.js.*
 import kotlinx.serialization.json.JsonObject
 
@@ -31,7 +30,7 @@ internal fun withBotInfo(conv: Conversation, botId: String, key: String, info: A
     conv.copy(messages = conv.messages.map { m -> if (m.id == botId) m.copy(extras = m.extras.plus(key, info)) else m })
 
 /** www/plugins/cache/gcache.js 插件部分（hooks + transformRequest） */
-class GCachePluginImpl(private val host: PluginHost) : GCachePlugin, RequestTransformer {
+class GCachePluginImpl(private val host: PluginHost) : GCachePlugin {
     override val id = GCache.ID
     override val name = "Gemini 提示缓存（OpenRouter）"
     override val defaultEnabled = true
@@ -142,16 +141,16 @@ class GCachePluginImpl(private val host: PluginHost) : GCachePlugin, RequestTran
                     s["missStreak"] = if (i["hit"].truthy()) 0.0 else Js.i32(s["missStreak"]) + 1.0
                     if (s["missStreak"].d() == 2.0 && o["missAlert"] != false) {
                         val why = Js.str(Js.or(if (s["hitAttr"].truthy()) s["hitAttr"]["text"] else null, "LCP≥90% 且在 TTL 内，可能被路由到不同供应商或缓存被驱逐"))
-                        host.toast("💎 连续 2 轮应命中却未命中：$why")
+                        host.notify("💎 连续 2 轮应命中却未命中：$why")
                     }
                 } else if (i["hit"].truthy()) s["missStreak"] = 0.0
             } else if (i["hit"].truthy()) s["missStreak"] = 0.0
             if (o["toast"].truthy()) {
                 var t = GCache.usageText(i)
                 if (s["hitAttr"].truthy() && s["hitAttr"]["text"].truthy()) t += " · " + s["hitAttr"]["text"].jstr()
-                host.toast(t)
+                host.notify(t)
             }
-            if (o["diagToast"].truthy() && s["diag"]["level"] == "low" && prev != "low") host.toast("💎 缓存命中率 " + Js.str(s["diag"]["rate"]) + "%：" + Js.str(s["diag"]["issues"].a()!![0]))
+            if (o["diagToast"].truthy() && s["diag"]["level"] == "low" && prev != "low") host.notify("💎 缓存命中率 " + Js.str(s["diag"]["rate"]) + "%：" + Js.str(s["diag"]["issues"].a()!![0]))
         }
         return conv
     }
@@ -159,9 +158,9 @@ class GCachePluginImpl(private val host: PluginHost) : GCachePlugin, RequestTran
     override fun messageBadges(msg: Message, conv: Conversation): List<Badge> {
         val i = if (msg.role == Role.ASSISTANT) Js.fromJson(msg.extras["gcache"]) else null
         if (!i.truthy()) return emptyList()
-        if (i["known"] == false) return listOf(Badge(id, "💎 缓存 ?", "info", GCache.usageText(i)))
+        if (i["known"] == false) return listOf(Badge(id, "💎 缓存 ?", "info", GCache.usageText(i), action = id))
         val pct = i["pct"].d()
-        return listOf(Badge(id, "💎 缓存 " + Js.str(i["pct"]), if (pct >= GCache.DIAG_GOOD) "ok" else if (i["hit"].truthy()) "warn" else "info", GCache.usageText(i)).let { it.copy(text = it.text + "%") })
+        return listOf(Badge(id, "💎 缓存 " + Js.str(i["pct"]), if (pct >= GCache.DIAG_GOOD) "ok" else if (i["hit"].truthy()) "warn" else "info", GCache.usageText(i), action = id).let { it.copy(text = it.text + "%") })
     }
     override fun headerBadges(conv: Conversation): List<Badge> {
         val s = Js.fromJson((conv.extras["plugins"] as? JsonObject)?.get(id))["stat"]
@@ -169,12 +168,12 @@ class GCachePluginImpl(private val host: PluginHost) : GCachePlugin, RequestTran
         val d = if (s["diag"].truthy()) s["diag"] else GCache.diagnose(s)
         if (d["rate"] == null) return emptyList()
         val tn = when (d["level"]) { "good" -> "ok"; "low" -> "bad"; "ok" -> "warn"; else -> "info" }
-        return listOf(Badge(id, "命中 " + Js.str(d["rate"]) + "%", tn, "Gemini 滚动命中率（近 " + GCache.ROLL_N + " 次）"))
+        return listOf(Badge(id, "命中 " + Js.str(d["rate"]) + "%", tn, "Gemini 滚动命中率（近 " + GCache.ROLL_N + " 次）", action = id))
     }
 }
 
 /** www/plugins/cache/mmcache.js 插件部分 */
-class MmCachePluginImpl(private val host: PluginHost) : MmCachePlugin, RequestTransformer {
+class MmCachePluginImpl(private val host: PluginHost) : MmCachePlugin {
     override val id = MmCache.ID
     override val name = "MiniMax 提示缓存（OpenRouter）"
     override val defaultEnabled = true
@@ -221,8 +220,8 @@ class MmCachePluginImpl(private val host: PluginHost) : MmCachePlugin, RequestTr
         s["lastPromptEst"] = i["prompt"]
         val conv = withBotInfo(ctx.conv, result.assistant.id, "mmcache", i)
         val prev = s["diag"]["level"]; s["diag"] = MmCache.diagnose(s)
-        if (o["toast"].truthy()) host.toast(MmCache.usageText(i))
-        if (o["diagToast"].truthy() && s["diag"]["level"] == "low" && prev != "low") host.toast("🧊 MiniMax 缓存命中率 " + Js.str(s["diag"]["rate"]) + "%：" + Js.str(s["diag"]["issues"].a()!![0]))
+        if (o["toast"].truthy()) host.notify(MmCache.usageText(i))
+        if (o["diagToast"].truthy() && s["diag"]["level"] == "low" && prev != "low") host.notify("🧊 MiniMax 缓存命中率 " + Js.str(s["diag"]["rate"]) + "%：" + Js.str(s["diag"]["issues"].a()!![0]))
         return conv
     }
     override fun messageBadges(msg: Message, conv: Conversation): List<Badge> {
@@ -237,6 +236,6 @@ class MmCachePluginImpl(private val host: PluginHost) : MmCachePlugin, RequestTr
         val d = if (s["diag"].truthy()) s["diag"] else MmCache.diagnose(s)
         if (d["rate"] == null) return emptyList()
         val tn = when (d["level"]) { "good" -> "ok"; "low" -> "bad"; "ok" -> "warn"; else -> "info" }
-        return listOf(Badge(id, "命中 " + Js.str(d["rate"]) + "%", tn, "MiniMax 滚动命中率（近 " + MmCache.ROLL_N + " 次）"))
+        return listOf(Badge(id, "命中 " + Js.str(d["rate"]) + "%", tn, "MiniMax 滚动命中率（近 " + MmCache.ROLL_N + " 次）", action = id))
     }
 }

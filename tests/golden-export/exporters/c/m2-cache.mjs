@@ -1,5 +1,5 @@
 // 工作流 C · M2 golden 导出：cache-common / gcache / mmcache / plugins 管线 + JS 语义基础（数字格式、JSON.stringify）。
-// 用法：node tests/golden-export/c-m2-cache.mjs [--check]
+// 用法：node tests/golden-export/exporters/c/m2-cache.mjs [--check]
 // 输出：app/src/test/resources/golden/<module>/<fn>.jsonl，每行 {"in":[…],"out":…}
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const WWW = ROOT + '/app/src/main/assets/www';
 const OUT = ROOT + '/app/src/test/resources/golden';
 const CHECK = process.argv.includes('--check');

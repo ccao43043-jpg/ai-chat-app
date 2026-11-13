@@ -1,5 +1,5 @@
 // 工作流 C · M3 golden 导出：retrieval-core / knowledge / affect / charcard / worlds / autochar。
-// 用法：node tests/golden-export/c-m3-domain.mjs [--check] [模块…]
+// 用法：node tests/golden-export/exporters/c/m3-domain.mjs [--check] [模块…]
 // 输出：app/src/test/resources/golden/<module>/<fn>.jsonl[.gz]，每行 {"in":[…],"out":…}
 // 时间与随机数固定：Date.now() = NOW，Math.random() = 0.5（uid = NOW.toString(36) + 'i'）。
 import { createRequire } from 'node:module';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const WWW = ROOT + '/app/src/main/assets/www';
 const OUT = ROOT + '/app/src/test/resources/golden';
 const CHECK = process.argv.includes('--check');

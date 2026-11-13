@@ -8,7 +8,7 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * C 侧 golden 对照支持（数据由 tests/golden-export/c-m2-cache.mjs 从 JS 实现导出）。
+ * C 侧 golden 对照支持（数据由 tests/golden-export/exporters/c/m2-cache.mjs 从 JS 实现导出）。
  * 比对规则（spec §6）：数字相对误差 ≤ 1e-9；字符串逐字相等；对象按 JSON 语义（键序无关；缺键 ≡ null，对应 JS 的 undefined）。
  */
 object Golden {
@@ -20,7 +20,7 @@ object Golden {
         return null
     }
     fun rawLines(path: String): List<String> {
-        val f = resource(path) ?: error("缺少 golden 文件：$path（先运行 node tests/golden-export/c-m2-cache.mjs）")
+        val f = resource(path) ?: error("缺少 golden 文件：$path（先运行 node tests/golden-export/run.mjs）")
         val text = if (f.name.endsWith(".gz")) GZIPInputStream(f.inputStream()).bufferedReader(Charsets.UTF_8).readText() else f.readText(Charsets.UTF_8)
         return text.split("\n").filter { it.isNotBlank() }
     }

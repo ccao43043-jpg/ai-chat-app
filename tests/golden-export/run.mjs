@@ -10,6 +10,8 @@ const MODULES = {
   convlog: () => import('./exporters/convlog.mjs'),
   secure: () => import('./exporters/secure.mjs'),
   library: () => import('./exporters/library.mjs'),
+  'c-cache': () => import('./exporters/c-cache.mjs'),     // C：js 语义 / cache-common / gcache / mmcache / pipeline
+  'c-domain': () => import('./exporters/c-domain.mjs'),   // C：retrieval / knowledge / affect / charcard / worlds / autochar
 };
 
 const args = process.argv.slice(2);

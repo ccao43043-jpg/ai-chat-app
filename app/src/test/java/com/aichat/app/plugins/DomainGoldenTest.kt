@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.BeforeClass
 import org.junit.Test
 
-/** M3 golden（tests/golden-export/c-m3-domain.mjs）：retrieval-core / knowledge / affect / charcard / worlds / autochar */
+/** M3 golden（tests/golden-export/exporters/c/m3-domain.mjs）：retrieval-core / knowledge / affect / charcard / worlds / autochar */
 class DomainGoldenTest {
     companion object {
         const val NOW = 1763000000000.0

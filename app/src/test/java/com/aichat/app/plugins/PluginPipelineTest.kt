@@ -108,7 +108,8 @@ class PluginPipelineTest {
         val model = head["model"].jstr()
         val s = AppSettings(providers = listOf(provider), plugins = (Js.toJson(head["settings"]["plugins"] ?: JObj()) as JsonObject))
         var now = 0L; val toasts = mutableListOf<String>()
-        val reg = PluginRegistryImpl.createDefault(clock = { now }, onToast = { toasts += it })
+        val reg = PluginRegistryImpl.createDefault(clock = { now })
+        reg.attach(object : PluginContext { override fun notify(text: String) { toasts += text } })
         var c = Conversation(head["convId"].jstr(), "", provider.id, model, 0, 0, emptyList(), extras = JsonObject(mapOf("plugins" to Js.toJson(head["convPlugins"] ?: JObj()))))
         lines.drop(1).forEachIndexed { t, line ->
             val inp = line["in"]!!; val exp = line["out"]!!; val where = "$name 第 ${t} 轮"
@@ -119,7 +120,7 @@ class PluginPipelineTest {
             var ctx = RequestContext(c, provider, model, c.systemPrompt ?: "", wire, ChatOptions(convId = c.id, maxTokens = 8192), s, inp["userId"] as String?)
             ctx = reg.runBeforeRequest(ctx) {}
             assertEquals("$where active", exp["active"].a()!!.map { it.jstr() }, ctx.activePlugins)
-            for (k in listOf("gcacheRp", "gcacheRpcache"))   // orGemini/orMiniMax 在 JS 里挂在 ctx.opts，Kotlin 挂在 meta（ChatOptions 无此字段），由请求体对照覆盖
+            for (k in listOf("gcacheRp", "gcacheRpcache"))   // orGemini/orMiniMax 在 JS 里挂在 ctx.opts，Kotlin 插件写 meta、由 ChatEngine 复制进 ChatOptions（契约 #h），由请求体对照覆盖
             Golden.diff(exp["meta"][k], Js.fromJson(ctx.meta[k]), "$where meta.$k")?.let { fail(it) }
             val rq = inp["req"]!!
             val req = BuiltRequest(rq["url"].jstr(), rq["method"].jstr(), (rq["headers"].o()!!).mapValues { it.value.jstr() }, rq["body"].jstr())
