@@ -10,7 +10,9 @@ import org.junit.Test
 class CharCardGoldenTest {
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     private fun unhex(h: Any?): ByteArray { val s = h as String; return ByteArray(s.length / 2) { s.substring(it * 2, it * 2 + 2).toInt(16).toByte() } }
-    private val safe = DomainGoldenTest::safe
+    /** 导出端 normErr：atob → <atob>，fflate 解压错误 → <inflate> */
+    private fun safe(f: () -> Any?): Any? = try { f() } catch (e: CharCard.AtobError) { jobj("throws" to "<atob>") } catch (e: CharCard.InflateError) { jobj("throws" to "<inflate>") }
+        catch (e: JsSyntaxError) { jobj("throws" to "<JSON>") } catch (e: JsError) { jobj("throws" to e.message) }
     @Suppress("UNCHECKED_CAST") private fun L(v: Any?) = v as List<Any?>?
 
     @Test fun charcard() {
@@ -28,7 +30,7 @@ class CharCardGoldenTest {
             "listChunks" to { a -> safe { CharCard.listChunks(unhex(a[0])).map { jobj("type" to it.type, "data" to hex(it.data), "offset" to it.offset, "length" to it.length.toDouble()) } } },
             "extractCharaRaw" to { a -> safe { CharCard.extractCharaRaw(unhex(a[0])) } },
             "b64encode" to { a -> CharCard.b64encode(a[0] as String) },
-            "b64decode" to { a -> CharCard.b64decode(a[0]) },
+            "b64decode" to { a -> safe { CharCard.b64decode(a[0]) } },
         )
         val files = Golden.list("charcard")
         assertEquals(files.toSet(), table.keys)

@@ -6,6 +6,7 @@ import java.util.zip.Inflater
 
 /**
  * www/charcard.js 移植：SillyTavern Character Card V2/V3（PNG tEXt / zTXt "chara"）导入导出，persona 与世界书文本映射。
+ * 行为取 App（WebView）路径：base64 用 atob + TextDecoder、zTXt 用 window.fflate（Node 分支的 Buffer / zlib 不适用）。
  * persona / card 沿用 JS 值模型；personaToCard 的世界书解析同 App（rpcache 已加载 → RPCache.parseLore = [Lore.parseLore]）。
  */
 object CharCard {
@@ -43,18 +44,39 @@ object CharCard {
         return if (stripBom && s.startsWith("\uFEFF")) s.substring(1) else s
     }
     fun b64encode(str: String): String = java.util.Base64.getEncoder().encodeToString(Js.utf8(str))
-    /** Buffer.from(s.replace(/\s+/g,''), 'base64').toString('utf8')：宽松（url-safe 字符、缺填充、非法字符跳过、遇 '=' 结束） */
+    /** atob 抛出的 DOMException（InvalidCharacterError），文案同 Chromium WebView */
+    class AtobError : JsError("Failed to execute 'atob' on 'Window': The string to be decoded is not correctly encoded.")
+    /** fflate.unzlibSync 的解压错误（unexpected EOF / invalid block type …；文案随库版本而异） */
+    class InflateError(msg: String) : JsError(msg)
+
+    /** App（WebView）路径：atob(String(b64).replace(/\s+/g, '')) → 字节 → TextDecoder（WHATWG forgiving-base64，非法即抛 [AtobError]，去 BOM） */
     fun b64decode(b64: Any?): String {
+        var t = Js.replace(Js.re("\\s+", "g"), Js.str(b64), true, "")
+        if (t.length % 4 == 0) { if (t.endsWith("==")) t = t.dropLast(2) else if (t.endsWith("=")) t = t.dropLast(1) }
+        if (t.length % 4 == 1) throw AtobError()
         val out = ByteArrayOutputStream(); var acc = 0; var n = 0
-        for (c in Js.str(b64)) {
-            val v = when (c) { in 'A'..'Z' -> c - 'A'; in 'a'..'z' -> c - 'a' + 26; in '0'..'9' -> c - '0' + 52; '+', '-' -> 62; '/', '_' -> 63; '=' -> -2; else -> -1 }
-            if (v == -2) break
-            if (v < 0) continue
+        for (c in t) {
+            val v = when (c) { in 'A'..'Z' -> c - 'A'; in 'a'..'z' -> c - 'a' + 26; in '0'..'9' -> c - '0' + 52; '+' -> 62; '/' -> 63; else -> throw AtobError() }
             acc = (acc shl 6) or v; n++
             if (n == 4) { out.write(acc shr 16); out.write((acc shr 8) and 0xff); out.write(acc and 0xff); acc = 0; n = 0 }
         }
-        if (n == 2) out.write((acc shl 12) shr 16 and 0xff) else if (n == 3) { out.write((acc shl 6) shr 16 and 0xff); out.write((acc shl 6) shr 8 and 0xff) }
-        return bytesToStr(out.toByteArray(), stripBom = false)
+        if (n == 2) out.write((acc shr 4) and 0xff) else if (n == 3) { out.write((acc shr 10) and 0xff); out.write((acc shr 2) and 0xff) }
+        return bytesToStr(out.toByteArray())
+    }
+    /** fflate.unzlibSync：校验 zlib 头（不支持预置字典），去掉头 2 字节与末尾 4 字节（不校验 Adler-32），raw inflate */
+    fun unzlib(d: ByteArray, from: Int): ByteArray {
+        val len = d.size - from
+        val b0 = if (len > 0) d[from].toInt() and 0xff else -1; val b1 = if (len > 1) d[from + 1].toInt() and 0xff else -1
+        if (b0 < 0 || (b0 and 15) != 8 || (b0 shr 4) > 7 || ((b0 shl 8) or (b1 and 0xff)) % 31 != 0 || b1 < 0) throw InflateError("invalid zlib data")
+        if ((b1 shr 5) and 1 == 1) throw InflateError("invalid zlib data: need dictionary")
+        val s = from + 2; val e = d.size - 4
+        if (e <= s) return ByteArray(0)
+        val inf = Inflater(true); inf.setInput(d, s, e - s)
+        val o = ByteArrayOutputStream(); val buf = ByteArray(8192)
+        try {
+            while (!inf.finished()) { val k = inf.inflate(buf); if (k == 0 && (inf.needsInput() || inf.needsDictionary())) throw InflateError("unexpected EOF"); o.write(buf, 0, k) }
+        } catch (x: java.util.zip.DataFormatException) { throw InflateError("invalid block type") } finally { inf.end() }
+        return o.toByteArray()
     }
     fun isPng(b: ByteArray): Boolean = b.size >= 8 && (0 until 8).all { b[it] == SIG[it] }
 
@@ -80,11 +102,7 @@ object CharCard {
             if (ch.type == "tEXt") return bytesToStr(d, nul + 1, d.size)
             val method = if (nul + 1 < d.size) d[nul + 1].toInt() and 0xff else -1
             if (method != 0) throw JsError("不支持的 zTXt 压缩方式")
-            try {
-                val inf = Inflater(); inf.setInput(d, nul + 2, d.size - nul - 2); val o = ByteArrayOutputStream(); val buf = ByteArray(8192)
-                while (!inf.finished()) { val k = inf.inflate(buf); if (k == 0 && (inf.needsInput() || inf.needsDictionary())) throw IllegalStateException("截断"); o.write(buf, 0, k) }
-                return bytesToStr(o.toByteArray(), stripBom = false)
-            } catch (_: Exception) { throw JsError("需要 zlib/fflate 才能解析 zTXt chara") }
+            return bytesToStr(unzlib(d, nul + 2))
         }
         return null
     }

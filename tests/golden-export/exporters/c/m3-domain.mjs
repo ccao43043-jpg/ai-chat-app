@@ -41,7 +41,9 @@ const clone = x => x === undefined ? undefined : JSON.parse(JSON.stringify(x));
 const files = {};
 const rec = (mod, fn, input, out) => { (files[mod + '/' + fn] = files[mod + '/' + fn] || []).push(JSON.stringify({ in: input, out: out === undefined ? null : out })); };
 /** 抛错时记 {throws: message}；V8 的 JSON.parse 文案统一为 <JSON> */
-const normErr = e => (e instanceof SyntaxError ? '<JSON>' : String(e && e.message || e)).replace(/(解析失败：)(?!非对象$).*$/s, '$1<JSON>');
+const normErr = e => (e && e.name === 'SyntaxError' ? '<JSON>' : e && e.name === 'InvalidCharacterError' ? '<atob>'
+  : /^(unexpected EOF|invalid (block type|length\/literal|distance|zlib data)|invalid zlib data: .*)$/.test(String(e && e.message)) ? '<inflate>'
+  : String(e && e.message || e)).replace(/(解析失败：)(?!非对象$).*$/s, '$1<JSON>');
 const safe = f => { try { return f(); } catch (e) { return { throws: normErr(e) }; } };
 const want = m => !ONLY.length || ONLY.includes(m);
 
@@ -242,11 +244,18 @@ if (want('b-handoff')) {
 }
 
 // ───────── 角色卡（charcard.js）+ 世界书文本（rpcache.js parseLore / loreToText） ─────────
-// 字节一律十六进制；parseCard 的输入记成 [kind, value]，kind ∈ hex | str | obj。App 中 rpcache 先于 charcard 加载，故 globalThis.RPCache 已就位。
+// 字节一律十六进制；parseCard 的输入记成 [kind, value]，kind ∈ hex | str | obj。
+// charcard.js 在 Node 与浏览器走不同分支（Buffer / require('zlib') vs atob + TextDecoder / window.fflate），golden 取 App（WebView）路径：
+// 在 vm 沙箱里按 index.html 的顺序加载 lib/fflate.min.js 与 charcard.js，只提供浏览器全局（TextEncoder/TextDecoder/atob/btoa），RPCache 已就位。
+// 错误文案：atob 的 DOMException → <atob>，fflate 的解压错误 → <inflate>（文案随引擎 / 库版本而异）。
 if (want('charcard')) {
   rnd = mulberry32(20261115);
-  const RP = require(WWW + '/rpcache.js'); globalThis.RPCache = RP;
-  const CC = require(WWW + '/charcard.js');
+  const RP = require(WWW + '/rpcache.js');
+  const vm = await import('node:vm');
+  const sb = { TextEncoder, TextDecoder, atob, btoa, RPCache: RP }; sb.window = sb; sb.self = sb; vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(WWW + '/lib/fflate.min.js', 'utf8'), sb);
+  vm.runInContext(fs.readFileSync(WWW + '/charcard.js', 'utf8'), sb);
+  const CC = sb.CharCard; if (!CC || !sb.fflate) throw new Error('沙箱加载 charcard / fflate 失败');
   const hex = b => Buffer.from(b).toString('hex');
   const unhex = h => new Uint8Array(Buffer.from(h, 'hex'));
   const be32 = n => Buffer.from([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
@@ -330,6 +339,9 @@ if (want('charcard')) {
     base, withChunks(tx('chara', b64(J))), withChunks(tx('Comment', 'hi'), tx('chara', b64(J).replace(/(.{10})/g, '$1\n '))), withChunks(tx('chara', b64(J).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''))),
     withChunks(tx('chara', b64('\uFEFF' + J))), withChunks(tx('chara', '')), withChunks(tx('chara', '!!!')), withChunks(tx('nokey', 'x')), withChunks(chunk('tEXt', Buffer.from('nonul'))),
     withChunks(zt('chara', 0, deflated)), withChunks(zt('chara', 1, deflated)), withChunks(zt('chara', null, Buffer.alloc(0))), withChunks(zt('chara', 0, deflated.subarray(0, 5))), withChunks(zt('chara', 0, Buffer.from('garbage'))),
+    withChunks(zt('chara', 0, Buffer.concat([deflated, Buffer.from('junk')]))), withChunks(zt('chara', 0, zlib.deflateSync(Buffer.from(b64('\uFEFF' + J)), { level: 0 }))),
+    withChunks(zt('chara', 0, Buffer.concat([Buffer.from([0x78, 0x9c]), zlib.deflateRawSync(Buffer.from(b64(J)))]))), withChunks(zt('chara', 0, (() => { let b1 = 0x20; while ((0x7800 | b1) % 31) b1++; return Buffer.concat([Buffer.from([0x78, b1]), deflated.subarray(2)]); })())),
+    withChunks(zt('chara', 0, Buffer.from([0x78]))), withChunks(zt('chara', 0, Buffer.from([0x78, 0x9c, 1, 2, 3, 4]))), withChunks(zt('chara', 0, Buffer.from([0x78, 0x9c, 0xff, 1, 2, 3, 4]))),
     withChunks(tx('chara', b64(JSON.stringify({ foo: 1 })))), withChunks(tx('chara', b64('[1,2]'))), withChunks(tx('chara', b64(JSON.stringify({ name: 'flat' })) + '==QUJD')),
     withChunks(tx('chara', b64(J)), tx('chara', b64(JSON.stringify({ name: 'second' })))), withChunks(tx('ch\u00e9ra', 'x'), tx('chara', b64(J) + '\u00ff')),
     base.subarray(0, 20), base.subarray(0, 8), Buffer.concat([base, Buffer.from('trailing')]), Buffer.concat([base.subarray(0, 33), be32(0xfffffff0), Buffer.from('tEXtchara')]),
@@ -351,7 +363,7 @@ if (want('charcard')) {
   strs.forEach(s => rec('charcard', 'parseCard', ['str', s], safe(() => CC.parseCard(s))));
   [null, { name: 'o' }, { spec: 'chara_card_v3', data: { name: 'v3' } }, [], { foo: 1 }].forEach(o => rec('charcard', 'parseCard', ['obj', o], safe(() => CC.parseCard(o))));
   ['', 'abc', '中文😀', '\ud800', '\udc00a', 'x'.repeat(100)].forEach(s => rec('charcard', 'b64encode', [s], CC.b64encode(s)));
-  ['', 'YWJj', 'YWJ', 'YW', 'Y', '5Lit5paH8J+YgA==', '5Lit5paH8J-YgA', 'YW Jj\n', 'YWJj=YWJj', '##YW*Jj', '/w==', '7aCA', null, 123, '77u/YQ=='].forEach(s => rec('charcard', 'b64decode', [s], CC.b64decode(s)));
+  ['', 'YWJj', 'YWJ', 'YW', 'Y', '5Lit5paH8J+YgA==', '5Lit5paH8J-YgA', 'YW Jj\n', 'YWJj=YWJj', '##YW*Jj', '/w==', '7aCA', null, 123, '77u/YQ=='].forEach(s => rec('charcard', 'b64decode', [s], safe(() => CC.b64decode(s))));
 }
 
 // ───────── 分段文本素材（rpstate / autochar / worlds 共用） ─────────

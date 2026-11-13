@@ -2,14 +2,14 @@
 {"in":["YWJj"],"out":"abc"}
 {"in":["YWJ"],"out":"ab"}
 {"in":["YW"],"out":"a"}
-{"in":["Y"],"out":""}
+{"in":["Y"],"out":{"throws":"<atob>"}}
 {"in":["5Lit5paH8J+YgA=="],"out":"中文😀"}
-{"in":["5Lit5paH8J-YgA"],"out":"中文😀"}
+{"in":["5Lit5paH8J-YgA"],"out":{"throws":"<atob>"}}
 {"in":["YW Jj\n"],"out":"abc"}
-{"in":["YWJj=YWJj"],"out":"abc"}
-{"in":["##YW*Jj"],"out":"abc"}
+{"in":["YWJj=YWJj"],"out":{"throws":"<atob>"}}
+{"in":["##YW*Jj"],"out":{"throws":"<atob>"}}
 {"in":["/w=="],"out":"�"}
 {"in":["7aCA"],"out":"���"}
 {"in":[null],"out":"��e"}
 {"in":[123],"out":"�m"}
-{"in":["77u/YQ=="],"out":"﻿a"}
+{"in":["77u/YQ=="],"out":"a"}
