@@ -1,0 +1,9 @@
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"big",""],"out":8192}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"big",20000],"out":20000}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"small",8192],"out":4096}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"small","2000"],"out":2000}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"none",null],"out":8192}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"unknown",0],"out":8192}
+{"in":[{"modelMeta":{"big":{"maxOutput":1000000},"small":{"maxOutput":4096},"none":{}}},"small",-5],"out":4096}
+{"in":[{},"x","12.5"],"out":12.5}
+{"in":[null,"x","abc"],"out":8192}

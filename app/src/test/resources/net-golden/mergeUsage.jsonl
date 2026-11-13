@@ -1,0 +1,7 @@
+{"in":[null,null],"out":null}
+{"in":[{"prompt":1},null],"out":{"prompt":1}}
+{"in":[null,{"completion":2}],"out":{"completion":2}}
+{"in":[{"prompt":100,"hit":10,"miss":90,"cacheSupported":true,"source":"openai"},{"prompt":120,"completion":5}],"out":{"prompt":120,"hit":10,"miss":110,"cacheSupported":true,"source":"openai","completion":5}}
+{"in":[{"prompt":100,"hit":150,"cacheSupported":true},{"completion":1}],"out":{"prompt":100,"hit":150,"cacheSupported":true,"completion":1,"miss":0}}
+{"in":[{"prompt":100},{"hit":40}],"out":{"prompt":100,"hit":40}}
+{"in":[{"cost":0.1,"prompt":1},{"cost":0.2,"cacheSaved":0.01}],"out":{"cost":0.2,"prompt":1,"cacheSaved":0.01}}
