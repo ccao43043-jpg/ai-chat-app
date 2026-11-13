@@ -51,18 +51,26 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SettingsScreen(start: SettingsDestination, onClose: () -> Unit) {
-    val stack = remember(start) { mutableStateListOf(start) }
+    // 栈元素：SettingsDestination.name 或 "panel:<pluginId>"（插件面板挂载点）
+    val stack = remember(start) { mutableStateListOf(start.name) }
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val toast: (String) -> Unit = { m -> scope.launch { snack.showSnackbar(m) } }
     val back: () -> Unit = { if (stack.size > 1) stack.removeAt(stack.size - 1) else onClose() }
     BackHandler(onBack = back)
-    val dest = stack.last()
+    val top = stack.last()
+    val panel = top.removePrefix("panel:").takeIf { top.startsWith("panel:") }
+    val dest = if (panel != null) SettingsDestination.Plugins else SettingsDestination.valueOf(top)
     val mounted = SettingsMounts.get(dest)
     Box(Modifier.fillMaxSize().testTag("settings")) {
         when {
+            panel != null -> PluginPanels.get(panel)?.invoke(back) ?: SettingsPageScaffold(panel, back) { Text("该插件没有面板", Modifier.padding(20.dp)) }
             mounted != null -> mounted(back)
-            dest == SettingsDestination.Main -> SettingsMain(onBack = back, open = { stack.add(it) })
+            dest == SettingsDestination.Main -> SettingsMain(onBack = back, open = { stack.add(it.name) })
+            dest == SettingsDestination.Search -> SearchSettingsScreen(onBack = back, toast = toast)
+            dest == SettingsDestination.Plugins -> PluginsScreen(onBack = back, openPanel = { stack.add("panel:$it") })
+            dest == SettingsDestination.Prompts -> com.aichat.app.ui.library.PromptsScreen(onBack = back, toast = toast)
+            dest == SettingsDestination.Templates -> com.aichat.app.ui.library.TemplatesScreen(onBack = back, toast = toast)
             dest == SettingsDestination.General -> GeneralSettings(onBack = back, toast = toast)
             dest == SettingsDestination.Providers -> ProvidersScreen(onBack = back, toast = toast)
             dest == SettingsDestination.DataBackup -> DataBackupScreen(onBack = back, toast = toast)
@@ -105,8 +113,12 @@ private fun SettingsMain(onBack: () -> Unit, open: (SettingsDestination) -> Unit
         SettingsRow("对话默认参数", "系统提示词、温度、最大输出、流式", "row-general") { open(SettingsDestination.General) }
         SettingsRow("数据与备份", "导出 / 导入整库 zip、导出全部对话 JSON", "row-backup") { open(SettingsDestination.DataBackup) }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        listOf(SettingsDestination.Search, SettingsDestination.Plugins, SettingsDestination.Prompts, SettingsDestination.Templates,
-            SettingsDestination.Personas, SettingsDestination.Worlds, SettingsDestination.Knowledge, SettingsDestination.Usage, SettingsDestination.Balance)
+        SettingsRow("联网搜索", if (s.searchOn) "已开启" else "已关闭", "row-search") { open(SettingsDestination.Search) }
+        SettingsRow("插件", "RP 缓存、Gemini/MiniMax 缓存、资料库、好感度、用量", "row-plugins") { open(SettingsDestination.Plugins) }
+        SettingsRow("提示词库", "⚡ 常用文字，一键插入输入框", "row-prompts") { open(SettingsDestination.Prompts) }
+        SettingsRow("提示词模板", "切换本对话的系统提示词", "row-templates") { open(SettingsDestination.Templates) }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        listOf(SettingsDestination.Personas, SettingsDestination.Worlds, SettingsDestination.Knowledge, SettingsDestination.Usage, SettingsDestination.Balance)
             .forEach { d -> SettingsRow(d.title, if (SettingsMounts.get(d) == null) "待实现" else null) { open(d) } }
     }
 }

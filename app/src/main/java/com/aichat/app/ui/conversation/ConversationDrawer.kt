@@ -56,6 +56,7 @@ fun ConversationDrawer(
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onExport: ((String) -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf<ConversationMeta?>(null) }
     var deleting by remember { mutableStateOf<ConversationMeta?>(null) }
@@ -74,7 +75,8 @@ fun ConversationDrawer(
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(index, key = { it.id }) { m ->
-                    ConvRow(m, m.id == currentId, onClick = { onSelect(m.id) }, onRename = { renaming = m }, onDelete = { deleting = m })
+                    ConvRow(m, m.id == currentId, onClick = { onSelect(m.id) }, onRename = { renaming = m }, onDelete = { deleting = m },
+                        onExport = onExport?.let { f -> { f(m.id) } })
                 }
             }
         }
@@ -101,7 +103,7 @@ fun ConversationDrawer(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ConvRow(m: ConversationMeta, selected: Boolean, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun ConvRow(m: ConversationMeta, selected: Boolean, onClick: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit, onExport: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     Surface(
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
@@ -120,6 +122,7 @@ private fun ConvRow(m: ConversationMeta, selected: Boolean, onClick: () -> Unit,
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "更多") }
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; onRename() })
+                    if (onExport != null) DropdownMenuItem(text = { Text("导出") }, onClick = { menu = false; onExport() })
                     DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() })
                 }
             }

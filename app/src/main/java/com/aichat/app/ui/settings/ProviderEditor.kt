@@ -4,9 +4,6 @@ import com.aichat.app.domain.KeyVault
 import com.aichat.app.domain.SettingsRepository
 import com.aichat.app.domain.model.ProviderConfig
 import com.aichat.app.domain.model.ProviderType
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 
 /** 服务商编辑页的草稿（文本框原样内容） */
 data class ProviderDraft(
@@ -51,16 +48,10 @@ class ProviderEditor(private val settings: SettingsRepository, private val keys:
         return Result.Ok(if (cleared && action == KeyMask.Action.Keep) "Base URL 主机已变更，旧 API Key 已清除，请重新填写" else "已保存", p)
     }
 
+    /** 删除服务商及其 Key。旧版的 settings.removedPresets（防止预设被重新合并回来）由 SettingsRepository 负责记录 */
     suspend fun delete(p: ProviderConfig) {
         keys.delete(p.id)
-        settings.update { s ->
-            var extras = s.extras
-            if (p.presetId.isNotEmpty() && p.presetId != "custom") {
-                val old: List<kotlinx.serialization.json.JsonElement> = (extras["removedPresets"] as? JsonArray).orEmpty()
-                extras = JsonObject(extras + ("removedPresets" to JsonArray(old + JsonPrimitive(p.presetId))))
-            }
-            s.copy(providers = s.providers.filterNot { it.id == p.id }, extras = extras)
-        }
+        settings.update { s -> s.copy(providers = s.providers.filterNot { it.id == p.id }) }
     }
 
     /** 新建：预设 id 未被占用时直接用 presetId（与旧版 presetToProvider 一致），否则加后缀 */

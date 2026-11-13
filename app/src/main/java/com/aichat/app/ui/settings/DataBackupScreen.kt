@@ -59,6 +59,24 @@ fun DataBackupScreen(onBack: () -> Unit, toast: (String) -> Unit) {
         }
     }
 
+    val importJson = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            val r = runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openInputStream(uri)!!.use { ins ->
+                        val b = ins.readBytes(); require(b.size <= 64 * 1024 * 1024) { "文件过大" }; String(b, Charsets.UTF_8)
+                    }
+                }
+                deps.chats.importJson(text)
+            }
+            r.fold({ ids -> toast(if (ids.isEmpty()) "没有可导入的对话" else "已导入 ${ids.size} 个对话") },
+                { toast("导入失败：${it.message ?: "文件格式不对"}") })
+            busy = false
+        }
+    }
+
     SettingsPageScaffold("数据与备份", onBack) {
         Text("升级须知：原生版 v1 装上后不能再覆盖安装 0.x 旧版。想回退，只能先在这里导出整库 zip → 卸载 → 装旧版 → 导入。备份不含 API Key。",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(20.dp))
@@ -70,6 +88,9 @@ fun DataBackupScreen(onBack: () -> Unit, toast: (String) -> Unit) {
         }
         SettingsRow("导出全部对话（JSON）", "与旧版「导出全部对话」同格式", "export-all-json") {
             if (!busy) exportJson.launch("aichat-conversations-${stamp()}.json")
+        }
+        SettingsRow("导入对话（JSON）", "支持单个对话或「导出全部对话」的文件；同 id 的对话会作为新对话导入", "import-json") {
+            if (!busy) importJson.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         }
         if (busy) Text("处理中…", modifier = Modifier.padding(20.dp))
     }

@@ -74,7 +74,7 @@ class SettingsLogicTest {
         val openai = s.settings.value.providers.first { it.id == "openai" }
         ed.delete(openai)
         assertFalse(s.settings.value.providers.any { it.id == "openai" })
-        assertTrue(s.settings.value.extras["removedPresets"].toString().contains("openai"))
+        assertEquals(listOf("openai"), s.removedPresets); assertTrue(s.settings.value.extras.isEmpty())
         assertFalse(keys.has("openai"))
     }
 
