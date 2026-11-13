@@ -1,9 +1,12 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+    id 'org.jetbrains.kotlin.plugin.serialization'
 }
 
-// 可选：在项目根目录放置 keystore.properties（不提交到 Git）以使用自签名 release 证书；
-// 不存在时 release 构建回退为 debug 证书签名。
+// 签名：根目录 keystore.properties（不提交 Git，见 .gitignore）存在时用它；否则回退 debug 证书。
+// 覆盖安装要求证书 SHA-256 = 6054f9df…a360（~/.android/debug.keystore / androiddebugkey）。
 def ksPropsFile = rootProject.file('keystore.properties')
 def ksProps = new Properties()
 if (ksPropsFile.exists()) { ksPropsFile.withInputStream { ksProps.load(it) } }
@@ -13,17 +16,18 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId 'com.aichat.app'
+        applicationId 'com.aichat.app'   // 不可改：覆盖安装
         minSdk 24
         targetSdk 34
-        versionCode 89
-        versionName '0.28.7'
+        versionCode 100                  // 原生 v1：> g胖 的 v0.29.0 (90)
+        versionName '1.0.0-dev'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
     signingConfigs {
         release {
             if (ksPropsFile.exists()) {
-                storeFile rootProject.file(ksProps['storeFile'])
+                storeFile file(ksProps['storeFile'])
                 storePassword ksProps['storePassword']
                 keyAlias ksProps['keyAlias']
                 keyPassword ksProps['keyPassword']
@@ -42,4 +46,31 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    kotlinOptions { jvmTarget = '17' }
+    buildFeatures { compose true; buildConfig true }
+    packaging { resources { excludes += '/META-INF/{AL2.0,LGPL2.1}' } }
+    testOptions { unitTests.returnDefaultValues = true }
+    // 旧 WebView 前端（src/main/assets/www）只作 golden 对照与 node 测试的参考实现，不打进 APK
+    sourceSets { main { assets.srcDirs = [] } }
+}
+
+dependencies {
+    def composeBom = platform('androidx.compose:compose-bom:2024.09.03')
+    implementation composeBom
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-core'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    implementation 'androidx.activity:activity-compose:1.9.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.6'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
+    implementation 'androidx.core:core-ktx:1.13.1'
+
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1'
 }

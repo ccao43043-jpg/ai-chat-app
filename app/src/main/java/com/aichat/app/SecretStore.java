@@ -18,12 +18,12 @@ import javax.crypto.spec.GCMParameterSpec;
  * v0.9.0：API Key 安全存储。用 Android Keystore 中不可导出的 AES-256-GCM 密钥加密后存入 SharedPreferences。
  * 明文只在原生层发请求时短暂出现，永远不会返回给 WebView。
  */
-final class SecretStore {
+public final class SecretStore {
     private static final String ALIAS = "aichat_secrets_v1";
     private static final String PREFS = "aichat_secrets";
     private final SharedPreferences prefs;
 
-    SecretStore(Context ctx) { prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
+    public SecretStore(Context ctx) { prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
 
     private SecretKey key() throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
@@ -38,7 +38,7 @@ final class SecretStore {
         return kg.generateKey();
     }
 
-    synchronized boolean put(String name, String value) {
+    public synchronized boolean put(String name, String value) {
         try {
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.ENCRYPT_MODE, key());
@@ -49,7 +49,7 @@ final class SecretStore {
         } catch (Exception e) { return false; }
     }
 
-    synchronized String get(String name) {
+    public synchronized String get(String name) {
         String enc = prefs.getString("s:" + name, null);
         if (enc == null) return null;
         try {
@@ -62,20 +62,20 @@ final class SecretStore {
         } catch (Exception e) { return null; }
     }
 
-    synchronized boolean has(String name) { return prefs.contains("s:" + name); }
-    synchronized void remove(String name) { prefs.edit().remove("s:" + name).remove("o:" + name).commit(); }
-    synchronized void clear() {
+    public synchronized boolean has(String name) { return prefs.contains("s:" + name); }
+    public synchronized void remove(String name) { prefs.edit().remove("s:" + name).remove("o:" + name).commit(); }
+    public synchronized void clear() {
         SharedPreferences.Editor ed = prefs.edit();
         for (String k : prefs.getAll().keySet()) if (k.startsWith("s:") || k.startsWith("o:")) ed.remove(k);
         ed.commit();
     }
     /** 密钥绑定的源（scheme://host:port） */
-    synchronized void setOrigin(String name, String origin) { prefs.edit().putString("o:" + name, origin).commit(); }
-    synchronized String origin(String name) { return prefs.getString("o:" + name, null); }
+    public synchronized void setOrigin(String name, String origin) { prefs.edit().putString("o:" + name, origin).commit(); }
+    public synchronized String origin(String name) { return prefs.getString("o:" + name, null); }
 
     /** 服务商登记（非机密）：id → baseUrl \n authType */
-    synchronized void putReg(String id, String baseUrl, String authType) { prefs.edit().putString("r:" + id, baseUrl + "\n" + authType).commit(); }
-    synchronized String[] reg(String id) {
+    public synchronized void putReg(String id, String baseUrl, String authType) { prefs.edit().putString("r:" + id, baseUrl + "\n" + authType).commit(); }
+    public synchronized String[] reg(String id) {
         String v = prefs.getString("r:" + id, null);
         if (v == null) return null;
         int i = v.indexOf('\n');
