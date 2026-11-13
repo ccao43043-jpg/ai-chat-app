@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * ProviderClient 实现（工作流 B）。M1：OpenAI 兼容格式的请求构造 + 流式；anthropic / gemini 请求构造、模型列表、endpoints 在 M2。
+ * ProviderClient 实现（工作流 B）。三种请求格式（openai 兼容 / anthropic / gemini）的构造 + 流式；模型列表、endpoints 待做。
  * 流式语义对照 app.js 2236–2320：
  *  - 只有 2xx 且为流式时才逐块喂 SSE 解析器；非 2xx 读完整个错误体 → Error(status, parseError, raw)
  *  - 流结束后若一个内容增量都没收到而 raw 非空 → 按整包 JSON 兜底解析（parseFullResponse）
@@ -38,14 +38,22 @@ import java.util.concurrent.atomic.AtomicReference
 class DefaultProviderClient(
     private val auth: AuthInjector,
     private val client: OkHttpClient = HttpClients.authed,
+    /** TODO(D 契约 #4)：改为在流里发 StreamEvent.Notice(text)；在那之前用回调把提示交给 ChatEngine */
+    private val notices: ((String) -> Unit)? = null,
 ) : ProviderClient {
 
-    constructor(keys: KeyVault?) : this(AuthInjector(keys))
+    constructor(keys: KeyVault?, registry: ProviderRegistry) : this(AuthInjector(keys, registry))
 
     override fun buildChatRequest(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
-                                  opts: ChatOptions, bodyPatch: JsonObject): BuiltRequest = when (provider.type) {
-        ProviderType.OPENAI -> OpenAiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch)
-        ProviderType.ANTHROPIC, ProviderType.GEMINI -> throw UnsupportedOperationException("${provider.type.wire} 请求格式在 M2 实现")
+                                  opts: ChatOptions, bodyPatch: JsonObject): BuiltRequest =
+        buildChatRequest(provider, model, messages, systemPrompt, opts, bodyPatch, NetOptions())
+
+    /** TODO(D 契约 #2)：ext 字段并入 ChatOptions 后删掉这个重载 */
+    fun buildChatRequest(provider: ProviderConfig, model: String, messages: List<WireMessage>, systemPrompt: String,
+                         opts: ChatOptions, bodyPatch: JsonObject, ext: NetOptions): BuiltRequest = when (provider.type) {
+        ProviderType.OPENAI -> OpenAiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch, ext)
+        ProviderType.ANTHROPIC -> AnthropicCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch)
+        ProviderType.GEMINI -> GeminiCompat.build(provider, model, messages, systemPrompt, opts, bodyPatch)
     }
 
     override fun stream(provider: ProviderConfig, request: BuiltRequest): Flow<StreamEvent> = callbackFlow {
@@ -58,7 +66,7 @@ class DefaultProviderClient(
             var downgraded = false
             var usage: JsonObject? = null
             while (true) {
-                val authed = try { auth.authorize(provider.id, provider.baseUrl, req) } catch (e: AuthInjector.Rejected) {
+                val authed = try { auth.authorize(provider.id, req) } catch (e: AuthInjector.Rejected) {
                     send(StreamEvent.Error(0, e.message ?: "请求失败", "")); break
                 }
                 val call = client.newCall(toOkHttp(authed)); current.set(call)
@@ -107,6 +115,7 @@ class DefaultProviderClient(
                                     downgraded = true
                                     val next = ProviderRules.downgradeMaxTokens(afford.toDouble())
                                     req = withMaxTokens(req, provider.type, next)
+                                    notices?.invoke(downgradeNotice(next))   // TODO(D 契约 #4)：send(StreamEvent.Notice(...))
                                     retry = true
                                     return@use
                                 }
@@ -138,6 +147,8 @@ class DefaultProviderClient(
     override suspend fun openRouterEndpoints(provider: ProviderConfig, modelId: String): JsonObject = TODO("M2：buildEndpointsRequest")
 
     companion object {
+        /** 与 app.js 2285 行逐字一致 */
+        fun downgradeNotice(next: Long) = "额度不足，已将最大输出降至 $next 并重试…"
         private val RE_402 = Regex("can only afford|max_tokens", RegexOption.IGNORE_CASE)
         private val JSON_MT = "application/json; charset=utf-8".toMediaType()
 
