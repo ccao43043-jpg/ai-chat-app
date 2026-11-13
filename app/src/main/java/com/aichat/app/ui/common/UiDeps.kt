@@ -23,6 +23,8 @@ data class UiDeps(
     val migration: MigrationService?,
     /** true = 当前用的是 fake 实现（顶栏显示「演示数据」提示） */
     val isFake: Boolean = false,
+    /** C 的角色卡编解码（charcard.js）；未接入时为 null，助手库的导入 / 导出给出提示 */
+    val charCard: com.aichat.app.domain.rp.CharCardCodec? = null,
 )
 
 val LocalUiDeps = staticCompositionLocalOf<UiDeps> { error("UiDeps 未提供") }

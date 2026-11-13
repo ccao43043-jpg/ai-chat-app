@@ -74,6 +74,28 @@ class AppRootUiTest {
         rule.onNodeWithTag("row-search").performClick()
         rule.onNodeWithTag("search-save").assertIsDisplayed()
     }
+
+    /** M3：抽屉 → 助手库：内置助手列出；点「翻译官」开始对话，标题栏显示新对话 */
+    @Test fun personasLibraryStartsConversation() {
+        launch()
+        rule.onNodeWithTag("open-drawer").performClick()
+        rule.onNodeWithTag("drawer-personas").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("persona-p-translator") }
+        rule.onNodeWithTag("persona-p-translator").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("input") }
+    }
+
+    /** M3：点版本号打开版本菜单 */
+    @Test fun versionMenuOpens() {
+        launch()
+        rule.onNodeWithTag("input").performTextInput("菜单")
+        rule.onNodeWithTag("send").performClick()
+        rule.waitUntil(15_000) { rule.onAllNodesWithTagExists("regen") }
+        rule.onNodeWithTag("regen").performClick()
+        rule.waitUntil(15_000) { rule.onAllNodesWithTagExists("ver-label") && rule.onAllNodesWithTagExists("send") }
+        rule.onNodeWithTag("ver-label").performClick()
+        rule.onNodeWithTag("version-menu").assertIsDisplayed()
+    }
 }
 
 private fun androidx.compose.ui.test.junit4.AndroidComposeTestRule<*, *>.onAllNodesWithTagExists(tag: String) =

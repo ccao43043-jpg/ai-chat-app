@@ -54,7 +54,8 @@ fun AppRoot(deps: UiDeps) {
         BackHandler(enabled = settings == null && tab != MainTab.Chat) { tab = MainTab.Chat }
 
         if (settings != null) {
-            SettingsScreen(settings!!, onClose = { settings = null })
+            SettingsScreen(settings!!, onClose = { settings = null },
+                onStartPersona = { p -> tab = MainTab.Chat; chatVm.controller.startFromPersona(p) })
             return@CompositionLocalProvider
         }
         Scaffold(

@@ -46,10 +46,10 @@ import kotlinx.coroutines.launch
 
 /*
  * 提示词库（⚡ 插入输入框）与提示词模板（替换本对话系统提示词）。
- * 读写只经 LibraryRepository；内置项的合并 / 「用户删掉的内置项」记录（settings.removed*）由仓库负责。
+ * 读写只经 LibraryRepository；内置项合并由仓库负责；删除内置模板时由 UI 记入 settings.removedTemplates（同 app.js 4201）。
  */
 
-private fun newId(prefix: String) = prefix + System.currentTimeMillis().toString(36) + (Math.random() * 1e6).toLong().toString(36)
+internal fun newId(prefix: String) = prefix + System.currentTimeMillis().toString(36) + (Math.random() * 1e6).toLong().toString(36)
 
 /** personas.js normalizePrompt */
 fun normalizePrompt(id: String?, title: String, content: String, builtin: Boolean) =
@@ -76,7 +76,7 @@ fun PromptsScreen(onBack: () -> Unit, toast: (String) -> Unit) {
         SettingsPageScaffold(if (list.any { it.id == p.id }) "编辑提示词" else "新建提示词", { editing = null }, actions = {
             TextButton(onClick = {
                 if (content.isBlank()) { toast("内容不能为空"); return@TextButton }
-                val q = normalizePrompt(p.id, title, content, p.builtin)
+                val q = normalizePrompt(p.id, title, content, p.builtin).copy(extras = p.extras)
                 scope.launch {
                     deps.library.savePrompts(if (list.any { it.id == q.id }) list.map { if (it.id == q.id) q else it } else list + q)
                     toast("已保存"); editing = null

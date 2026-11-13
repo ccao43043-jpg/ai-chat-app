@@ -25,4 +25,15 @@ class DataLayerRegressionTest {
         val back = d.chats.load(c.id)!!.messages[0]
         assertFalse(back.truncated); assertEquals(0, back.vi); assertEquals(null, back.error)
     }
+
+    /** 「只保留当前版本」：versions 从 [..] 变成 []（同类问题，A-M3 发现） */
+    @Ignore("D：默认值字段回写不落盘，待 native/D 修复")
+    @Test fun clearingVersionsPersists() = runBlocking {
+        val d = DataGraph.inMemory()
+        val c = d.chats.create("p", "m")
+        val m = Message("m1", Role.ASSISTANT, "hi", 1, vi = 1, versions = listOf(kotlinx.serialization.json.JsonObject(emptyMap()), null))
+        d.chats.save(c.copy(messages = listOf(m)))
+        d.chats.save(c.copy(messages = listOf(m.copy(versions = emptyList(), vi = 0))))
+        org.junit.Assert.assertTrue(d.chats.load(c.id)!!.messages[0].versions.isEmpty())
+    }
 }

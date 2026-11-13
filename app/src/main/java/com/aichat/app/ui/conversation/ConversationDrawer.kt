@@ -57,6 +57,7 @@ fun ConversationDrawer(
     onDelete: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onExport: ((String) -> Unit)? = null,
+    onOpenPersonas: (() -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf<ConversationMeta?>(null) }
     var deleting by remember { mutableStateOf<ConversationMeta?>(null) }
@@ -81,6 +82,9 @@ fun ConversationDrawer(
             }
         }
         HorizontalDivider()
+        if (onOpenPersonas != null) TextButton(onClick = onOpenPersonas, modifier = Modifier.padding(horizontal = 8.dp).testTag("drawer-personas")) {
+            Text("🤖 助手库")
+        }
         TextButton(onClick = onOpenSettings, modifier = Modifier.padding(8.dp).testTag("drawer-settings")) {
             Icon(Icons.Filled.Settings, null); Text("  设置")
         }

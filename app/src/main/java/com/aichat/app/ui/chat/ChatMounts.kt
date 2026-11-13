@@ -24,7 +24,19 @@ import com.aichat.app.domain.model.Conversation
  *  - [usage]：顶栏费用 / 用量浮层（B 的 ui/usage 注册；参数 = 当前对话、设置）。未注册时用 [DefaultUsageChip]（只汇总本对话 token）。
  *  - [headerExtras]：顶栏下方一行（C 的 RP 状态条 / headerBadges 等）。
  */
+/**
+ * RP 相关的 UI 钩子（C 的 rpcache 注册；未注册时 A 只做通用逻辑）。均返回改写后的对话，A 随后保存。
+ * 对应 app.js：RPCache.markHistoryCause（改较早历史前）、RPCache.explicitBaseUpdate（改系统提示词）、RPCache.setLore（助手卡世界书）。
+ */
+interface RpUiHooks {
+    /** kind：version | regen | branch | delete */
+    fun markHistoryCause(conv: Conversation, kind: String, now: Long): Conversation = conv
+    fun systemPromptChanged(conv: Conversation, before: String, after: String, cause: kotlinx.serialization.json.JsonObject, now: Long): Conversation = conv
+    fun setLore(conv: Conversation, loreText: String): Conversation = conv
+}
+
 object ChatMounts {
+    var rp: RpUiHooks? = null
     var usage: (@Composable (Conversation?, AppSettings) -> Unit)? = null
     var headerExtras: (@Composable (Conversation?, AppSettings) -> Unit)? = null
 }

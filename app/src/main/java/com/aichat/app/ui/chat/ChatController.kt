@@ -42,6 +42,13 @@ data class Streaming(
 
 data class FilePatch(val sentText: String, val rawText: String, val files: List<JsonObject>)
 
+/** 需要 UI 配合的操作结果：直接提示 / 先确认再执行（文案照 app.js dialog） */
+sealed interface Plan {
+    data class Toast(val text: String) : Plan
+    data class Ask(val title: String, val body: String?, val okText: String, val danger: Boolean = false, val run: () -> Unit) : Plan
+    data object Done : Plan
+}
+
 data class ChatUiState(
     val convId: String? = null,
     val conv: Conversation? = null,
@@ -50,6 +57,8 @@ data class ChatUiState(
     /** 输入区待发送的图片（data URL）/ 文件（已抽取文字）。放在这里而不是 rememberSaveable：体积大，不能进 Bundle */
     val draftImages: List<String> = emptyList(),
     val draftFiles: List<JsonObject> = emptyList(),
+    /** 开着联网搜索但没配置好：UI 弹 app.js askSearchSetup 的对话框 */
+    val askSearchSetup: Boolean = false,
 ) {
     val streaming: Streaming? get() = convId?.let { streams[it] }
     val isStreaming: Boolean get() = streaming != null
@@ -154,17 +163,70 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         }
     }
 
-    /** 当前对话的系统提示词（模板 / 清空）。templateId 等是旧版 conv 上的未建模键，经 extras 原样保留 */
-    fun setConversationSystem(text: String, templateId: String?, templateName: String?, templateEmoji: String?) {
+    /** app.js applyTemplate：tpl=null 为清空；RP 对话先确认（RP_WARN）；已在使用时提示 */
+    fun planApplyTemplate(tplId: String?, name: String?, emoji: String?, text: String, skill: Boolean = false): Plan {
+        val c = _state.value.conv
+        val rp = rpOn(c)
+        if (tplId == null) {
+            if (c?.systemPrompt.isNullOrEmpty() && c?.extras?.get("templateId") == null) return Plan.Toast("当前没有系统提示词")
+            val go = { setConversationSystem("", null, null, null, JsonObject(mapOf("kind" to JsonPrimitive("clear")))); toast("已清空本对话的系统提示词") }
+            if (rp) return Plan.Ask("清空系统提示词？", RP_WARN, "仍然清空") { go() }
+            go(); return Plan.Done
+        }
+        if (text == (c?.systemPrompt ?: "") && (c?.extras?.get("templateId") as? JsonPrimitive)?.content == tplId) return Plan.Toast("已经在使用「$name」")
+        val go = {
+            setConversationSystem(text, tplId, name, emoji, JsonObject(mapOf("kind" to JsonPrimitive("template"), "name" to JsonPrimitive(name ?: ""))))
+            toast(if (skill) "已启用「$name」：直接发一句想法或贴旧设定；之后可说「精修一下」「加秘密」等"
+                else "已切换为「$name」" + if (c?.messages?.isNotEmpty() == true) "，从下一条消息开始生效" else "")
+        }
+        if (rp) return Plan.Ask("切换为「$name」？", RP_WARN, "切换") { go() }
+        go(); return Plan.Done
+    }
+
+    /** app.js setConvSystem：模板键 templateId/templateName/templateEmoji 是旧版对话 JSON 顶层键（经 extras 原样往返）。
+     *  RP 对话且规范化后内容变了 → RPCache.explicitBaseUpdate（C 的钩子）。JS 只在对话已有消息或 plugins 时保存；这里没有对话就先建一个 */
+    fun setConversationSystem(text: String, templateId: String?, templateName: String?, templateEmoji: String?,
+                              cause: JsonObject = JsonObject(emptyMap())) {
         scope.launch {
             val c = _state.value.conv ?: deps.chats.create(currentTarget()?.first?.id ?: "", currentTarget()?.second ?: "")
+            val before = c.systemPrompt ?: ""
             val ex = c.extras.toMutableMap()
             if (templateId != null) {
                 ex["templateId"] = JsonPrimitive(templateId); ex["templateName"] = JsonPrimitive(templateName ?: "")
                 ex["templateEmoji"] = JsonPrimitive(templateEmoji ?: "")
             } else { ex.remove("templateId"); ex.remove("templateName"); ex.remove("templateEmoji") }
+            var nc = c.copy(systemPrompt = text, extras = JsonObject(ex))
+            if (rpOn(nc)) nc = ChatMounts.rp?.systemPromptChanged(nc, before, text, cause, now()) ?: nc
             _state.update { it.copy(convId = c.id) }
-            save(c.copy(systemPrompt = text, extras = JsonObject(ex)), touch = false)
+            save(nc, touch = false)
+        }
+    }
+
+    /** app.js startFromPersona：新对话 + 助手的服务商/模型/系统提示词/温度；角色卡世界书 → rpcache；开场白作为首条助手消息 */
+    fun startFromPersona(p: com.aichat.app.domain.model.Persona) {
+        if (_state.value.isStreaming) { toast("请先停止当前生成"); return }
+        scope.launch {
+            val s = settings.value
+            val cur = currentTarget(s)
+            val prov = s.providers.firstOrNull { it.id == p.providerId && p.providerId.isNotEmpty() && it.hasKey }
+            val providerId = prov?.id ?: cur?.first?.id ?: ""
+            val model = if (prov != null) p.model.ifEmpty { prov.models.firstOrNull { it.isNotBlank() } ?: cur?.second ?: "" } else cur?.second ?: ""
+            val c0 = deps.chats.create(providerId, model)
+            val ex = c0.extras.toMutableMap()
+            ex["personaId"] = JsonPrimitive(p.id)
+            p.temperature?.let { ex["temperature"] = JsonPrimitive(it) }
+            val lore = (p.extras["loreText"] as? JsonPrimitive)?.content.orEmpty()
+            var c = c0.copy(systemPrompt = p.systemPrompt, personaName = p.name, personaEmoji = p.emoji, extras = JsonObject(ex))
+            if (lore.isNotEmpty()) {
+                c = ChatMounts.rp?.setLore(c, lore) ?: c
+                c = c.copy(extras = com.aichat.app.ui.settings.PluginToggles.withConvEnabled(c.extras, "rpcache", true))
+            }
+            val first = (p.extras["firstMes"] as? JsonPrimitive)?.content.orEmpty()
+            if (first.isNotEmpty()) c = c.copy(messages = c.messages + Message(newId(), Role.ASSISTANT, first, now(),
+                extras = JsonObject(mapOf("model" to JsonPrimitive(model), "personaName" to JsonPrimitive(p.name), "personaEmoji" to JsonPrimitive(p.emoji)))))
+            _state.update { it.copy(convId = c.id, conv = c) }
+            save(c, touch = true)
+            toast("已切换到「${p.name}」" + if (lore.isNotEmpty()) "（已导入世界书）" else "")
         }
     }
 
@@ -192,6 +254,7 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         if (_state.value.isStreaming) return false
         val target = currentTarget()
         if (target == null) { toast("请先在设置里添加服务商和模型"); return false }
+        if (searchNotReady()) return false
         // ChatEngine.send 没有 files 参数：先按旧版 Files.buildFileContext 把文件拼进本轮文字（模型看到的与旧版一致），
         // 流结束后再把落盘的用户消息改回「原文 + files[]」。TODO(D/B)：契约加 files 参数后去掉这段。
         val withText = files.filter { !(it["text"] as? JsonPrimitive)?.content.isNullOrEmpty() }
@@ -213,24 +276,53 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         return true
     }
 
-    /** 重新生成（app.js regenerate）：返回 null = 已开始；否则为需要用户确认的提示（后面还有消息时） */
-    fun regenerateNeedsConfirm(assistantId: String): String? {
-        val c = _state.value.conv ?: return null
+    // ---------------- RP / 冻结 ----------------
+    /** app.js rpOn：本对话 rpcache 插件是否生效 */
+    fun rpOn(c: Conversation? = _state.value.conv) = c != null && deps.plugins.isActive("rpcache", settings.value, c)
+    /** app.js rpFrozen：插件把消息标为 dim（已写入章节摘要 / 超预算未发送） */
+    fun frozen(m: Message, c: Conversation? = _state.value.conv) = c != null && deps.plugins.messageState(m, settings.value, c).dim
+    private fun markHistory(c: Conversation, kind: String) = ChatMounts.rp?.markHistoryCause(c, kind, now()) ?: c
+
+    private fun searchNotReady(): Boolean {
+        val s = settings.value
+        if (s.searchOn && !com.aichat.app.ui.settings.SearchConfig.ready(s, deps.keys)) { _state.update { it.copy(askSearchSetup = true) }; return true }
+        return false
+    }
+    fun consumeAskSearch() = _state.update { it.copy(askSearchSetup = false) }
+
+    /** 重新生成（app.js regenerate）：最后一条直接开始；较早的回复先确认（RP 对话附加提示）；冻结的不能重新生成 */
+    fun planRegenerate(assistantId: String): Plan {
+        val c = _state.value.conv ?: return Plan.Done
+        if (_state.value.isStreaming) return Plan.Done
         val i = c.messages.indexOfFirst { it.id == assistantId }
-        if (i < 0 || i == c.messages.size - 1) return null
-        return "会为这条回复生成一个新版本。之后的 ${c.messages.size - i - 1} 条对话保留在旧版本里，可以用 ‹ › 切换回去。"
+        val m = c.messages.getOrNull(i) ?: return Plan.Done
+        if (m.role != Role.ASSISTANT) return Plan.Done
+        if (i < c.messages.size - 1) {
+            if (frozen(m, c)) return Plan.Toast("这条回复已写入章节摘要，不能重新生成")
+            val rest = c.messages.size - i - 1
+            val rp = rpOn(c)
+            return Plan.Ask("从这里重新生成？", "会为这条回复生成一个新版本。之后的 $rest 条对话保留在旧版本里，可以用 ‹ › 切换回去。" +
+                (if (rp) "\n\n本对话开启了 RP 缓存优化：从较早的回复重新生成会改变对话历史，下一轮缓存命中率会下降一次。" else ""), "重新生成") {
+                regenerate(assistantId, markKind = if (rp) "regen" else null)
+            }
+        }
+        regenerate(assistantId)
+        return Plan.Done
     }
 
-    fun regenerate(assistantId: String) {
-        val c = _state.value.conv ?: return
+    fun regenerate(assistantId: String, markKind: String? = null) {
+        val c0 = _state.value.conv ?: return
         if (_state.value.isStreaming) return
+        if (currentTarget() == null) { toast("请先选择服务商和模型"); return }
+        if (searchNotReady()) return
+        val c = if (markKind != null) markHistory(c0, markKind) else c0
         val i = c.messages.indexOfFirst { it.id == assistantId }
         val m = c.messages.getOrNull(i) ?: return
         if (m.role != Role.ASSISTANT) return
-        // 失败 / 空的回复不保留为版本，直接在原位置重试
-        val path = if ((m.error != null || m.truncated) && m.content.isEmpty() && i == c.messages.size - 1)
-            c.messages.take(i) + Versions.clearFields(m)
-        else Versions.addVersion(c.messages, i)
+        // 失败 / 空的回复不保留为版本，直接在原位置重试（app.js：(error||stopped) && !content && 最后一条）。
+        // 差异：JS 单版本时 pop 后 runChat 新建助手消息；这里原位清空、沿用同一 id（引擎只有 regenerate(msgId) 入口）
+        val failed = (m.error != null || stopped(m) || m.truncated) && m.content.isEmpty() && i == c.messages.size - 1
+        val path = if (failed) c.messages.take(i) + Versions.clearFields(m) else Versions.addVersion(c.messages, i)
         scope.launch {
             val nc = c.copy(messages = path)
             save(nc, touch = true)
@@ -241,8 +333,11 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         }
     }
 
-    fun canContinue(m: Message) = m.role == Role.ASSISTANT && m.content.isNotEmpty() &&
-        (m.truncated || m.finishReason == "length" || m.error != null)
+    private fun stopped(m: Message) = (m.extras["stopped"] as? JsonPrimitive)?.content == "true"
+
+    /** app.js canContinueMsg */
+    fun canContinue(m: Message) = m.role == Role.ASSISTANT && m.content.isNotEmpty() && m.extras["imageGen"] == null &&
+        (m.truncated || m.finishReason == "length" || m.error != null || stopped(m))
 
     fun continueGeneration(assistantId: String) {
         val c = _state.value.conv ?: return
@@ -250,6 +345,7 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         val i = c.messages.indexOfFirst { it.id == assistantId }
         val m = c.messages.getOrNull(i) ?: return
         if (!canContinue(m)) return
+        if (currentTarget() == null) { toast("请先选择服务商和模型"); return }
         scope.launch {
             startStream(c.id, Streaming(c.id, c.messages.take(i), null, liveId = m.id, prefix = m.copy(error = null), startedAt = now())) {
                 deps.engine.continueGeneration(c.id, m.id)
@@ -276,15 +372,19 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         val m = c.messages.getOrNull(i) ?: return false
         if (m.role != Role.USER) return false
         if (text.isBlank() && m.images.isEmpty() && m.files.isEmpty()) { toast("消息不能为空"); return false }
+        if (currentTarget() == null) { toast("请先选择服务商和模型"); return false }
+        if (searchNotReady()) return false
+        // app.js confirmHistoryChange(m, …, false, 'branch')：编辑器里已提示过，不再弹窗，只记录历史变更原因
+        val c1 = if (i < c.messages.size - 1 && rpOn(c)) markHistory(c, "branch") else c
         val init = buildMap {
             put("content", JsonPrimitive(text)); put("createdAt", JsonPrimitive(now()))
             if (m.images.isNotEmpty()) put("images", JsonArray(m.images.map { JsonPrimitive(it) }))
             if (m.files.isNotEmpty()) put("files", JsonArray(m.files))
         }
-        val path = Versions.addVersion(c.messages, i, JsonObject(init))
+        val path = Versions.addVersion(c1.messages, i, JsonObject(init))
         val placeholder = Message(newId(), Role.ASSISTANT, "", now())
         scope.launch {
-            val nc = c.copy(messages = path + placeholder)
+            val nc = c1.copy(messages = path + placeholder)
             save(nc, touch = true)
             startStream(c.id, Streaming(c.id, path, null, liveId = placeholder.id, prefix = placeholder, startedAt = now())) {
                 deps.engine.regenerate(c.id, placeholder.id)
@@ -293,15 +393,89 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
         return true
     }
 
-    /** 切换版本 ‹ n/m ›（versions.select）；较早消息切换时后面的对话随之切到对应分支 */
-    fun selectVersion(msgId: String, k: Int) {
-        val c = _state.value.conv ?: return
-        if (_state.value.isStreaming) return
+    /** 切换版本（app.js switchVersion）：生成中 / 冻结时提示；RP 对话改较早历史先确认（VER_RP_WARN） */
+    fun planSwitch(msgId: String, k: Int): Plan {
+        val c = _state.value.conv ?: return Plan.Done
+        if (_state.value.isStreaming) return Plan.Toast("请先停止当前生成")
         val i = c.messages.indexOfFirst { it.id == msgId }
+        val m = c.messages.getOrNull(i) ?: return Plan.Done
+        val n = Versions.count(m)
+        if (k < 0 || k >= n || k == Versions.index(m)) return Plan.Done
+        if (frozen(m, c)) return Plan.Toast("这条消息已写入章节摘要（或超出预算未发送），不能切换版本")
+        if (i < c.messages.size - 1 && rpOn(c)) return Plan.Ask("切换到第 ${k + 1} 个版本？", VER_RP_WARN, "继续") { selectVersion(msgId, k, "version") }
+        selectVersion(msgId, k)
+        return Plan.Done
+    }
+
+    fun selectVersion(msgId: String, k: Int, markKind: String? = null) {
+        val c0 = _state.value.conv ?: return
+        if (_state.value.isStreaming) return
+        val i = c0.messages.indexOfFirst { it.id == msgId }
         if (i < 0) return
+        val c = if (markKind != null) markHistory(c0, markKind) else c0
+        val before = c.messages.size - i - 1
         val path = Versions.select(c.messages, i, k)
         if (path === c.messages) return
-        scope.launch { save(c.copy(messages = path), touch = false) }
+        scope.launch {
+            save(c.copy(messages = path), touch = false)
+            val after = path.size - i - 1
+            if (before > 0 || after > 0) toast("已切换到第 ${k + 1} 个版本" + if (after > 0) "，后面显示该版本的 $after 条对话" else "（该版本之后还没有对话）")
+        }
+    }
+
+    /** app.js deleteVersion */
+    fun planDeleteVersion(msgId: String, k: Int): Plan {
+        val c = _state.value.conv ?: return Plan.Done
+        if (_state.value.isStreaming) return Plan.Toast("请先停止当前生成")
+        val i = c.messages.indexOfFirst { it.id == msgId }
+        val m = c.messages.getOrNull(i) ?: return Plan.Done
+        if (frozen(m, c)) return Plan.Toast("这条消息已写入章节摘要，不能修改版本")
+        val tl = Versions.tailLength(c.messages, i, k)
+        val later = rpOn(c) && i < c.messages.size - 1
+        return Plan.Ask("删除第 ${k + 1} 个版本？", (if (tl > 0) "这个版本之后的 $tl 条对话也会一起删除。" else "删除后无法恢复。") + (if (later) "\n$VER_RP_WARN" else ""),
+            "删除", danger = true) {
+            val cur = _state.value.conv ?: return@Ask
+            val j = cur.messages.indexOfFirst { it.id == msgId }; if (j < 0) return@Ask
+            val c1 = if (later) markHistory(cur, "delete") else cur
+            scope.launch { save(c1.copy(messages = Versions.removeVersion(c1.messages, j, k)), touch = false); toast("已删除该版本") }
+        }
+    }
+
+    /** app.js keepOnlyVersion */
+    fun planKeepOnly(msgId: String): Plan {
+        val c = _state.value.conv ?: return Plan.Done
+        if (_state.value.isStreaming) return Plan.Toast("请先停止当前生成")
+        val m = c.messages.firstOrNull { it.id == msgId } ?: return Plan.Done
+        val n = Versions.count(m)
+        return Plan.Ask("只保留当前版本？", "其他 ${n - 1} 个版本（以及它们之后的对话分支）会被删除，当前显示的内容不变。", "只保留这个", danger = true) {
+            val cur = _state.value.conv ?: return@Ask
+            val j = cur.messages.indexOfFirst { it.id == msgId }; if (j < 0) return@Ask
+            scope.launch { save(cur.copy(messages = Versions.keepOnly(cur.messages, j)), touch = false); toast("已只保留当前版本") }
+        }
+    }
+
+    /** app.js deleteMsg（不确认，直接删；保存时 touch） */
+    fun deleteMessage(msgId: String) {
+        val c = _state.value.conv ?: return
+        if (_state.value.isStreaming) return
+        scope.launch { save(c.copy(messages = c.messages.filterNot { it.id == msgId }), touch = true) }
+    }
+
+    /** 编辑器提示（app.js editMsg 的 hint / warn） */
+    fun editHint(msgId: String): Pair<String, Boolean>? {
+        val c = _state.value.conv ?: return null
+        val idx = c.messages.indexOfFirst { it.id == msgId }
+        val m = c.messages.getOrNull(idx) ?: return null
+        val user = m.role == Role.USER
+        val after = c.messages.size - idx - 1
+        val rp = rpOn(c)
+        var hint = if (user) (if (after > 0) "「保存并重新发送」会从这里开出一个新分支重新生成，原来的内容和之后的 $after 条消息保留在旧版本里（可用 ‹ › 切换回去）；「保存」只修改这条消息。"
+            else "「保存并重新发送」会用新内容重新生成回复。")
+        else "修改这条 AI 回复的内容，后续对话会以修改后的内容作为上下文。"
+        if (m.images.isNotEmpty() || m.files.isNotEmpty()) hint += "图片和文件附件会保留。"
+        val warn = rp && (after > 0 || !user)
+        if (warn) hint += "\n本对话开启了 RP 缓存优化：修改历史消息会改变历史前缀，下一轮缓存命中率会下降一次。"
+        return hint to warn
     }
 
     fun stop() {
@@ -382,5 +556,9 @@ class ChatController(private val deps: UiDeps, private val scope: CoroutineScope
 
     companion object {
         const val PENDING_USER_ID = "__pending_user__"
+        /** app.js 1678 */
+        const val VER_RP_WARN = "本对话开启了 RP 缓存优化：切换较早回复的版本会改变对话历史，下一轮缓存命中率会下降一次。"
+        /** app.js 4030 */
+        const val RP_WARN = "本对话开启了 RP 缓存优化：系统提示词属于 L1 固定前缀，切换提示词会改变固定前缀，下一轮缓存命中率会下降一次（之后恢复）。"
     }
 }

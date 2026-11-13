@@ -53,4 +53,33 @@ object Versions {
 
     /** 用空快照替换当前版本字段（失败/空回复原位重试用，= applySnap(m, {})） */
     fun clearFields(m: Message) = MessageJson.withFields(m, JsonObject(emptyMap()))
+
+    /** versions.js normalizeMsg：只剩 1 个版本时去掉 versions；当前位置置 null；空的非当前版本补 {content:'',tail:[]} */
+    fun normalize(m: Message): Message {
+        if (m.versions.isEmpty()) return m
+        if (m.versions.size < 2) return m.copy(versions = emptyList(), vi = 0)
+        val vi = index(m)
+        val empty = JsonObject(mapOf("content" to kotlinx.serialization.json.JsonPrimitive(""), "tail" to JsonArray(emptyList())))
+        return m.copy(vi = vi, versions = m.versions.mapIndexed { j, v -> if (j == vi) null else v ?: empty })
+    }
+
+    /** 删除第 i 条消息的第 k 个版本（连同该版本之后的分支）；删当前版本时先切到相邻版本 */
+    fun removeVersion(msgs: List<Message>, i: Int, k: Int): List<Message> {
+        val m0 = msgs[i]
+        val n = count(m0)
+        if (n < 2 || k < 0 || k >= n) return msgs
+        val out = if (k == index(m0)) select(msgs, i, if (k > 0) k - 1 else 1) else msgs
+        val m = out[i]
+        val vs = m.versions.toMutableList().also { it.removeAt(k) }
+        val vi = if (m.vi > k) m.vi - 1 else m.vi
+        return out.take(i) + normalize(m.copy(versions = vs, vi = vi)) + out.drop(i + 1)
+    }
+
+    /** 只保留当前版本（丢弃其他版本和它们的分支） */
+    fun keepOnly(msgs: List<Message>, i: Int): List<Message> =
+        msgs.toMutableList().also { it[i] = it[i].copy(versions = emptyList(), vi = 0) }
+
+    /** 单个版本的内容（预览用） */
+    fun versionContent(m: Message, k: Int): String =
+        if (k == index(m)) m.content else ((m.versions.getOrNull(k)?.get("content") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
 }

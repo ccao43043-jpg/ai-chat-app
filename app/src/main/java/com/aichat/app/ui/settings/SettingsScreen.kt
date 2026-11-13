@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
  * 子页面可以自己用 BackHandler 先拦截（例如服务商编辑页的「放弃修改？」）。
  */
 @Composable
-fun SettingsScreen(start: SettingsDestination, onClose: () -> Unit) {
+fun SettingsScreen(start: SettingsDestination, onClose: () -> Unit, onStartPersona: ((com.aichat.app.domain.model.Persona) -> Unit)? = null) {
     // 栈元素：SettingsDestination.name 或 "panel:<pluginId>"（插件面板挂载点）
     val stack = remember(start) { mutableStateListOf(start.name) }
     val snack = remember { SnackbarHostState() }
@@ -71,6 +71,8 @@ fun SettingsScreen(start: SettingsDestination, onClose: () -> Unit) {
             dest == SettingsDestination.Plugins -> PluginsScreen(onBack = back, openPanel = { stack.add("panel:$it") })
             dest == SettingsDestination.Prompts -> com.aichat.app.ui.library.PromptsScreen(onBack = back, toast = toast)
             dest == SettingsDestination.Templates -> com.aichat.app.ui.library.TemplatesScreen(onBack = back, toast = toast)
+            dest == SettingsDestination.Personas -> com.aichat.app.ui.library.PersonasScreen(onBack = back, toast = toast,
+                onStart = { p -> onStartPersona?.invoke(p); onClose() })
             dest == SettingsDestination.General -> GeneralSettings(onBack = back, toast = toast)
             dest == SettingsDestination.Providers -> ProvidersScreen(onBack = back, toast = toast)
             dest == SettingsDestination.DataBackup -> DataBackupScreen(onBack = back, toast = toast)
@@ -118,7 +120,8 @@ private fun SettingsMain(onBack: () -> Unit, open: (SettingsDestination) -> Unit
         SettingsRow("提示词库", "⚡ 常用文字，一键插入输入框", "row-prompts") { open(SettingsDestination.Prompts) }
         SettingsRow("提示词模板", "切换本对话的系统提示词", "row-templates") { open(SettingsDestination.Templates) }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        listOf(SettingsDestination.Personas, SettingsDestination.Worlds, SettingsDestination.Knowledge, SettingsDestination.Usage, SettingsDestination.Balance)
+        SettingsRow("助手库", "常用助手、角色卡 PNG / JSON 导入导出", "row-personas") { open(SettingsDestination.Personas) }
+        listOf(SettingsDestination.Worlds, SettingsDestination.Knowledge, SettingsDestination.Usage, SettingsDestination.Balance)
             .forEach { d -> SettingsRow(d.title, if (SettingsMounts.get(d) == null) "待实现" else null) { open(d) } }
     }
 }

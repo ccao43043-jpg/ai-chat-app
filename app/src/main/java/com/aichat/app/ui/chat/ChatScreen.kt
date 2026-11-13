@@ -1,7 +1,10 @@
 package com.aichat.app.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,7 +84,9 @@ fun ChatScreen(
     var menu by remember { mutableStateOf(false) }
     var viewing by remember { mutableStateOf<String?>(null) }
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirmRegen by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var plan by remember { mutableStateOf<Plan?>(null) }
+    var versionMenu by rememberSaveable { mutableStateOf<String?>(null) }
+    var panel by rememberSaveable { mutableStateOf<String?>(null) }
     var sheet by rememberSaveable { mutableStateOf(0) }          // 1 = 提示词库，2 = 模板
     var convPlugins by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -123,7 +128,8 @@ fun ChatScreen(
             onRename = controller::rename,
             onDelete = controller::delete,
             onOpenSettings = { scope.launch { drawer.close() }; onOpenSettings(SettingsDestination.Main) },
-            onExport = exportConv)
+            onExport = exportConv,
+            onOpenPersonas = { scope.launch { drawer.close() }; onOpenSettings(SettingsDestination.Personas) })
     }) {
         Scaffold(
             contentWindowInsets = WindowInsets(0),
@@ -160,6 +166,15 @@ fun ChatScreen(
             },
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+                val hbadges = if (conv != null) deps.plugins.headerBadges(settings, conv) else emptyList()
+                if (hbadges.isNotEmpty()) androidx.compose.foundation.layout.Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp).testTag("header-badges"),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    hbadges.forEach { b ->
+                        BadgeChip(b, prefix = when (b.plugin) { "affect" -> "💓 "; else -> "" },
+                            onClick = { if (b.action != null) panel = b.action else b.detail?.let(controller::toast) })
+                    }
+                }
                 if (deps.isFake) Text("演示模式：数据层 / 网络层尚未接入，回复由 fake 引擎生成，不会保存",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
@@ -176,17 +191,24 @@ fun ChatScreen(
                                 val ms = if (conv != null && !live) deps.plugins.messageState(m, settings, conv) else null
                                 val badges = if (conv != null && !live) deps.plugins.messageBadges(m, settings, conv) else emptyList()
                                 val isUser = m.role == com.aichat.app.domain.model.Role.USER
+                                val isLast = messages.lastOrNull()?.id == m.id
+                                val headName = if (isUser) null else {
+                                    val pn = (m.extras["personaName"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaName
+                                    val pe = (m.extras["personaEmoji"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: conv?.personaEmoji
+                                    val model = (m.extras["model"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                                    listOfNotNull(pn?.let { listOfNotNull(pe, it).joinToString(" ") }, model).joinToString(" · ").ifEmpty { null }
+                                }
                                 MessageItem(m, streaming = live && !isUser, badges = badges,
                                     onToast = controller::toast, onImage = { viewing = it },
-                                    locked = st.isStreaming || ms?.dim == true, stateLabel = ms?.label,
-                                    actions = MessageActions(
-                                        onEdit = { editing = m.id },
-                                        onRegenerate = if (isUser) null else ({
-                                            val ask = controller.regenerateNeedsConfirm(m.id)
-                                            if (ask == null) controller.regenerate(m.id) else confirmRegen = m.id to ask
-                                        }),
+                                    view = MessageView(busy = st.isStreaming, dim = ms?.dim == true, label = ms?.label, isLast = isLast, headName = headName),
+                                    actions = if (live) MessageActions() else MessageActions(
+                                        onEdit = if (isUser || m.content.isNotEmpty()) ({ editing = m.id }) else null,
+                                        onRegenerate = if (isUser) null else ({ plan = controller.planRegenerate(m.id) }),
                                         onContinue = if (!isUser && controller.canContinue(m)) ({ controller.continueGeneration(m.id) }) else null,
-                                        onVersion = { k -> controller.selectVersion(m.id, k) },
+                                        onVersion = { k -> plan = controller.planSwitch(m.id, k) },
+                                        onVersionMenu = { if (st.isStreaming) controller.toast("请先停止当前生成") else versionMenu = m.id },
+                                        onDelete = { controller.deleteMessage(m.id) },
+                                        onBadge = { b -> if (b.action != null) panel = b.action else b.detail?.let(controller::toast) },
                                     ))
                             }
                         }
@@ -210,13 +232,13 @@ fun ChatScreen(
         val m = conv?.messages?.firstOrNull { it.id == id }
         if (m == null) editing = null else {
             val user = m.role == com.aichat.app.domain.model.Role.USER
-            val after = conv.messages.size - 1 - conv.messages.indexOf(m)
+            val (hint, warn) = controller.editHint(id) ?: (null to false)
             FullScreenEditor(
-                title = if (user) "编辑消息" else "编辑回复",
+                title = if (user) "编辑消息" else "编辑 AI 回复",
                 initial = m.content,
                 actions = if (user) listOf(EditorAction("save", "保存"), EditorAction("resend", "保存并重新发送", primary = true))
                     else listOf(EditorAction("save", "保存", primary = true)),
-                hint = if (user && after > 0) "「保存并重新发送」会开一个新版本，之后的 $after 条对话留在旧版本里，可用 ‹ › 切回。" else null,
+                hint = hint, warn = warn, placeholder = if (user) "输入消息…" else "回复内容…",
                 onResult = { key, text ->
                     val ok = if (key == "resend") controller.editAndResend(id, text) else controller.editMessage(id, text)
                     if (ok) editing = null
@@ -224,16 +246,51 @@ fun ChatScreen(
                 onDismiss = { editing = null })
         }
     }
-    confirmRegen?.let { (id, body) ->
-        ConfirmDialog("重新生成这条回复？", body, "重新生成", onOk = { confirmRegen = null; controller.regenerate(id) }, onDismiss = { confirmRegen = null })
+    when (val p = plan) {
+        is Plan.Toast -> LaunchedEffect(p) { controller.toast(p.text); plan = null }
+        is Plan.Ask -> ConfirmDialog(p.title, p.body, p.okText, danger = p.danger, onOk = { plan = null; p.run() }, onDismiss = { plan = null })
+        else -> {}
+    }
+    versionMenu?.let { id ->
+        val m = conv?.messages?.firstOrNull { it.id == id }
+        if (m == null || Versions.count(m) < 2) versionMenu = null else {
+            val n = Versions.count(m); val cur = Versions.index(m)
+            androidx.compose.material3.AlertDialog(onDismissRequest = { versionMenu = null },
+                title = { Text((if (m.role == com.aichat.app.domain.model.Role.USER) "消息" else "回复") + "版本 ${cur + 1} / $n") },
+                text = { Column(Modifier.testTag("version-menu")) {
+                    (0 until n).filter { it != cur }.forEach { k ->
+                        TextButton(onClick = { versionMenu = null; plan = controller.planSwitch(id, k) }) {
+                            Text("切换到第 ${k + 1} 个：" + Versions.versionContent(m, k).replace(Regex("\\s+"), " ").take(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    TextButton(onClick = { versionMenu = null; plan = controller.planKeepOnly(id) }) { Text("只保留当前版本（第 ${cur + 1} 个）") }
+                    TextButton(onClick = { versionMenu = null; plan = controller.planDeleteVersion(id, cur) }) {
+                        Text("删除当前版本", color = MaterialTheme.colorScheme.error)
+                    }
+                } },
+                confirmButton = { TextButton(onClick = { versionMenu = null }) { Text("取消") } })
+        }
+    }
+    if (st.askSearchSetup) ConfirmDialog("还没有配置联网搜索", "联网搜索需要一个搜索服务。推荐 Tavily（注册即送免费额度）或国内的博查 Bocha，在设置中填入 API Key 即可。", "去设置",
+        onOk = { controller.consumeAskSearch(); onOpenSettings(SettingsDestination.Search) }, onDismiss = controller::consumeAskSearch)
+    panel?.let { id ->
+        val page = com.aichat.app.ui.settings.PluginPanels.get(id) ?: com.aichat.app.ui.settings.PluginPanels.get(id.substringBefore('.'))
+        androidx.compose.ui.window.Dialog(onDismissRequest = { panel = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
+                if (page != null) page { panel = null }
+                else com.aichat.app.ui.settings.SettingsPageScaffold(id, { panel = null }) {
+                    Text("面板「$id」尚未接入（工作流 C）", Modifier.padding(20.dp))
+                }
+            }
+        }
     }
     if (sheet == 1) PromptSheet(onPick = { t -> input = if (input.isEmpty()) t else input + (if (input.endsWith("\n")) "" else "\n") + t; sheet = 0 },
         onManage = { sheet = 0; onOpenSettings(SettingsDestination.Prompts) }, onDismiss = { sheet = 0 })
     if (sheet == 2) TemplateSheet(
         currentTemplateId = (conv?.extras?.get("templateId") as? kotlinx.serialization.json.JsonPrimitive)?.content,
         hasSystem = !conv?.systemPrompt.isNullOrEmpty(),
-        onApply = { t, text -> controller.setConversationSystem(text, t?.id, t?.name, t?.emoji); sheet = 0
-            controller.toast(if (t == null) "已清空系统提示词" else "已套用模板「${t.name}」") },
+        onApply = { t, text -> sheet = 0; plan = controller.planApplyTemplate(t?.id, t?.name, t?.emoji, text, t?.skill == true) },
         onManage = { sheet = 0; onOpenSettings(SettingsDestination.Templates) }, onDismiss = { sheet = 0 })
     if (convPlugins) {
         val perConv = deps.plugins.plugins.filter { it.perConversation }

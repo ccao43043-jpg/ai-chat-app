@@ -147,11 +147,12 @@ object FakeDeps {
      * 仓库 / KeyVault / 备份全部用 D 的真实实现（DataGraph.inMemory：MemFileStore + FakeKeyVault，进程内、不落盘）；
      * 只有 ChatEngine（等 B）和 PluginRegistry（等 C）还是本文件的 fake。
      */
-    fun create(data: DataGraph = DataGraph.inMemory(), engineDelayMs: Long = 35, now: () -> Long = System::currentTimeMillis): UiDeps {
+    fun create(data: DataGraph = DataGraph.inMemory(), engineDelayMs: Long = 35, now: () -> Long = System::currentTimeMillis,
+               plugins: PluginRegistry = FakePluginRegistry()): UiDeps {
         if (data.settings.settings.value.providers.isEmpty()) runBlocking {
             data.settings.update { it.copy(providers = ProviderPresets.defaults()) }
         }
-        return UiDeps(data.chats, data.settings, data.library, data.keys, FakeChatEngine(data.chats, engineDelayMs, now), FakePluginRegistry(),
+        return UiDeps(data.chats, data.settings, data.library, data.keys, FakeChatEngine(data.chats, engineDelayMs, now), plugins,
             data.migration, isFake = true)
     }
 }
