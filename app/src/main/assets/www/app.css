@@ -1181,3 +1181,28 @@ html, body { background: var(--bg); }
 .wd-paste-row { display: flex; gap: 8px; margin: 10px 0 4px; }
 .wd-paste-row .ghost-btn { flex: 1; margin: 0; }
 #wp-text { min-height: 38vh; max-height: 52vh; font-size: 14px; }
+
+/* ================= v0.29.0：底部固定 Tab（聊天 / 生图） ================= */
+:root { --tabbar-h: 56px; --tab-safe: env(safe-area-inset-bottom, 0px); }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 34; display: none;
+  height: calc(var(--tabbar-h) + var(--tab-safe)); padding: 0 12px var(--tab-safe);
+  background: rgba(9, 9, 11, .96); border-top: 1px solid #27272a;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+body.tabs-on .tabbar { display: flex; }
+.tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: var(--fg-3); font-size: 11.5px; font-weight: 550; letter-spacing: .3px; position: relative; min-height: 48px; }
+.tab-btn svg { width: 23px; height: 23px; transition: transform .2s var(--ease); }
+.tab-btn::before { content: ""; position: absolute; top: 0; left: 50%; width: 28px; height: 3px; margin-left: -14px;
+  border-radius: 0 0 3px 3px; background: transparent; transition: background .2s; }
+.tab-btn.active { color: var(--fg); }
+.tab-btn.active svg { color: var(--accent-3); transform: translateY(-1px); }
+.tab-btn.active::before { background: var(--grad); }
+.tab-btn:active { opacity: .7; }
+/* Tab 可见时：聊天页底部让出 Tab 高度，Composer 不再自带安全区（由 Tab 吃掉） */
+body.tabs-on #app { padding-bottom: calc(var(--tabbar-h) + var(--tab-safe)); }
+body.tabs-on .composer { padding-bottom: 8px; }
+body.tabs-on #page-imagegen { bottom: calc(var(--tabbar-h) + var(--tab-safe)); }
+body.tabs-on #toast { bottom: calc(110px + var(--tabbar-h) + var(--tab-safe)); }
+/* Tab 模式下生图页本身就是一级页面：保留返回按钮（返回聊天），去掉滑入阴影避免压在 Tab 上 */
+body.tabs-on #page-imagegen.show { box-shadow: none; }
+@media (min-width: 900px) { .tabbar { left: 256px; } }

@@ -3,7 +3,7 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const bridge = window.AndroidBridge || null;
-  const APP_VERSION = '0.28.7';
+  const APP_VERSION = '0.29.0';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
@@ -4419,6 +4419,50 @@
     return false;
   };
 
+  // ---------------- v0.29.0：底部 Tab（聊天 / 生图） ----------------
+  // 生图 Tab = 复用 #page-imagegen；返回键在生图页时按原逻辑 closeImageGen 回到聊天。
+  // Tab 只在「聊天主界面」或「生图页」时显示；其它全屏页、抽屉、面板/遮罩、编辑器、看图、键盘弹出时隐藏。
+  const TABBAR_BLOCKERS = '.page.show:not(#page-imagegen), .sheet.show, .mask.show, #drawer.show, #editor.show, #viewer.show';
+  function activeTab() { return $('#page-imagegen').classList.contains('show') ? 'imagegen' : 'chat'; }
+  function updateTabbar() {
+    const bar = $('#tabbar'); if (!bar) return;
+    const tab = activeTab();
+    bar.querySelectorAll('.tab-btn').forEach(b => {
+      const on = b.dataset.tab === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const blocked = !!document.querySelector(TABBAR_BLOCKERS);
+    const kb = document.body.classList.contains('kb-open');
+    const on = !blocked && !kb;
+    if (document.body.classList.contains('tabs-on') !== on) document.body.classList.toggle('tabs-on', on);
+    bar.setAttribute('aria-hidden', on ? 'false' : 'true');
+  }
+  function switchTab(tab) {
+    if (tab === activeTab()) { updateTabbar(); return; }
+    if (tab === 'imagegen') {
+      closeDrawer();
+      openImageGen();
+    } else {
+      closeImageGen({ keepRunning: true });
+    }
+    updateTabbar();
+  }
+  window.__tabs = { switchTab, activeTab, updateTabbar };
+  runInit('tabbar', function () {
+    const bar = $('#tabbar'); if (!bar) return;
+    bar.querySelectorAll('.tab-btn').forEach(b => { b.onclick = () => switchTab(b.dataset.tab); });
+    // 只关心 body 直接子节点（各页面 / 面板 / 遮罩）和 body 自身（kb-open）的 class 变化，流式渲染不会触发
+    let raf = 0;
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; updateTabbar(); }); };
+    new MutationObserver(muts => {
+      for (const m of muts) {
+        if (m.type === 'childList' || m.target === document.body || m.target.parentNode === document.body) { schedule(); return; }
+      }
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+    updateTabbar();
+  });
+
 
 
   // ---------------- 账户余额页 ----------------
@@ -4833,6 +4877,12 @@
       });
   }
   function openImageGen(prefill) {
+    // v0.29.0：从底部 Tab 切回时若仍在生成，保留进度与状态，不重置控件
+    if (igRunning) {
+      if (typeof prefill === 'string' && prefill.trim()) $('#ig-prompt').value = prefill.trim();
+      $('#page-imagegen').classList.add('show');
+      return;
+    }
     fillImageSizeSelect(settings.imageSize);
     fillImageGenControls();
     if (typeof prefill === 'string' && prefill.trim()) $('#ig-prompt').value = prefill.trim();
@@ -4842,8 +4892,9 @@
     setImageGenStatus('', '');
     $('#page-imagegen').classList.add('show');
   }
-  function closeImageGen() {
-    if (igRunning) stopImageGenPage();
+  function closeImageGen(opts) {
+    // opts.keepRunning：底部 Tab 切到「聊天」时不打断正在进行的生成（返回键 / 返回按钮仍按原逻辑停止）
+    if (igRunning && !(opts && opts.keepRunning)) stopImageGenPage();
     persistImageGenSelection();
     $('#page-imagegen').classList.remove('show');
   }
