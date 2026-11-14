@@ -14,7 +14,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.put
 import java.io.File
 
 /** 手写 DI 根（D 所有）。各工作流把实现挂在这里；不引入 Hilt，减少构建内存与 KSP。 */
@@ -46,7 +45,7 @@ class AppGraph(app: Application) {
             override fun openIn(uri: Uri) = app.contentResolver.openInputStream(uri)
         },
         providerMigration = com.aichat.app.net.ProviderMigration.hook,   // B：Providers.migrateSettings（首启迁移里跑）
-        fromVersionCode = { 0 }, // 旧版本号覆盖安装后已不可得；0 = 未知（报告里以 store 内容为准）
+        fromVersionCode = { 0 }, // 旧版本号覆盖安装后已不可得；0 = 未知（报告里以 store 内容为准）。见 PLAN DEC-5
     )
 
     // ---- 数据（D） ----
@@ -69,34 +68,36 @@ class AppGraph(app: Application) {
     val rpMemoryStore get() = data.rpMemory
 
     // ---- 引擎 / 插件（I1：B 的真实引擎；C 合并前插件为空注册表） ----
+    /**
+     * OPT-3：插件注册表**只允许一个实例**。engine 与 uiDeps() 共用同一个对象，
+     * 否则合入 C 之后引擎看到的插件状态和 UI 看到的是两份，开关会「点了没反应」。
+     * 合 C 时把这里换成 RealPluginRegistry（注册顺序见 SPEC：knowledge → rpcache → usage → gcache → mmcache → affect）。
+     * 注意：engine 构造时捕获的是引用本身，构造之后再给 [plugins] 赋新对象**不会**传进引擎。
+     */
     var plugins: PluginRegistry = EmptyPluginRegistry
     val providerClient = com.aichat.app.net.DefaultProviderClient(secretVault)
     /** OpenRouter 缓存亲和路由（app.js routerState，持久化在 router-affinity.json） */
     val affinityRouter = com.aichat.app.net.AffinityRouter(initial = data.routerState.load(), save = { data.routerState.save(it) })
     var engine: ChatEngine = com.aichat.app.engine.DefaultChatEngine(
-        chats = data.chats, settingsRepo = data.settings, client = providerClient, plugins = EmptyPluginRegistry,
+        chats = data.chats, settingsRepo = data.settings, client = providerClient, plugins = plugins,
         router = affinityRouter, onUsage = { conv, provider, model, msg, usage -> recordUsage(conv, provider, model, msg, usage) },
+        // W1：接联网搜索（app.js webSearch）。Key 由 AuthInjector 按 search:<provider> 注入；
+        // 开关仍是 settings.searchOn，未配置 Key 时 ChatController 会先弹「去设置搜索」。
+        search = com.aichat.app.net.DefaultSearchClient(secretVault),
     )
 
-    /** app.js recordUsage + UsageStats.makeEntry（usage-stats.js 32–51）：追加一行到 usage-stats.jsonl；meta 不存在时先写 */
+    /**
+     * app.js `recordUsage`：把一次请求的用量追加到 usage-stats.jsonl（meta 不存在时先写）。
+     *
+     * OPT-1：字段拼装 / 默认值 / 去重键格式全部交给 [UsageEntry] + [UsageStatsCore.makeEntry]，
+     * 这里不再手写第二份（原来手写那份的 `key`、`id` 随机段、`actualCost` 空值处理都与 JS 各自独立实现，必然漂移）。
+     */
     private suspend fun recordUsage(conv: com.aichat.app.domain.model.Conversation, p: com.aichat.app.domain.model.ProviderConfig,
                                     model: String, msg: com.aichat.app.domain.model.Message, u: com.aichat.app.domain.model.Usage) {
-        val prompt = u.prompt ?: return
-        val completion = u.completion ?: 0
-        val cache = u.cacheSupported == true
-        val hit = if (cache) (u.hit ?: 0) else 0
-        val miss = if (cache) (u.miss ?: maxOf(0, prompt - hit)) else prompt
-        val at = System.currentTimeMillis()
-        val rnd = (1..6).map { "0123456789abcdefghijklmnopqrstuvwxyz"[(Math.random() * 36).toInt()] }.joinToString("")
-        val entry = kotlinx.serialization.json.buildJsonObject {
-            put("id", "u_" + java.lang.Long.toString(at, 36) + "_" + rnd); put("at", at); put("type", "chat")
-            put("prompt", prompt); put("completion", completion); put("hit", hit); put("miss", miss); put("cache", cache)
-            put("model", model.ifEmpty { conv.model }); put("providerId", p.presetId.ifEmpty { p.id }); put("providerName", p.name)
-            put("convId", conv.id); put("convTitle", conv.title); put("msgId", msg.id)
-            put("key", "l:$at:${msg.id}:$prompt:$completion:chat")
-            u.costUsd?.takeIf { it.isFinite() }?.let { put("actualCost", it) } ?: put("actualCost", kotlinx.serialization.json.JsonNull)
+        val entry = com.aichat.app.domain.cost.UsageEntry.from(conv, p, model, msg, u) ?: return
+        if (data.usage.meta().isEmpty()) {
+            data.usage.saveMeta(com.aichat.app.domain.cost.UsageStatsCore.metaOf(com.aichat.app.domain.cost.UsageStatsCore.emptyState()))
         }
-        if (data.usage.meta().isEmpty()) data.usage.saveMeta(com.aichat.app.domain.cost.UsageStatsCore.metaOf(com.aichat.app.domain.cost.UsageStatsCore.emptyState()))
         data.usage.append(entry)
     }
 

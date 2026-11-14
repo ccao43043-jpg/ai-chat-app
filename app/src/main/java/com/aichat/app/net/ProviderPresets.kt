@@ -9,9 +9,9 @@ import kotlinx.serialization.json.JsonObject
  */
 object ProviderPresets {
     const val SETTINGS_VERSION = 2
-    val PRESETS: JsonArray by lazy { Js.json.parseToJsonElement(PRESETS_JSON) as JsonArray }
-    val OLD_DEFAULTS: JsonObject by lazy { Js.json.parseToJsonElement(OLD_DEFAULTS_JSON) as JsonObject }
-    val RETIRED: JsonObject by lazy { Js.json.parseToJsonElement(RETIRED_JSON) as JsonObject }
+    val PRESETS: JsonArray by lazy { Js.parse(PRESETS_JSON) as JsonArray }
+    val OLD_DEFAULTS: JsonObject by lazy { Js.parse(OLD_DEFAULTS_JSON) as JsonObject }
+    val RETIRED: JsonObject by lazy { Js.parse(RETIRED_JSON) as JsonObject }
 
     fun preset(presetId: String?): JsonObject? = PRESETS.firstOrNull { (it as JsonObject)["presetId"].let { p -> p != null && Js.str(p) == presetId } } as? JsonObject
 

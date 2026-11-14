@@ -153,6 +153,18 @@ class DefaultProviderClient(
         if (routeSlug.isNullOrEmpty()) stream(provider, request)
         else kotlinx.coroutines.flow.flow { emit(StreamEvent.RouteChosen(routeSlug)); emitAll(stream(provider, request)) }
 
+    /**
+     * app.js requestText(authed(req, p.id), _, timeoutMs)：已认证的一次性请求 → (status, body)。
+     * 超时抛 IOException("请求超时")；取消随协程取消 Call。改写搜索查询（rewriteQuery）用。
+     */
+    suspend fun requestText(provider: ProviderConfig, req: BuiltRequest, timeoutMs: Long): Pair<Int, String> = withContext(Dispatchers.IO) {
+        val authed = auth.authorize(provider.id, req)
+        val call = client.newBuilder().callTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS).build().newCall(toOkHttp(authed))
+        kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.invokeOnCompletion { if (it != null) call.cancel() }
+        try { call.execute().use { r -> r.code to (r.body?.string() ?: "") } }
+        catch (e: java.io.InterruptedIOException) { if (call.isCanceled()) throw e; throw IOException("请求超时") }
+    }
+
     /** 已认证 GET → (status, body)；未登记 / 跨源抛 AuthInjector.Rejected */
     private suspend fun getText(provider: ProviderConfig, req: BuiltRequest): Pair<Int, String> = withContext(Dispatchers.IO) {
         val authed = auth.authorize(provider.id, req)
@@ -202,7 +214,7 @@ class DefaultProviderClient(
 
         /** 402 降级：只改 max_tokens（openai / anthropic）或 generationConfig.maxOutputTokens（gemini），其余逐字不变 */
         fun withMaxTokens(r: BuiltRequest, type: ProviderType, maxTokens: Double): BuiltRequest {
-            val body = Js.json.parseToJsonElement(r.body) as? JsonObject ?: return r
+            val body = Js.parse(r.body) as? JsonObject ?: return r
             val m = LinkedHashMap<String, JsonElement>(body)
             if (type == ProviderType.GEMINI) {
                 val gc = LinkedHashMap<String, JsonElement>((m["generationConfig"] as? JsonObject) ?: JsonObject(emptyMap()))
