@@ -21,6 +21,8 @@ import com.aichat.app.net.AffinityRouter
 import com.aichat.app.net.DefaultProviderClient
 import com.aichat.app.net.ProviderRules
 import com.aichat.app.net.Js
+import com.aichat.app.net.NetRetry
+import com.aichat.app.net.SearchCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -56,6 +58,11 @@ class DefaultChatEngine(
     private val now: () -> Long = System::currentTimeMillis,
     /** app.js uid()：Date.now().toString(36) + 6 位随机 base36 */
     private val uid: () -> String = { java.lang.Long.toString(System.currentTimeMillis(), 36) + (1..6).map { "0123456789abcdefghijklmnopqrstuvwxyz"[(Math.random() * 36).toInt()] }.joinToString("") },
+    /** 联网搜索（app.js webSearch）；null = 不搜索 */
+    private val search: com.aichat.app.net.DefaultSearchClient? = null,
+    /** NetRetry 等待（测试注入）与抖动随机数 */
+    private val sleep: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+    private val rnd: () -> Double = Math::random,
 ) : ChatEngine {
     private val running = ConcurrentHashMap<String, Job>()
 
@@ -133,22 +140,57 @@ class DefaultChatEngine(
         var conv = if (reuse == null) conv0.copy(messages = conv0.messages + bot) else conv0.copy(messages = conv0.messages.map { if (it.id == bot.id) bot else it })
         send(StreamEvent.Started(lastUser?.id, bot.id))     // #c：第一个事件；助手消息此时只在内存
 
-        // ---- 请求上下文（toRequestMsg：文件展开 / 搜索注入待移植） ----
-        val wire = conv.messages.filter { it.id != bot.id && it.error == null && !Js.truthy(it.extras["imageGen"]) && !Js.truthy(it.extras["pending"]) }
-            .map { WireMessage(it.role, FileContext.requestContent(it, it === lastUser, TimeLine.localDateStr(now())), it.images, srcId = it.id) }
-        var sys = conv.systemPrompt ?: ""
-        var msgs = wire
-        if (continuing && prior.isNotEmpty()) {
-            msgs = msgs + WireMessage(Role.ASSISTANT, prior) + WireMessage(Role.USER, "请从上次中断处继续，不要重复已生成的内容。")
-            sys = (if (sys.isNotEmpty()) "$sys\n\n" else "") + "【续写】请从上次中断处继续，不要重复。"
+        val wantSearch = !continuing && search != null && settings.searchOn && SearchCore.ready(SearchCore.cfgOf(settings)) &&
+            lastUser != null && Js.trim(lastUser.content).isNotEmpty()
+        // app.js：if (lastUser && !continuing) delete lastUser.search（内存；收尾时随对话落盘，D5 写 null）
+        if (lastUser != null && !continuing && lastUser.extras.containsKey("search"))
+            conv = conv.copy(messages = conv.messages.map { if (it.id == lastUser.id) it.copy(extras = JsonObject(it.extras - "search")) else it })
+
+        fun buildCtx(c: Conversation): RequestContext {
+            val lu = c.messages.firstOrNull { it.id == lastUser?.id }
+            val wire = c.messages.filter { it.id != bot.id && it.error == null && !Js.truthy(it.extras["imageGen"]) && !Js.truthy(it.extras["pending"]) }
+                .map { WireMessage(it.role, FileContext.requestContent(it, lu != null && it.id == lu.id, TimeLine.localDateStr(now())), it.images, srcId = it.id) }
+            var sys = c.systemPrompt ?: ""
+            var msgs = wire
+            if (continuing && prior.isNotEmpty()) {
+                msgs = msgs + WireMessage(Role.ASSISTANT, prior) + WireMessage(Role.USER, "请从上次中断处继续，不要重复已生成的内容。")
+                sys = (if (sys.isNotEmpty()) "$sys\n\n" else "") + "【续写】请从上次中断处继续，不要重复。"
+            }
+            val temp = c.extras["temperature"]?.takeIf { Js.truthy(it) || (it is JsonPrimitive && !it.isString) }
+                ?.let { Js.parseFloat(Js.str(it)).takeIf { d -> !d.isNaN() } } ?: settings.temperature
+            return RequestContext(c, provider, c.model, sys, msgs,
+                ChatOptions(stream = settings.stream, temperature = temp, maxTokens = ProviderRules.resolveMaxTokens(provider, c.model, settings.maxTokens),
+                    convId = c.id), settings, lu?.id)
         }
-        val temp = conv.extras["temperature"]?.takeIf { Js.truthy(it) || (it is JsonPrimitive && !it.isString) }
-            ?.let { Js.parseFloat(Js.str(it)).takeIf { d -> !d.isNaN() } } ?: settings.temperature
-        var ctx = RequestContext(conv, provider, conv.model, sys, msgs,
-            ChatOptions(stream = settings.stream, temperature = temp, maxTokens = ProviderRules.resolveMaxTokens(provider, conv.model, settings.maxTokens),
-                convId = conv.id), settings, lastUser?.id)
+        var ctx = buildCtx(conv)
 
         val job = launch {
+            if (wantSearch) {                                                       // app.js runChat 联网搜索段
+                bot = bot.copy(extras = JsonObject(bot.extras + ("searching" to JsonPrimitive(true))))
+                try {
+                    var q = Js.trim(lastUser!!.content)
+                    if (Js.truthy(settings.search["rewrite"])) {
+                        val hist = conv.messages.filter { it.id != bot.id && it.id != lastUser.id && it.error == null && !Js.truthy(it.extras["imageGen"]) }
+                        q = rewriteQuery(provider, conv.model, q, hist)
+                    }
+                    val sq = SearchCore.sliceUtf16(q, 120)
+                    bot = bot.copy(extras = JsonObject(bot.extras + ("searchQuery" to JsonPrimitive(sq))))
+                    send(StreamEvent.Notice("正在联网搜索：$sq"))
+                    val results = search!!.webSearch(SearchCore.cfgOf(settings), q)
+                    if (results.isEmpty()) throw java.io.IOException("没有搜索到相关结果")
+                    val so = JsonObject(mapOf("query" to JsonPrimitive(sq), "results" to JsonArray(results)))
+                    conv = conv.copy(messages = conv.messages.map { if (it.id == lastUser.id) it.copy(extras = JsonObject(it.extras + ("search" to so))) else it })
+                    bot = bot.copy(extras = JsonObject(bot.extras + ("sources" to JsonArray(results))))
+                } catch (e: CancellationException) { throw e
+                } catch (e: Exception) {
+                    val msg = "联网搜索失败：" + (e.message ?: e.javaClass.simpleName) + "。以下为模型直接回答。"
+                    bot = bot.copy(extras = JsonObject(bot.extras + ("searchError" to JsonPrimitive(msg))))
+                    send(StreamEvent.Notice(msg))
+                }
+                bot = bot.copy(extras = JsonObject(bot.extras - "searching"))
+                conv = conv.copy(messages = conv.messages.map { if (it.id == bot.id) bot else it })
+                ctx = buildCtx(conv)
+            }
             plugins.attach(object : PluginContext { override fun notify(text: String) { trySend(StreamEvent.Notice(text)) } })   // #i
             ctx = plugins.runBeforeRequest(ctx) { /* pluginStatus：临时状态，UI 用 Notice 之外的通道，v1 不显示 */ }
             ctx = ctx.copy(messages = injectNowLine(ctx.messages, ctx.systemPrompt.ifEmpty { conv.systemPrompt }))
@@ -166,19 +208,47 @@ class DefaultChatEngine(
             req = plugins.transformRequest(req, ctx)                                                                         // #g
             val startedAt = now()
             var status = 0
-            client.stream(provider, req, routeSlug).collect { ev ->
-                when (ev) {
-                    is StreamEvent.Status -> status = ev.httpStatus
-                    is StreamEvent.Delta -> bot = bot.copy(content = bot.content + ev.text)
-                    is StreamEvent.Reasoning -> bot = bot.copy(reasoning = (bot.reasoning ?: "") + ev.text)
-                    is StreamEvent.Finish -> bot = bot.copy(finishReason = ev.reason, truncated = bot.truncated || ev.reason == "length")
-                    is StreamEvent.UsageUpdate -> bot = bot.copy(usage = ev.usage)
-                    is StreamEvent.RouteChosen -> bot = bot.copy(routeSlug = ev.slug)
-                    is StreamEvent.Error -> bot = bot.copy(error = (bot.error?.let { "$it\n" } ?: "") + ev.message,
-                        truncated = bot.truncated || bot.content.isNotEmpty())
-                    else -> {}
+            // A6 NetRetry：失败且还没收到正文时按 classify / backoff 重试（最多 2 次）；402 降级在 ProviderClient 内
+            var attempt = 0
+            while (true) {
+                status = 0
+                var gotDelta = false
+                var failure: StreamEvent.Error? = null
+                client.stream(provider, req, routeSlug).collect { ev ->
+                    when (ev) {
+                        is StreamEvent.Status -> status = ev.httpStatus
+                        is StreamEvent.Delta -> { gotDelta = true; bot = bot.copy(content = bot.content + ev.text) }
+                        is StreamEvent.Reasoning -> { gotDelta = true; bot = bot.copy(reasoning = (bot.reasoning ?: "") + ev.text) }
+                        is StreamEvent.Finish -> bot = bot.copy(finishReason = ev.reason, truncated = bot.truncated || ev.reason == "length")
+                        is StreamEvent.UsageUpdate -> bot = bot.copy(usage = ev.usage)
+                        is StreamEvent.RouteChosen -> bot = bot.copy(routeSlug = ev.slug)
+                        is StreamEvent.Error -> {
+                            val transport = ev.httpStatus >= 400 || ev.message.startsWith(NET_ERR)
+                            if (transport && failure == null) { failure = ev; return@collect }      // 先扣住，决定是否重试
+                            gotDelta = true
+                            bot = bot.copy(error = (bot.error?.let { "$it\n" } ?: "") + ev.message)
+                        }
+                        else -> {}
+                    }
+                    send(ev)
                 }
-                send(ev)
+                val f = failure
+                if (f != null) {
+                    val netErr = if (f.message.startsWith(NET_ERR)) f.message.removePrefix(NET_ERR).substringBefore(NET_HINT) else null
+                    val c = NetRetry.classify(if (netErr != null) 0 else f.httpStatus, f.raw, netErr)
+                    if (NetRetry.shouldRetry(c, attempt, gotDelta, false)) {
+                        val wait = NetRetry.backoff(attempt, c.kind, rnd())
+                        send(StreamEvent.Notice(c.label + "，" + Js.numberToString(Math.round(wait / 100.0) / 10.0) + " 秒后重试（" + (attempt + 1) + "/" + NetRetry.MAX_RETRIES + "）"))
+                        sleep(wait)
+                        attempt++
+                        continue
+                    }
+                    if (attempt > 0) bot = bot.copy(extras = JsonObject(bot.extras + ("retries" to JsonPrimitive(attempt))))
+                    val msg = withRetries(f.message, attempt)
+                    bot = bot.copy(error = (bot.error?.let { "$it\n" } ?: "") + msg, truncated = bot.truncated || bot.content.isNotEmpty())
+                    send(f.copy(message = msg))
+                }
+                break
             }
             if (status == 0 && bot.error == null) bot = bot.copy(error = "请求失败：没有收到响应")
             finishTurn(ctx, provider, bot, status, startedAt, routeSlug, stopped = false).let { conv = it }
@@ -192,10 +262,21 @@ class DefaultChatEngine(
         }
     }
 
+    /** app.js rewriteQuery：非流式、temperature 0、maxTokens 256、20s；失败回退原问题（取消照常抛出） */
+    private suspend fun rewriteQuery(p: ProviderConfig, model: String, q: String, history: List<Message>): String = try {
+        val prompt = SearchCore.buildRewritePrompt(q, history.map { SearchCore.Turn(it.role.wire, it.content) })
+        val req = client.buildChatRequest(p, model, listOf(WireMessage(Role.USER, prompt)), "", ChatOptions(stream = false, temperature = 0.0, maxTokens = 256))
+        val (st, text) = client.requestText(p, req, 20_000)
+        if (st >= 400 || st == 0) q
+        else SearchCore.cleanRewrite(com.aichat.app.net.Deltas.parseFullResponse(p.type.wire, text)
+            .filterIsInstance<com.aichat.app.net.StreamDelta.Text>().joinToString("") { it.text }, q)
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { q }
+
     /** 收尾：写回助手消息 → runAfterResponse → 用量 → 路由观测 → save */
     private suspend fun finishTurn(ctx: RequestContext, provider: ProviderConfig, bot: Message, status: Int, startedAt: Long,
                                    routeSlug: String?, stopped: Boolean): Conversation = withContext(NonCancellable) {
         // ctx.conv = runBeforeRequest 之后的对话（插件可能改了 rpState / extras）；把本轮助手消息写回（不在则追加）
+        val bot = bot.copy(extras = JsonObject(bot.extras - "searching"))   // 临时字段不落盘（app.js finish：delete bot.searching）
         val conv = ctx.conv.let { c ->
             val msgs = if (c.messages.any { it.id == bot.id }) c.messages.map { if (it.id == bot.id) bot else it } else c.messages + bot
             c.copy(messages = msgs, updatedAt = now())
@@ -208,6 +289,11 @@ class DefaultChatEngine(
         after
     }
 }
+
+private const val NET_ERR = "网络错误："
+private const val NET_HINT = "\n请检查网络连接和 Base URL。"
+/** app.js：错误文案后接「（已重试 N 次）」；402 附注在 ProviderClient 里已拼好，接在其前（402 不在重试范围内，实际不会同时出现） */
+internal fun withRetries(msg: String, attempt: Int): String = if (attempt > 0) "$msg（已重试 $attempt 次）" else msg
 
 /** timeutil.js 的 nowLine / NOW_MARKER（本地时区） */
 object TimeLine {

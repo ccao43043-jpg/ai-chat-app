@@ -17,7 +17,7 @@ object CostCoreJs {
     const val EWMA_ALPHA = 0.3
     const val BIAS_ABS_THRESHOLD = 0.15
     const val BIAS_STREAK_MARK = 3
-    private fun parse(s: String) = Js.json.parseToJsonElement(s) as JsonObject
+    private fun parse(s: String) = Js.parse(s) as JsonObject
     val DEFAULT_PEAK: JsonObject = parse("""{"windows":"09:00-12:00,14:00-18:00","tz":8,"weekdays":true,"off_factor":0.5}""")
     val DEFAULT_PRICES: JsonObject = parse("""{"deepseek-flash":{"hit":0.006,"miss":0.3,"out":1.2,"match":"deepseek"},"deepseek-v4-pro":{"hit":0.044,"miss":1.32,"out":3.96,"match":"deepseek-v4-pro,deepseek-pro"}}""")
     /** 由 node 从 cost-core.js 导出（qp() 已按 JS 舍入），逐字一致 */

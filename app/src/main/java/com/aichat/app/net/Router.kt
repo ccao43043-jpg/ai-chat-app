@@ -114,7 +114,7 @@ object Router {
             }
             fun parse(text: String?): State {
                 if (text == null) return State()
-                return try { fromJson(Js.json.parseToJsonElement(text) as? JsonObject) } catch (e: Exception) { State() }
+                return try { fromJson(Js.parse(text) as? JsonObject) } catch (e: Exception) { State() }
             }
         }
     }

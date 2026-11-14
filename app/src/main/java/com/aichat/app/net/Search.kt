@@ -104,7 +104,7 @@ object SearchCore {
 
     /** parseSearchResponse → [{title,url,content,site,date}]；非 JSON 抛 SearchParseException(syntax=true)，博查错误码抛其 msg */
     fun parseSearchResponse(provider: String, text: String, count: JsonElement?): List<JsonObject> {
-        val obj = try { Js.json.parseToJsonElement(text) } catch (e: Exception) { throw SearchParseException(e.message ?: "", true) }
+        val obj = try { Js.parse(text) } catch (e: Exception) { throw SearchParseException(e.message ?: "", true) }
         fun p(o: JsonElement?, k: String): JsonElement? = (o as? JsonObject)?.get(k)
         fun arr(e: JsonElement?): List<JsonElement> = when { e is JsonArray -> e; Js.truthy(e) -> throw SearchParseException("TypeError"); else -> emptyList() }
         /** JS 里 r 为 null/undefined 时读 r.title 抛 TypeError */
@@ -180,7 +180,7 @@ object SearchCore {
     fun searchErrorText(status: Int, text: String?): String {
         var msg = ""
         try {
-            val o = Js.json.parseToJsonElement(text ?: "")
+            val o = Js.parse(text ?: "")
             fun p(e: JsonElement?, k: String): JsonElement? = (e as? JsonObject)?.get(k)
             fun or(a: JsonElement?, b: JsonElement?): JsonElement? = if (Js.truthy(a)) a else b
             if (o is JsonNull) throw IllegalStateException("null.detail")   // JS：null.detail → TypeError → catch 分支

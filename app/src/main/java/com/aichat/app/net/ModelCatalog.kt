@@ -85,7 +85,7 @@ object ModelCatalog {
 
     /** 模型列表 → 去重、localeCompare 排序的 id；Gemini 只留支持 generateContent 的。JSON 非法抛异常（同 JSON.parse）。 */
     fun parseModelsResponse(type: ProviderType, text: String): List<String> {
-        val obj = Js.json.parseToJsonElement(text)
+        val obj = Js.parse(text)
         val ids: List<String> = if (type == ProviderType.GEMINI) {
             val models = ((obj as? JsonObject)?.get("models")?.takeIf { Js.truthy(it) } as? JsonArray) ?: emptyList()
             models.filter { m ->
@@ -111,7 +111,7 @@ object ModelCatalog {
 
     /** 列表元数据 → { id: { context, maxOutput, modality, price } }；JSON 非法返回 {} */
     fun parseModelsMeta(type: ProviderType, text: String): JsonObject {
-        val obj = try { Js.json.parseToJsonElement(text) } catch (e: Exception) { return JsonObject(emptyMap()) }
+        val obj = try { Js.parse(text) } catch (e: Exception) { return JsonObject(emptyMap()) }
         val out = LinkedHashMap<String, JsonElement>()
         for (m in listOf(obj)) {
             if (m !is JsonObject) continue
@@ -190,7 +190,7 @@ object ModelCatalog {
 
     /** endpoints 响应 → 数组（[…] / {endpoints} / {data:{endpoints}} / {data:[…]}）；非法 → [] */
     fun parseEndpointsResponse(text: String?): JsonArray {
-        val obj = try { Js.json.parseToJsonElement(text ?: "") } catch (e: Exception) { return JsonArray(emptyList()) }
+        val obj = try { Js.parse(text ?: "") } catch (e: Exception) { return JsonArray(emptyList()) }
         if (obj is JsonArray) return obj
         if (obj !is JsonObject) return JsonArray(emptyList())
         (obj["endpoints"] as? JsonArray)?.let { return it }

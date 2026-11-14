@@ -94,7 +94,7 @@ object Deltas {
 
     /** 非流式完整响应（也用于「请求了流式但服务商回了整包 JSON」的兜底） */
     fun parseFullResponse(type: String, text: String): List<StreamDelta> {
-        val obj = try { Js.json.parseToJsonElement(text) } catch (e: Exception) {
+        val obj = try { Js.parse(text) } catch (e: Exception) {
             return listOf(StreamDelta.Error("无法解析响应：" + text.take(300)))
         }
         if (obj is JsonArray) return obj.flatMap { extract(type, it) }
@@ -110,7 +110,7 @@ object Deltas {
     fun parseError(status: Int, text: String?): String {
         var msg = ""
         try {
-            val obj = Js.json.parseToJsonElement(text ?: "")
+            val obj = Js.parse(text ?: "")
             val oo = obj as? JsonObject
             val e: JsonElement? = if (obj is JsonArray) { val f = obj.firstOrNull(); if (Js.truthy(f)) o(f)?.get("error") else f } else oo?.get("error")
             if (obj is kotlinx.serialization.json.JsonNull) throw IllegalStateException()
@@ -146,7 +146,7 @@ class StreamParser(private val type: String) {
         if (dataLines.isEmpty()) return
         val data = dataLines.joinToString("\n"); dataLines.clear()
         if (Js.trim(data) == "[DONE]") { done = true; return }
-        val obj = try { Js.json.parseToJsonElement(data) } catch (e: Exception) { return }
+        val obj = try { Js.parse(data) } catch (e: Exception) { return }
         out += Deltas.extract(type, obj)
     }
     private fun processLine(raw: String, out: MutableList<StreamDelta>) {

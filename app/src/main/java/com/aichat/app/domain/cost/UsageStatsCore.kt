@@ -14,7 +14,7 @@ object UsageStatsCore {
     const val VERSION = 1
     const val LOG_LIMIT = 5000
     /** CostCore.USAGE_DEFAULT_PRICES：DEFAULT_PRICES + default 兜底（键序同 JS） */
-    val DEFAULT_PRICES: JsonObject = com.aichat.app.net.Js.json.parseToJsonElement(
+    val DEFAULT_PRICES: JsonObject = com.aichat.app.net.Js.parse(
         """{"deepseek-flash":{"hit":0.006,"miss":0.3,"out":1.2,"match":"deepseek"},"deepseek-v4-pro":{"hit":0.044,"miss":1.32,"out":3.96,"match":"deepseek-v4-pro,deepseek-pro"},"default":{"hit":0,"miss":0.5,"out":1.5}}"""
     ) as JsonObject
     private val PRICE_MODES = setOf("auto", "peak", "offpeak")
