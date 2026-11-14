@@ -1,0 +1,57 @@
+name: android
+
+on:
+  push:
+    branches: [main, 'feat/**', 'native/**']
+  pull_request:
+  workflow_dispatch:
+
+# 同一个分支只跑最新一次，省 runner
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 编译 + 单测
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      # 仓库里的 gradlew 未必带可执行位（Windows 上提交时会丢）；显式补一次，避免 CI 上是 Permission denied
+      - name: 赋执行位
+        run: chmod +x ./gradlew
+
+      - name: 单元测试
+        run: ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: 编译 debug APK
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+
+      - name: 上传 debug APK
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
