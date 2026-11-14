@@ -81,6 +81,9 @@ class AppGraph(app: Application) {
     var engine: ChatEngine = com.aichat.app.engine.DefaultChatEngine(
         chats = data.chats, settingsRepo = data.settings, client = providerClient, plugins = plugins,
         router = affinityRouter, onUsage = { conv, provider, model, msg, usage -> recordUsage(conv, provider, model, msg, usage) },
+        // W1：接联网搜索（app.js webSearch）。Key 由 AuthInjector 按 search:<provider> 注入；
+        // 开关仍是 settings.searchOn，未配置 Key 时 ChatController 会先弹「去设置搜索」。
+        search = com.aichat.app.net.DefaultSearchClient(secretVault),
     )
 
     /**
